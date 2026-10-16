@@ -1,0 +1,69 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_initfinal.pcpp - Module compliance: initialize and finalize sections
+
+  initialize <routine body> / finalize <routine body> (BNF.md sec 1): every
+  module kind may have each at most once, initialize first, after the
+  declarations. A section is a routine with no parameters and no result: local
+  var / const / type blocks, then begin ... end;, and return; leaves it early.
+  Order: every imported unit's initialize runs before its importer's (imports
+  in dependency order, not clause order), then the importer's, then the exe
+  body; finalize runs in the reverse order. This exe imports
+  mod_initfinal_a.pcpp and mod_initfinal_b.pcpp in that order, and
+  mod_initfinal_a imports mod_initfinal_b, so mod_initfinal_b comes first.
+  Each printed line carries its expected position.
+
+  How to check, from repo\bin:
+    pcpp res\tests\mod_initfinal.pcpp -r
+    pcpp res\tests\mod_initfinal.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    1. mod_initfinal_b initialize
+    2. mod_initfinal_a initialize
+    3. mod_initfinal initialize
+    4. the exe body
+    5. mod_initfinal finalize
+    6. mod_initfinal_a finalize
+    7. mod_initfinal_b finalize
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  Both targets print the same; the [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way; each reports exactly what the
+  // ERROR / WARN / HINT comment on its marked line says, and nothing else:
+    mod_initfinal_err_twice.pcpp         a second initialize section
+    mod_initfinal_err_order.pcpp         finalize before initialize
+    mod_initfinal_err_returnvalue.pcpp   return with a value in a section
+*******************************************************************************/
+
+module exe mod_initfinal;
+import mod_initfinal_a, mod_initfinal_b;
+
+initialize
+var
+  LStep: int32;
+begin
+  LStep := 3;
+  println("{}. mod_initfinal initialize", LStep);
+end;
+
+finalize
+begin
+  println("5. mod_initfinal finalize");
+end;
+
+begin
+  println("4. the exe body");
+end.

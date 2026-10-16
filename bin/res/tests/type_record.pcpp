@@ -1,0 +1,190 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record.pcpp - Type compliance: record types
+
+  A record type (BNF.md sec 4: record type, field decl, anon overlay) is a
+  plain aggregate of fields. Every part of the production is used here and
+  what it does is printed:
+  - a parent, (TBase), and a parent of a parent: a child holds every field
+    of its chain (size(TGrand) = 3 x int32); a parent from an imported unit,
+    qualified (type_record_unit.TShape);
+  - packed (no padding: int8 + int32 = 5 bytes), align(n) with a constant
+    expression (align(CACHE_LINE) = 64 bytes), and all three prefixes in
+    their order: record(TBase) packed align(8);
+  - bitfields at the widest width each field type takes: int32 : 32,
+    uint8 : 1, wchar : 16 (one width on every target), bool : 1, char : 8 and
+    a choices field : 3;
+  - an anonymous overlay inside a record, with an anonymous record inside it:
+    their fields are the record's own (LV.AsInt, LV.Lo);
+  - a C++ struct as the parent, declared as plain C++ in this file: its
+    members (LP.x) are C++'s, used next to the record's own fields. No
+    `cpp header;` is needed: a record that is not exported, and that no
+    exported item names, stays in the module's C++ source, beside the C++
+    it names (BNF.md sec 10).
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_record.pcpp -r
+    pcpp res\tests\type_record.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    grand 1 2 3 size 12
+    far 4 5 size 8
+    packed 5 aligned 64 both 8
+    bits -5 1 65535 true z true
+    variant 7 1 2 size 8
+    C++ parent 1 2 3 size 12
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // ERROR comment on its marked line says, and nothing else:
+    type_record_err_prefix_parent.pcpp     record packed (TBase): the parent
+                                           comes first
+    type_record_err_prefix_packed.pcpp     record align(8) packed: packed
+                                           comes before align
+    type_record_err_prefix_twice.pcpp      record packed packed
+    type_record_err_object_packed.pcpp     an object takes no packed
+    type_record_err_object_align.pcpp      an object takes no align
+    type_record_err_overlay_packed.pcpp    an overlay takes no packed
+    type_record_err_anon_overlay_packed.pcpp
+                                           nor does an anonymous overlay
+    type_record_err_method.pcpp            a record holds no methods
+    type_record_err_anon_record.pcpp       an anonymous record goes inside an
+                                           overlay, not straight in a record
+    type_record_err_parent_object.pcpp     an object as a record's parent
+    type_record_err_parent_choices.pcpp    a choices type as a parent
+    type_record_err_parent_alias.pcpp      an alias of int32 as a parent
+    type_record_err_reuse.pcpp             a field reuses its parent's name
+    type_record_err_reuse_anon.pcpp        an anonymous overlay's field reuses
+                                           a grandparent's name
+    type_record_err_align_power.pcpp       align(12): not a power of two
+    type_record_err_align_zero.pcpp        align(0)
+    type_record_err_align_negative.pcpp    align(-8)
+    type_record_err_align_max.pcpp         align(16384): above 8192
+    type_record_err_align_below.pcpp       align(2) on an int32 field: below
+                                           its natural alignment 4 (SM0311)
+    type_record_err_align_below_cpp_field.pcpp
+                                           align(4) on a C++ struct field holding
+                                           a double: below 8 (SM0311, judged in
+                                           the emitted C++)
+    type_record_err_align_below_cpp_value.pcpp
+                                           align(cpp("2")) on an int32 field: a
+                                           C++ value, judged the same way (SM0311)
+    type_record_err_align_cpp_power.pcpp   align(cpp("3")): not a power of two
+                                           (SM0310)
+    type_record_err_align_cpp_max.pcpp     align(cpp("16384")): above 8192 (SM0312)
+    type_record_err_align_cpp_packed.pcpp  record packed align(cpp("6")) (SM0310)
+    type_record_err_bit_type.pcpp          a float32 bitfield
+    type_record_err_bit_width.pcpp         int32 : 33
+    type_record_err_bit_wchar.pcpp         wchar : 17 (16 on every target)
+    type_record_err_bit_zero.pcpp          uint8 : 0
+    type_record_err_bit_store.pcpp         100 stored into int32 : 3 (-4..3)
+    type_record_err_bit_store_unsigned.pcpp
+                                           5 stored into uint8 : 2 (0..3)
+    type_record_err_bit_store_literal.pcpp TR(B: 7): a record literal's
+                                           field is a store too
+    type_record_err_too_large.pcpp         two fields of 2^59 bytes: no type
+                                           holds more than 1152921504606846975
+                                           bytes (SM0277, judged in the emitted C++)
+*******************************************************************************/
+
+module exe type_record;
+
+import type_record_unit;
+
+struct CPoint { int x; int y; };
+
+const
+  CACHE_LINE: int32 = 64;
+
+type
+  TBase = record
+    A: int32;
+  end;
+  TChild = record(TBase)
+    B: int32;
+  end;
+  TGrand = record(TChild)
+    C: int32;
+  end;
+  TFar = record(type_record_unit.TShape)
+    Side: int32;
+  end;
+  TPacked = record packed
+    P1: int8;
+    P2: int32;
+  end;
+  TAligned = record align(CACHE_LINE)
+    V: int32;
+  end;
+  TBoth = record(TBase) packed align(8)
+    D: int8;
+  end;
+  TColor = choices(cRed, cGreen, cBlue);
+  TBits = record
+    I: int32 : 32;
+    U: uint8 : 1;
+    W: wchar : 16;
+    BB: bool : 1;
+    CC: char : 8;
+    Col: TColor : 3;
+  end;
+  TVariant = record
+    Tag: int32;
+    overlay
+      AsInt: int32;
+      AsFloat: float32;
+      record
+        Lo: int16;
+        Hi: int16;
+      end;
+    end;
+  end;
+  TPoint3 = record(CPoint)
+    Z: int32;
+  end;
+
+var
+  LG: TGrand;
+  LF: TFar;
+  LB: TBits;
+  LV: TVariant;
+  LP: TPoint3;
+
+begin
+  LG.A := 1;
+  LG.B := 2;
+  LG.C := 3;
+  LF.Sides := 4;
+  LF.Side := 5;
+  LB.I := -5;
+  LB.U := 1;
+  LB.W := wchar(65535);
+  LB.BB := true;
+  LB.CC := 'z';
+  LB.Col := TColor.cBlue;
+  LV.Tag := 7;
+  LV.AsInt := 131073;
+  LP.x := 1;
+  LP.y := 2;
+  LP.Z := 3;
+  println("grand {} {} {} size {}", LG.A, LG.B, LG.C, size(TGrand));
+  println("far {} {} size {}", LF.Sides, LF.Side, size(TFar));
+  println("packed {} aligned {} both {}", size(TPacked), size(TAligned), size(TBoth));
+  println("bits {} {} {} {} {} {}", LB.I, LB.U, uint32(LB.W), LB.BB, LB.CC, LB.Col = TColor.cBlue);
+  println("variant {} {} {} size {}", LV.Tag, LV.Lo, LV.Hi, size(TVariant));
+  println("C++ parent {} {} {} size {}", LP.x, LP.y, LP.Z, size(TPoint3));
+end.

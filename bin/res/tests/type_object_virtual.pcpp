@@ -1,0 +1,106 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_virtual.pcpp - Type compliance: virtual methods (dispatch)
+
+  A method is not virtual unless it says so (BNF.md sec 3 method decl,
+  sec 4 object type). Shown here:
+  - virtual method opens dispatch: a call runs the method of the object's
+    own type, also through a var parameter of an ancestor type (Show) and
+    a pointer to an ancestor (LP^.Area());
+  - override method continues it, with the same parameters and result;
+    override is required: a method named like an ancestor's virtual one
+    without it is an error (no quiet hiding);
+  - abstract replaces the body (`; abstract;`): TShape has no Area of its
+    own, so a TShape is never held by value or created;
+  - final closes a method (override final) or a whole type (final object):
+    TCube.Name cannot be overridden, TCube cannot be a parent;
+  - parent.Area() calls the parent level's own method (not dispatched);
+  - a plain method stays bound to the type named: Kind() through a
+    TShape is TShape's.
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_virtual.pcpp -r
+    pcpp res\tests\type_object_virtual.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    9 shape plain
+    24 cube plain
+    24 cube
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // ERROR comment on its marked line says, and nothing else:
+    type_object_virtual_err_needs_override.pcpp    an ancestor's virtual name without override
+    type_object_virtual_err_overrides_nothing.pcpp override of a plain method
+    type_object_virtual_err_override_signature.pcpp an override taking other parameters
+    type_object_virtual_err_override_final.pcpp    override of a final method
+    type_object_virtual_err_final_not_virtual.pcpp final on a plain method
+    type_object_virtual_err_abstract_not_virtual.pcpp abstract on a plain method
+    type_object_virtual_err_abstract_value.pcpp    a variable of an abstract object
+    type_object_virtual_err_final_parent.pcpp      a final object as a parent
+    type_object_virtual_err_abstract_call.pcpp     parent.M() of an abstract M
+*******************************************************************************/
+
+module exe type_object_virtual;
+
+type
+  TShape = object
+    virtual method Area(): int32; abstract;
+    virtual method Name(): string;
+    begin
+      return "shape";
+    end;
+    method Kind(): string;
+    begin
+      return "plain";
+    end;
+  end;
+  TSquare = object(TShape)
+    S: int32;
+    override method Area(): int32;
+    begin
+      return self.S * self.S;
+    end;
+  end;
+  TCube = final object(TSquare)
+    override final method Name(): string;
+    begin
+      return "cube";
+    end;
+    override method Area(): int32;
+    begin
+      return 6 * parent.Area();
+    end;
+  end;
+
+routine Show(var AShape: TShape);
+begin
+  println("{} {} {}", AShape.Area(), AShape.Name(), AShape.Kind());
+end;
+
+var
+  LSq: TSquare;
+  LCube: TCube;
+  LP: ptr to TShape;
+begin
+  LSq.S := 3;
+  LCube.S := 2;
+  Show(LSq);
+  Show(LCube);
+  LP := address of LCube;
+  println("{} {}", LP^.Area(), LP^.Name());
+end.

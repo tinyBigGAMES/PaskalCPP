@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_initfinal_err_order.pcpp - break step of mod_initfinal.pcpp: finalize
+  before initialize (initialize stands first)
+
+  How to check, from repo\bin:
+    pcpp res\tests\mod_initfinal_err_order.pcpp
+    pcpp res\tests\mod_initfinal_err_order.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe mod_initfinal_err_order;
+
+finalize
+begin
+end;
+
+initialize // ERROR PR0018@1
+begin
+end;
+
+begin
+end.

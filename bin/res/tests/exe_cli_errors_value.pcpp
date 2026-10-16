@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_cli_errors_value.pcpp - Build-kind compliance: an option without its value
+
+  An option that takes a value, given none (-o needs a path): exit 2.
+
+  How to check, from repo\bin:
+    pcpp -o
+  EXPECT:
+    PaskalCPP™ CLI v<VERSION>
+    Copyright © 2026-present tinyBigGAMES™ LLC, All Rights Reserved.
+    https://paskalcpp.org
+
+    Error: -o requires a path argument
+  EXITCODE: 2
+  <VERSION> is the compiler's version (the banner's one changing text); the
+  tester runs pcpp.exe itself (cmCli), once: the CLI is the same for every
+  target. This file is not compiled.
+*******************************************************************************/
+
+module exe exe_cli_errors_value;
+
+begin
+end.

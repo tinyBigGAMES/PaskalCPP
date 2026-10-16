@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_builtin_err_star.pcpp - break step of type_builtin.pcpp:
+  int32* is C++'s pointer spelling: write ptr to int32
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_builtin_err_star.pcpp
+    pcpp res\tests\type_builtin_err_star.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_builtin_err_star;
+
+var
+  LP: int32*; // ERROR PR0027@12: write ptr to int32
+
+begin
+end.

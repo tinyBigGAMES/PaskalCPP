@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_memory_err_statement.pcpp - break step of intr_memory.pcpp:
+  freemem used as a value (SM0408)
+
+  How to check, from repo\bin:
+    pcpp res\tests\intr_memory_err_statement.pcpp
+    pcpp res\tests\intr_memory_err_statement.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe intr_memory_err_statement;
+
+var
+  LP: ptr;
+  LQ: ptr;
+
+begin
+  LQ := getmem(4);
+  LP := freemem(LQ); // ERROR SM0408@9: 'freemem' is a statement, not a value
+end.

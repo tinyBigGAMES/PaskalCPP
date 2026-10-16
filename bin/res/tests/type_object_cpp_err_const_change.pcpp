@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_cpp_err_const_change.pcpp - break step of type_object_cpp.pcpp:
+  a const method that changes self (SM0387)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_cpp_err_const_change.pcpp
+    pcpp res\tests\type_object_cpp_err_const_change.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_cpp_err_const_change;
+
+type
+  TBox = object
+    N: int32;
+    const method Bump(): int32;
+    begin
+      self.N := self.N + 1; // ERROR SM0387
+      return self.N;
+    end;
+  end;
+
+begin
+end.

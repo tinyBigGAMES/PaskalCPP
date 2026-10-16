@@ -1,0 +1,57 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_optimize_debug.pcpp - Directive compliance: @optimize debug (a level of
+  dir_optimize.pcpp)
+
+  The debug level: no optimization; the compiler defines PCPP_DEBUG, so the
+  runtime prints its heap report at shutdown (the [Heap] line).
+
+  How to check, from repo\bin:
+    pcpp res\tests\dir_optimize_debug.pcpp -r
+    pcpp res\tests\dir_optimize_debug.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    clang sees: PCPP_DEBUG
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  Both targets print the same.
+  CHECK: output\build.zig holds "std.builtin.OptimizeMode = .Debug"
+*******************************************************************************/
+
+module exe dir_optimize_debug;
+@optimize debug;
+
+// The macros clang defines at this level, in a fixed order
+static const char* dir_optimize_flags()
+{
+  return ""
+#ifdef __OPTIMIZE__
+  " __OPTIMIZE__"
+#endif
+#ifdef __OPTIMIZE_SIZE__
+  " __OPTIMIZE_SIZE__"
+#endif
+#ifdef NDEBUG
+  " NDEBUG"
+#endif
+#ifdef PCPP_DEBUG
+  " PCPP_DEBUG"
+#endif
+  ;
+}
+
+begin
+  println("clang sees:{}", cpp("dir_optimize_flags()"));
+end.

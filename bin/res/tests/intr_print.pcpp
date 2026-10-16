@@ -1,0 +1,91 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_print.pcpp - Intrinsic compliance: print and println
+
+  print(F, ...) and println(F, ...) write std::format text, println with a
+  newline (BNF.md sec 7). Every argument prints by its PaskalCPP type: wide
+  text (a wchar, a wstring) as UTF-8, a ptr to char as its text (nil prints
+  nil), any other pointer as its address (nil prints 0x0), an array element
+  by element (text elements quoted). A record, an object or an overlay, an
+  overload set and a C/C++ value with no formatter cannot be printed. The
+  format string itself is C++'s: clang checks it.
+
+  How to check, from repo\bin:
+    pcpp res\tests\intr_print.pcpp -r
+    pcpp res\tests\intr_print.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    no newline then one
+    values 42 2.5 text true
+    width [  42] [42  ] [0042]
+    wide w wide
+    wchar number 119
+    nil pointer 0x0
+    nil text nil
+    text pointer abc
+    array [1, 2, 3]
+    text array ["x", nil]
+    no arguments
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // comment on its marked line says, and nothing else:
+    intr_print_err_record.pcpp
+      a record printed (SM0425)
+    intr_print_err_overload.pcpp
+      an overload set's name printed (SM0425)
+    intr_print_err_value.pcpp
+      println used as a value (SM0408)
+    intr_print_err_cpp_value.pcpp
+      a C++ value with no formatter printed (SM0425, the emitted check)
+    intr_print_err_format.pcpp
+      a format string with more {} than arguments: clang reports it (ZB0016)
+*******************************************************************************/
+
+module exe intr_print;
+
+var
+  LN: int32 = 42;
+  LF: float64 = 2.5;
+  LS: string = "text";
+  LB: bool = true;
+  LW: wchar = L'w';
+  LWS: wstring = L"wide";
+  LP: ptr to int32;
+  LC: ptr to const char;
+  LA: array[0..2] of int32;
+  LCS: array[0..1] of ptr to const char;
+
+begin
+  print("no newline ");
+  println("then one");
+  println("values {} {} {} {}", LN, LF, LS, LB);
+  println("width [{:>4}] [{:<4}] [{:04}]", LN, LN, LN);
+  println("wide {} {}", LW, LWS);
+  println("wchar number {}", int32(LW));
+  println("nil pointer {}", LP);
+  println("nil text {}", LC);
+  LC := "abc";
+  println("text pointer {}", LC);
+  LA[0] := 1;
+  LA[1] := 2;
+  LA[2] := 3;
+  println("array {}", LA);
+  LCS[0] := "x";
+  println("text array {}", LCS);
+  println("no arguments");
+end.

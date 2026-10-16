@@ -1,0 +1,125 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_packed.pcpp - Type compliance: packed records pack as written (PLAN-RECORDS)
+
+  A record packed holds its fields with no padding, records, static arrays,
+  sets and a parent included: int8 + a record of two int32 = 9 bytes, int8 +
+  array[0..1] of int32 = 9, record(TBase) packed with an int8 = 5. A field it
+  places below its alignment (element 1 of an array of packed records starts
+  at an odd address) is read, copied to a const parameter, printed, indexed,
+  tested with in and assigned as a whole; only what would write through it,
+  or keep its address, is an error (the break steps).
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_record_packed.pcpp -r
+    pcpp res\tests\type_record_packed.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    packs 9 9 5
+    copies 42 7 [3, 4]
+    base part 55 2
+    set true 2
+    assign 22
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // ERROR comment on its marked line says, and nothing else:
+    type_record_packed_err_string.pcpp
+      a string field in a packed record: it cannot be packed (SM0331)
+    type_record_packed_err_dynarray.pcpp
+      a dynamic array field in a packed record (SM0331)
+    type_record_packed_err_nested.pcpp
+      a record holding a string, as a field of a packed record (SM0331)
+    type_record_packed_err_var.pcpp
+      a field of a packed record passed to a var parameter: it may sit below its alignment (SM0270)
+    type_record_packed_err_address.pcpp
+      the address of a field of a packed record (SM0270)
+    type_record_packed_err_compound.pcpp
+      a set field of a packed record as the target of += (SM0270)
+    type_record_packed_err_upcast.pcpp
+      a packed extension passed to a var parameter of its base: its int32 base part may be misaligned (SM0270)
+*******************************************************************************/
+
+module exe type_record_packed;
+
+type
+  TIn = record
+    A: int32;
+    B: int32;
+  end;
+  TQ2 = array[0..1] of int32;
+  TS = set of 0..15;
+  TPk = record packed
+    C: int8;
+    R: TIn;
+    Q: TQ2;
+    S: TS;
+  end;
+  TPk2 = record packed
+    C: int8;
+    R: TIn;
+  end;
+  TPk3 = record packed
+    C: int8;
+    Q: TQ2;
+  end;
+  TArr = array[0..2] of TPk;
+  TBase = record
+    X: int32;
+  end;
+  TPe = record(TBase) packed
+    Y: int8;
+  end;
+  TPeArr = array[0..2] of TPe;
+
+routine SumIn(const A: TIn): int32;
+begin
+  return A.A + A.B;
+end;
+
+routine SumQ(const A: TQ2): int32;
+begin
+  return A[0] + A[1];
+end;
+
+routine BaseX(const A: TBase): int32;
+begin
+  return A.X;
+end;
+
+var
+  LA: TArr;
+  LE: TPeArr;
+  LIn: TIn;
+
+begin
+  LA[1].C := 7;
+  LA[1].R.A := 20;
+  LA[1].R.B := 22;
+  LA[1].Q[0] := 3;
+  LA[1].Q[1] := 4;
+  LA[1].S := [1, 3];
+  println("packs {} {} {}", size(TPk2), size(TPk3), size(TPe));
+  println("copies {} {} {}", SumIn(LA[1].R), SumQ(LA[1].Q), LA[1].Q);
+  LE[1].X := 55;
+  LE[1].Y := 2;
+  println("base part {} {}", BaseX(LE[1]), LE[1].Y);
+  println("set {} {}", 3 in LA[1].S, len(LA[1].Q));
+  LIn := LA[1].R;
+  LA[2].R := LIn;
+  println("assign {}", LA[2].R.B);
+end.

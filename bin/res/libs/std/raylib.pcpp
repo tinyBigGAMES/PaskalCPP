@@ -1,0 +1,52 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  raylib.pcpp - the raylib unit: `import raylib;` uses raylib from
+  PaskalCPP. A self-describing vendor module: it owns every include
+  path, library path and link library it needs, per official target.
+==============================================================================*/
+
+module unit raylib;
+
+// Self-describing vendor module: it owns every path it needs.
+
+@addincludepath "$P:res/libs/vendor/raylib/include";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/raylib/lib/x86_64-windows-gnu";
+  @linklibrary "opengl32";
+  @linklibrary "gdi32";
+  @linklibrary "winmm";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/linux64";
+  @addlibrarypath "$P:res/libs/vendor/raylib/lib/x86_64-linux-gnu";
+  @linklibrary "GL";
+  @linklibrary "X11";
+  @linklibrary "m";    
+  @linklibrary "pthread";
+  @linklibrary "dl";
+  @linklibrary "rt";
+@else
+  @message error "raylib_import: unsupported target";
+@endif
+
+@linklibrary "raylib";
+
+#include "raylib.h"
+
+end.

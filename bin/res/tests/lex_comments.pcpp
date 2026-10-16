@@ -1,0 +1,57 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_comments.pcpp - Lexical compliance: comments
+
+  A line comment runs from two slashes to the end of the line, a block
+  comment from slash-star to the first star-slash (BNF.md sec 9): block
+  comments do not nest, so a slash-star inside one is only text (and a
+  warning: lex_comments_err_nested). Two slashes in a string are text.
+  (This header is itself a block comment: it never spells those pairs.)
+
+  How to check, from repo\bin:
+    pcpp res\tests\lex_comments.pcpp -r
+    pcpp res\tests\lex_comments.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    code
+    inline
+    // not a comment
+    between
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // comment on its marked line says, and nothing else:
+    lex_comments_err_unterminated.pcpp
+      a block comment never closed (LX0003)
+    lex_comments_err_nested.pcpp
+      a slash-star inside a block comment: no nesting (LX0203, a warning)
+    lex_comments_err_escaped_end.pcpp
+      a splice between the * and the / that close a comment (LX0202, a warning)
+*******************************************************************************/
+
+module exe lex_comments;
+
+// a line comment
+/* a block comment
+   over two lines */
+
+begin
+  println("code"); // after code
+  println(/* inside */ "inline");
+  println("// not a comment");
+  /* one */ println("between"); /* two */
+end.

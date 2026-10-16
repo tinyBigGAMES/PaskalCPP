@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_pointer_err_to_integer.pcpp - break step of type_pointer.pcpp:
+  a pointer is no integer: cast it (SM0200)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_pointer_err_to_integer.pcpp
+    pcpp res\tests\type_pointer_err_to_integer.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_pointer_err_to_integer;
+
+var
+  LP: ptr to int32;
+  LI: int64;
+
+begin
+  LP := nil;
+  LI := LP; // ERROR SM0200@9: 'ptr to int32' does not convert implicitly to 'int64'; write int64(LP)
+end.

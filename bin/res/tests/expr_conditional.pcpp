@@ -1,0 +1,59 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_conditional.pcpp - Expression compliance: the conditional ? :
+
+  C ? A : B (BNF.md sec 6 cond expr): C is bool, the value is A or B and
+  only that branch is evaluated; it is right associative, so
+  C1 ? A : C2 ? B : C reads as C1 ? A : (C2 ? B : C).
+
+  How to check, from repo\bin:
+    pcpp res\tests\expr_conditional.pcpp -r
+    pcpp res\tests\expr_conditional.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    pick 1 2
+    chain small mid big
+    lazy 7
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // comment on its marked line says, and nothing else:
+    expr_conditional_err_condition.pcpp
+      an int32 condition (SM0263)
+*******************************************************************************/
+
+module exe expr_conditional;
+
+routine Size(AN: int32): string;
+begin
+  return AN < 10 ? "small" : AN < 100 ? "mid" : "big";
+end;
+
+routine Loud(): int32;
+begin
+  println("never");
+  return 0;
+end;
+
+var
+  LA: int32 = 5;
+
+begin
+  println("pick {} {}", LA > 0 ? 1 : 2, LA < 0 ? 1 : 2);
+  println("chain {} {} {}", Size(5), Size(50), Size(500));
+  println("lazy {}", true ? 7 : Loud());
+end.

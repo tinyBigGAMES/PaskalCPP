@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_size_err_args.pcpp - break step of intr_size.pcpp:
+  size with no argument (SM0409)
+
+  How to check, from repo\bin:
+    pcpp res\tests\intr_size_err_args.pcpp
+    pcpp res\tests\intr_size_err_args.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe intr_size_err_args;
+
+var
+  LN: int64;
+
+begin
+  LN := size(); // ERROR SM0409@9: 'size' takes
+end.

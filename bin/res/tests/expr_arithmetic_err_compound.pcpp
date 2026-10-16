@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_arithmetic_err_compound.pcpp - break step of expr_arithmetic.pcpp:
+  an int32 added into an int8 with += (SM0200 at the value): a compound
+  assignment stores in the target's type, so its value converts to it;
+  write LN += int8(LA)
+
+  How to check, from repo\bin:
+    pcpp res\tests\expr_arithmetic_err_compound.pcpp
+    pcpp res\tests\expr_arithmetic_err_compound.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe expr_arithmetic_err_compound;
+
+var
+  LN: int8 = 1;
+  LA: int32 = 300;
+
+begin
+  LN += LA; // ERROR SM0200@9: 'int32' does not convert implicitly to 'int8'
+end.

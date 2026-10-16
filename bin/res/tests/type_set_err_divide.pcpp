@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_set_err_divide.pcpp - break step of type_set.pcpp:
+  a / b on two sets (SM0250)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_set_err_divide.pcpp
+    pcpp res\tests\type_set_err_divide.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_set_err_divide;
+
+type
+  TS = set of 0..15;
+
+var
+  LS: TS;
+
+begin
+  LS := [1, 2];
+  LS := LS / [1]; // ERROR SM0250@9: operator '/' does not take
+end.

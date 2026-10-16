@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_guard_err_empty.pcpp - break step of stmt_guard.pcpp:
+  a guard with neither except nor finally (PR0052)
+
+  How to check, from repo\bin:
+    pcpp res\tests\stmt_guard_err_empty.pcpp
+    pcpp res\tests\stmt_guard_err_empty.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe stmt_guard_err_empty;
+
+var
+  LN: int32;
+
+begin
+  guard
+    LN := 1;
+  end; // ERROR PR0052@3: a guard needs
+end.

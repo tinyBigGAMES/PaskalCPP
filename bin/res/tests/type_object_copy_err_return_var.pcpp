@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_copy_err_return_var.pcpp - break step of type_object_copy.pcpp:
+  a var parameter returned by value: only a local or a value parameter moves out (SM0427)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_copy_err_return_var.pcpp
+    pcpp res\tests\type_object_copy_err_return_var.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_copy_err_return_var;
+
+type
+  TRes = object
+    Id: int32;
+    done;
+    begin
+    end;
+  end;
+
+routine Pass(var AR: TRes): TRes;
+begin
+  return AR; // ERROR SM0427@10: 'AR' would be copied here, and 'TRes' cannot be copied: pass it var / const, return it from a local
+end;
+
+begin
+end.

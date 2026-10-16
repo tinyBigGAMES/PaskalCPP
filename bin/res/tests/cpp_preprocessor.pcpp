@@ -1,0 +1,55 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  cpp_preprocessor.pcpp - C++ integration compliance: preprocessor lines
+
+  A line whose first token is # (or its digraph %:) is a C++ preprocessor
+  line (BNF.md sec 10), copied as written: at module level it goes to the
+  module's header, so every later line sees it; in a body it stays in
+  place. A splice continues it on the next line.
+
+  How to check, from repo\bin:
+    pcpp res\tests\cpp_preprocessor.pcpp -r
+    pcpp res\tests\cpp_preprocessor.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    two 2
+    joined 12
+    digraph 7
+    in place 6
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // comment on its marked line says, and nothing else:
+    cpp_preprocessor_err_hash.pcpp
+      a # that is not first on its line (LX0008)
+*******************************************************************************/
+
+module exe cpp_preprocessor;
+
+#include <cstdlib>
+#define KTWO 2
+#define KJOINED \
+  12
+%:define KDIGRAPH 7
+
+begin
+  println("two {}", KTWO);
+  println("joined {}", KJOINED);
+  println("digraph {}", KDIGRAPH);
+#define KLOCAL 6
+  println("in place {}", KLOCAL);
+end.

@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_assign_err_convert.pcpp - break step of expr_assign.pcpp:
+  a float64 value into an int32 variable (SM0200)
+
+  How to check, from repo\bin:
+    pcpp res\tests\expr_assign_err_convert.pcpp
+    pcpp res\tests\expr_assign_err_convert.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe expr_assign_err_convert;
+
+var
+  LN: int32;
+
+begin
+  LN := 1.5; // ERROR SM0200@9: does not convert implicitly
+end.

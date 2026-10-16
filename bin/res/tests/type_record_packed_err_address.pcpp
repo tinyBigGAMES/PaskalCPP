@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_packed_err_address.pcpp - break step of type_record_packed.pcpp:
+  the address of a field of a packed record (SM0270)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_record_packed_err_address.pcpp
+    pcpp res\tests\type_record_packed_err_address.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_record_packed_err_address;
+
+type
+  TS = set of 0..15;
+  TPk = record packed
+    C: int8;
+    I: int32;
+    S: TS;
+  end;
+
+var
+  LP: TPk;
+  LPI: ptr to int32;
+
+begin
+  LPI := address of LP.I; // ERROR SM0270@21: it may be misaligned
+end.

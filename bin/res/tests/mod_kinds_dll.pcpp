@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_kinds_dll.pcpp - Module compliance: the dll kind (part of mod_kinds.pcpp)
+
+  module dll emits a shared library (BNF.md sec 1): no begin body, the module
+  ends with end. alone. Loading and calling a dll is dll_build.pcpp's.
+
+  How to check, from repo\bin:
+    pcpp res\tests\mod_kinds_dll.pcpp
+    pcpp res\tests\mod_kinds_dll.pcpp -t x86_64-linux-gnu
+  The build succeeds and reports nothing.
+  CHECK: output\zig-out\bin holds mod_kinds_dll.dll (windows) or
+  libmod_kinds_dll.so (linux)
+
+  Break it: mod_kinds_err_body.pcpp (a begin body where there must be none).
+*******************************************************************************/
+
+module dll mod_kinds_dll;
+
+exported routine clink mod_kinds_dll_twice(AX: int32): int32;
+begin
+  return AX * 2;
+end;
+
+end.

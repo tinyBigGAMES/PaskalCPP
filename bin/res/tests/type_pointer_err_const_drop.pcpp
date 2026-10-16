@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_pointer_err_const_drop.pcpp - break step of type_pointer.pcpp:
+  nor does a ptr to const become a ptr to T: no cast drops const (SM0200)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_pointer_err_const_drop.pcpp
+    pcpp res\tests\type_pointer_err_const_drop.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_pointer_err_const_drop;
+
+var
+  LP: ptr to int32;
+  LC: ptr to const int32;
+
+begin
+  LC := nil;
+  LP := LC; // ERROR SM0200@9: 'ptr to const int32' does not convert implicitly to 'ptr to int32'
+end.

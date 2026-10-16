@@ -1,0 +1,82 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_target.pcpp - Directive compliance: @target
+
+  @target "<triple>"; names the target a program is built for: an LLVM
+  triple, arch-vendor-os-env, or arch-os-env, which is the same target with
+  LLVM's vendor for its OS (BNF.md sec 2). Only the two official targets are
+  accepted: x86_64-pc-windows-gnu and x86_64-unknown-linux-gnu. It stands in
+  the directive prologue (right after the module header), outside any @ifdef
+  branch, before the first conditional directive, at most once. Only the main
+  module's @target applies: an imported module may name the same target (in
+  any spelling) and otherwise builds for the main module's.
+
+  This file names Windows in four parts; the unit it imports names it in
+  three (the same target: no report). dir_target_linux.pcpp names Linux in
+  three parts and imports a unit with no @target. Each prints what PaskalCPP
+  and clang build it for.
+
+  How to check, from repo\bin (no -t: the file names its own target; a -t on
+  the command line wins over every @target, this file's and its unit's):
+    pcpp res\tests\dir_target.pcpp -r
+  EXPECT:
+    PaskalCPP builds for: x86_64-windows-gnu
+    clang compiles for: _WIN32
+    in the unit: x86_64-windows-gnu
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The Linux form: dir_target_linux.pcpp, checked the same way.
+
+  Break it: run each file below the same way (no -t); each reports exactly
+  what the // ERROR / WARN / HINT comment on its marked line says, and
+  nothing else:
+    dir_target_err_place.pcpp        @target after a declaration
+    dir_target_err_branch.pcpp       @target inside an @ifdef branch
+    dir_target_err_late.pcpp         @target after a conditional directive
+    dir_target_err_duplicate.pcpp    @target given twice
+    dir_target_err_string.pcpp       @target with a word, not a string
+    dir_target_err_shape.pcpp        a triple of one part
+    dir_target_err_unsupported.pcpp  a triple that is not an official target
+    dir_target_err_mismatch.pcpp     an imported unit names another target
+*******************************************************************************/
+
+module exe dir_target;
+@target "x86_64-pc-windows-gnu";
+import dir_target_unit;
+
+// The OS macro clang defines for the target it compiles for
+static const char* dir_target_os()
+{
+  return ""
+#ifdef _WIN32
+  " _WIN32"
+#endif
+#ifdef __linux__
+  " __linux__"
+#endif
+  ;
+}
+
+begin
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  println("PaskalCPP builds for: x86_64-windows-gnu");
+@endif
+@ifdef TARGET_X86_64_LINUX_GNU
+  println("PaskalCPP builds for: x86_64-linux-gnu");
+@endif
+  println("clang compiles for:{}", cpp("dir_target_os()"));
+  dir_target_unit.ShowTarget();
+end.

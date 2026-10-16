@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_own_err_weak_new.pcpp - break step of type_object_own.pcpp:
+  a weak building an object: a weak watches what a ref holds (SM0359)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_own_err_weak_new.pcpp
+    pcpp res\tests\type_object_own_err_weak_new.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_own_err_weak_new;
+
+type
+  TPlain = object
+    X: int32;
+  end;
+
+routine Use();
+var
+  LW: weak TPlain;
+begin
+  LW := weak TPlain; // ERROR SM0359@9: 'weak TPlain' builds nothing
+end;
+
+begin
+end.

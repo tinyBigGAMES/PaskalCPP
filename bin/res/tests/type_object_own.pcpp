@@ -1,0 +1,169 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_own.pcpp - Type compliance: own, ref and weak
+
+  An object on the heap is held by an owner (BNF.md sec 4 owner type, sec 6
+  owner new). Shown here:
+  - own T is the sole owner: own T(args) builds it with the init the
+    arguments pick, a routine returns one (it moves), and the object ends
+    with its own; an own of a polymorphic root (TBase) frees the whole
+    object (done kid, then done base);
+  - ref T shares the object: it ends with the last ref; a ref gives a
+    weak T, which watches: alive(W) tells whether the object still
+    exists, lock(W) gives a ref to it (nil once it is gone);
+  - LO.X reads the object an own / ref holds; through a nil one it
+    raises (exccode 3);
+  - a ref cycle (LX and LY hold each other) is never freed: the debug
+    build's leak report names where each leaked object was built.
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_own.pcpp -r
+    pcpp res\tests\type_object_own.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    init 1
+    own 11
+    kid
+    done kid
+    done base
+    done 11
+    init 2
+    alive true
+    still 2
+    done 2
+    alive false
+    init 3
+    init 4
+    nil 3
+    [Heap] Allocs: 5, Frees: 3, Leaked: 2
+    [Heap] Leaked object created at type_object_own.pcpp(147)
+    [Heap] Leaked object created at type_object_own.pcpp(148)
+  EXITCODE: 0
+  The [Heap] lines are the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // ERROR comment on its marked line says, and nothing else:
+    type_object_own_err_target.pcpp  own of a type that is no object
+    type_object_own_err_record.pcpp  a record holding a ref
+    type_object_own_err_copy.pcpp  an own copied from a variable
+    type_object_own_err_to_ref.pcpp  an own named by a variable given to a ref
+    type_object_own_err_upcast.pcpp  an own reaching an ancestor that is not polymorphic
+    type_object_own_err_weak_new.pcpp  a weak building an object
+    type_object_own_err_weak_member.pcpp  a member read through a weak
+    type_object_own_err_weak_to_ref.pcpp  a weak given to a ref without lock
+    type_object_own_err_create.pcpp  create on an object
+    type_object_own_err_destroy.pcpp  destroy on an object
+*******************************************************************************/
+
+module exe type_object_own;
+
+forward type TNode;
+
+type
+  TNode = object
+    Name: int32;
+    Next: ref TNode;
+    init(const AN: int32);
+    begin
+      self.Name := AN;
+      println("init {}", self.Name);
+    end;
+    done;
+    begin
+      println("done {}", self.Name);
+    end;
+  end;
+  TBase = object
+    virtual method Speak();
+    begin
+      println("base");
+    end;
+    done;
+    begin
+      println("done base");
+    end;
+  end;
+  TKid = object(TBase)
+    override method Speak();
+    begin
+      println("kid");
+    end;
+    done;
+    begin
+      println("done kid");
+    end;
+  end;
+
+routine Make(const AN: int32): own TNode;
+begin
+  return own TNode(AN);
+end;
+
+routine Owns();
+var
+  LO: own TNode;
+  LB: own TBase;
+begin
+  LO := Make(1);
+  LO.Name := 11;
+  println("own {}", LO.Name);
+  LB := own TKid;
+  LB.Speak();
+end;
+
+routine Shares();
+var
+  LA: ref TNode;
+  LB: ref TNode;
+  LW: weak TNode;
+begin
+  LA := ref TNode(2);
+  LB := LA;
+  LW := LA;
+  println("alive {}", alive(LW));
+  LA := nil;
+  println("still {}", lock(LW).Name);
+  LB := nil;
+  println("alive {}", alive(LW));
+end;
+
+routine Leak();
+var
+  LX: ref TNode;
+  LY: ref TNode;
+begin
+  LX := ref TNode(3);
+  LY := ref TNode(4);
+  LX.Next := LY;
+  LY.Next := LX;
+end;
+
+routine NilAccess();
+var
+  LO: own TNode;
+begin
+  guard
+    println("{}", LO.Name);
+  except
+    println("nil {}", exccode());
+  end;
+end;
+
+begin
+  Owns();
+  Shares();
+  Leak();
+  NilAccess();
+end.

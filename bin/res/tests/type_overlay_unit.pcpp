@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_overlay_unit.pcpp - a unit type_overlay.pcpp imports: an exported
+  overlay (TPixel) that type_overlay.pcpp uses qualified.
+
+  Nothing to check here: type_overlay.pcpp checks it.
+*******************************************************************************/
+
+module unit type_overlay_unit;
+
+exported type
+  TPixel = overlay
+    Value: uint32;
+    record
+      R: uint8;
+      G: uint8;
+      B: uint8;
+      A: uint8;
+    end;
+  end;
+
+end.

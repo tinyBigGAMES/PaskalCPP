@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_var_err_external_local.pcpp - break step of decl_var.pcpp:
+  an external variable in a routine's var block
+
+  How to check, from repo\bin:
+    pcpp res\tests\decl_var_err_external_local.pcpp
+    pcpp res\tests\decl_var_err_external_local.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe decl_var_err_external_local;
+
+routine Use(): int32;
+var
+  decl_var_counter: int32; external; // ERROR SM0302@3
+begin
+  return decl_var_counter;
+end;
+
+begin
+  println("{}", Use());
+end.

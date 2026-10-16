@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_exported_err_type.pcpp - break step of decl_exported.pcpp:
+  a type decl_exported_unit does not export, named in a declaration
+
+  How to check, from repo\bin:
+    pcpp res\tests\decl_exported_err_type.pcpp
+    pcpp res\tests\decl_exported_err_type.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe decl_exported_err_type;
+
+import decl_exported_unit;
+
+var
+  GSecret: decl_exported_unit.TSecret; // ERROR SM0006@12
+
+begin
+end.

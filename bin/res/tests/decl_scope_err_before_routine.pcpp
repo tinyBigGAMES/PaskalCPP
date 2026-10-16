@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_scope_err_before_routine.pcpp - break step of decl_scope.pcpp:
+  a routine called before its declaration (no forward)
+
+  How to check, from repo\bin:
+    pcpp res\tests\decl_scope_err_before_routine.pcpp
+    pcpp res\tests\decl_scope_err_before_routine.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe decl_scope_err_before_routine;
+
+routine First(AN: int32): int32;
+begin
+  return Second(AN); // ERROR SM0002@10
+end;
+
+routine Second(AN: int32): int32;
+begin
+  return AN;
+end;
+
+begin
+  println("{}", First(1));
+end.

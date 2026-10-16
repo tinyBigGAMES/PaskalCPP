@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_gui.pcpp - Build-kind compliance: a gui exe (Windows)
+
+  @subsystem gui builds a Windows program with no console window (BNF.md
+  sec 2); it shows a message box through the Win32 API it #includes.
+  Built by the tester, never run: a person checks the window.
+
+  How to check, from repo\bin:
+    pcpp res\tests\exe_gui.pcpp -r
+  CHECK: a message box "exe_gui" saying "a gui program" appears, and no
+  console window; OK closes it and the program ends.
+*******************************************************************************/
+
+module exe exe_gui;
+@subsystem gui;
+
+#include <windows.h>
+
+begin
+  // A C++ statement in a body goes in a cppstart block (BNF.md sec 10)
+  cppstart source
+  MessageBoxW(nullptr, L"a gui program", L"exe_gui", MB_OK);
+  cppend;
+end.

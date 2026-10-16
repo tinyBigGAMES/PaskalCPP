@@ -1,0 +1,161 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lsp_object.pcpp - LSP compliance: the editor on every object member kind
+
+  The outline, hover, Go to Definition, completion, inlay hints and Format
+  Document know each member an object or interface declares (PLAN-OBJECT
+  O14): init, done, copy, properties (plain, indexed, default), operators,
+  embeds, hidden members, const and virtual methods.
+
+  How to check: open this file in the editor (no problems are shown).
+
+  CHECK Ctrl+Shift+O lists (indented = a child; [kind] = the icon):
+    IShape                     [interface]
+      Area                     [method]       (): int32
+      Title                    [property]     string
+    TCounter                   [class]
+      FN                       [field]        int32
+      N                        [property]     int32
+    TShape                     [class]
+      FName, FSize, C          [field]
+      init                     [constructor]  (const AName: string; const ASize: int32)
+      copy                     [constructor]  (const ASource: TShape)
+      done                     [method]
+      Area                     [method]       (): int32
+      Title                    [property]     string
+      Twice                    [method]       (): int32
+      Size                     [property]     [const AScale: int32]: int32
+      operator =, operator <>  [operator]     (const A: TShape; const B: TShape): bool
+    TSquare                    [class]
+      init                     [constructor]
+      Area                     [method]
+    Show, LS, LQ, LT
+  CHECK hover shows each declaration as written:
+    the word init           init(const AName: string; const ASize: int32)
+                            and its doc comment "Builds a named shape"
+    done                    done
+    Area in TShape          virtual method Area(): int32
+    Area in IShape          method Area(): int32   (an interface member's
+                            virtual / abstract are the grammar's: not shown)
+    Twice (in the body)     const method Twice(): int32
+    Title in TShape         virtual property Title: string read FName
+                            and "The shape's title"
+    Title in IShape         property Title: string read
+    FSize                   hidden FSize: int32
+    C                       embed C: TCounter
+    N in LS.N := 5          property N: int32 read FN; write FN
+    = in LS = LT            operator =(const A: TShape; const B: TShape): bool
+    [ in LS[2]              property Size[const AScale: int32]: int32 read; default
+  CHECK F12 (Go to Definition): LS.N goes to N in TCounter, the = of
+    LS = LT to the symbol of `operator =`, the [ of LS[2] to Size,
+    parent.init(...) in TSquare to TShape's init.
+  CHECK type `LS.` in the body: FName, C, Area, Title, Twice, Size, then FN
+    and N (TCounter's members, reached through the embed C); FSize is not
+    offered (hidden). Inside a TShape method `self.` also offers FSize.
+  CHECK inlay hints: AName: / ASize: before the arguments of LS, LT and
+    own TSquare(...); AS: before LS in Show(LS).
+  CHECK Format Document changes nothing (the Size property keeps its read
+    body one in and default; on its own line).
+
+  The debugger side (own / ref / weak values) is dbg_owners in the testbed's
+  Debug case (tests\probe\dbg\owners).
+*******************************************************************************/
+
+module exe lsp_object;
+
+type
+  /// Something with an area
+  IShape = interface
+    method Area(): int32;
+    property Title: string read;
+  end;
+  TCounter = object
+    FN: int32;
+    property N: int32 read FN; write FN;
+  end;
+  /// The base shape
+  TShape = object implements IShape
+    FName: string;
+    hidden FSize: int32;
+    embed C: TCounter;
+    /// Builds a named shape
+    init(const AName: string; const ASize: int32);
+    begin
+      self.FName := AName;
+      self.FSize := ASize;
+    end;
+    copy(const ASource: TShape);
+    begin
+      self.FName := ASource.FName;
+      self.FSize := ASource.FSize;
+    end;
+    done;
+    begin
+      println("done {}", self.FName);
+    end;
+    virtual method Area(): int32;
+    begin
+      return self.FSize * self.FSize;
+    end;
+    /// The shape's title
+    virtual property Title: string read FName;
+    const method Twice(): int32;
+    begin
+      return self.FSize * 2;
+    end;
+    property Size[const AScale: int32]: int32 read
+      begin
+        return self.FSize * AScale;
+      end;
+      default;
+    operator =(const A: TShape; const B: TShape): bool;
+    begin
+      return A.FSize = B.FSize;
+    end;
+    operator <>(const A: TShape; const B: TShape): bool;
+    begin
+      return A.FSize <> B.FSize;
+    end;
+  end;
+  TSquare = object(TShape)
+    init(const AName: string; const ASize: int32);
+    begin
+      parent.init(AName, ASize);
+    end;
+    override method Area(): int32;
+    begin
+      return parent.Area() + 1;
+    end;
+  end;
+
+routine Show(var AS: IShape);
+begin
+  println("{} {}", AS.Title, AS.Area());
+end;
+
+var
+  LS: TShape("box", 3);
+  LQ: own TSquare;
+  LT: TShape("other", 3);
+begin
+  LQ := own TSquare("sq", 2);
+  Show(LS);
+  LS.N := 5;
+  println("{} {} {} {}", LS.Twice(), LS[2], LQ.Area(), LS = LT);
+  if LQ is TSquare then
+    println("square");
+  end;
+end.

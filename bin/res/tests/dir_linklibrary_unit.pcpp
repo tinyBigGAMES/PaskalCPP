@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_linklibrary_unit.pcpp - the unit dir_linklibrary.pcpp imports: its own
+  @linklibrary names lib_plain (from where lib_plain.pcpp's commands build
+  it), which adds to the one build of the program.
+
+  Nothing to check here: dir_linklibrary.pcpp checks it.
+*******************************************************************************/
+
+module unit dir_linklibrary_unit;
+@ifdef TARGET_X86_64_LINUX_GNU
+@addlibrarypath "$P:output/lib_plain_linux/zig-out/lib";
+@else
+@addlibrarypath "$P:output/lib_plain/zig-out/lib";
+@endif
+@linklibrary "lib_plain";
+
+routine clink lib_plain_add(AA: int32; AB: int32): int32; external;
+
+exported routine Add(AA: int32; AB: int32): int32;
+begin
+  return lib_plain_add(AA, AB);
+end;
+
+end.

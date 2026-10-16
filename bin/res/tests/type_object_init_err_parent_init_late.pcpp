@@ -1,0 +1,50 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_init_err_parent_init_late.pcpp - break step of type_object_init.pcpp:
+  parent.init(...) after a field's init: the parent is built first (SM0344)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_init_err_parent_init_late.pcpp
+    pcpp res\tests\type_object_init_err_parent_init_late.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_init_err_parent_init_late;
+
+type
+  TA = object
+    N: int32;
+    init(const AN: int32);
+    begin
+      self.N := AN;
+    end;
+  end;
+  TC = object
+    init();
+    begin
+    end;
+  end;
+  TB = object(TA)
+    F: TC;
+    init();
+    begin
+      self.F.init();
+      parent.init(2); // ERROR SM0344@7: parent.init(...) is the first statement of an init
+    end;
+  end;
+
+begin
+end.

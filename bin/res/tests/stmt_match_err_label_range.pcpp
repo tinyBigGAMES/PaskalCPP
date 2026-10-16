@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_match_err_label_range.pcpp - break step of stmt_match.pcpp:
+  a label outside the subject's type: it never matches (SM0604)
+
+  How to check, from repo\bin:
+    pcpp res\tests\stmt_match_err_label_range.pcpp
+    pcpp res\tests\stmt_match_err_label_range.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe stmt_match_err_label_range;
+
+var
+  LB: int8;
+
+begin
+  LB := 1;
+  match LB of
+    300: println("big"); // ERROR SM0604@5: is outside
+  end;
+end.

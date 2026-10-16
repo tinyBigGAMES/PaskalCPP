@@ -1,0 +1,121 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  test_asserts.pcpp - Unit testing compliance: every assert
+
+  Inside a test every assert (BNF.md sec 8) that does not hold records a
+  failure line, <file>:<line>: <message>, and the test goes on: the first
+  test holds every assert, the second fails every one, so 1 test failed.
+  testAssertEqualFloat allows a relative difference of 1e-9; a pointer prints
+  as its address (nil 0x0). An assert outside a test: test_asserts_outside.
+
+  How to check, from repo\bin:
+    pcpp res\tests\test_asserts.pcpp -r
+    pcpp res\tests\test_asserts.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    asserts
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║                     Unit Test Runner                         ║
+    ╚══════════════════════════════════════════════════════════════╝
+
+    Running 2 test(s)...
+
+    ✅ PASS: every assert holds
+    ❌ FAIL: every assert fails
+      🔴 <DIR>/test_asserts.pcpp:109: testAssert failed
+      🔴 <DIR>/test_asserts.pcpp:110: testAssertTrue failed: expected true, got false
+      🔴 <DIR>/test_asserts.pcpp:111: testAssertFalse failed: expected false, got true
+      🔴 <DIR>/test_asserts.pcpp:112: testAssertNil failed: expected nil, got 0x20
+      🔴 <DIR>/test_asserts.pcpp:113: testAssertNotNil failed: expected not nil, got nil
+      🔴 <DIR>/test_asserts.pcpp:114: testFail: on purpose
+      🔴 <DIR>/test_asserts.pcpp:115: testAssertEqualInt failed: expected 3, got -4
+      🔴 <DIR>/test_asserts.pcpp:116: testAssertEqualUInt failed: expected 18446744073709551615, got 5
+      🔴 <DIR>/test_asserts.pcpp:117: testAssertEqualFloat failed: expected 1.5, got 1.5000001
+      🔴 <DIR>/test_asserts.pcpp:118: testAssertEqualStr failed: expected "a", got "b"
+      🔴 <DIR>/test_asserts.pcpp:119: testAssertEqualBool failed: expected true, got false
+      🔴 <DIR>/test_asserts.pcpp:120: testAssertEqualPtr failed: expected 0x20, got 0x0
+
+    ════════════════════════════════════════════════════════════════
+    Results: 1 passed, 1 failed, 2 total
+    ════════════════════════════════════════════════════════════════
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 1
+  <DIR> is the folder this file is in, as the compiler prints it
+  (its full path, forward slashes).
+  The [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // comment on its marked line says, and nothing else:
+    test_asserts_err_type.pcpp
+      testAssertEqualInt given a string (SM0409); test blocks are checked even without @unitTestMode
+    test_asserts_err_count.pcpp
+      testAssertTrue given two arguments (SM0409)
+*******************************************************************************/
+
+module exe test_asserts;
+
+@unitTestMode on;
+
+var
+  GValue: int32 = 5;
+  GText: string = "a";
+
+initialize
+begin
+  println("asserts");
+end;
+
+begin
+end.
+
+test "every assert holds"
+var
+  LP: ptr to int32;
+begin
+  LP := address of GValue;
+  testAssert(GValue = 5);
+  testAssertTrue(GValue > 0);
+  testAssertFalse(GValue < 0);
+  testAssertNil(nil);
+  testAssertNotNil(LP);
+  testAssertEqualInt(-5, -GValue);
+  testAssertEqualUInt(5, uint64(GValue));
+  testAssertEqualFloat(1.5, 3.0 / 2.0);
+  testAssertEqualStr("ab", GText + "b");
+  testAssertEqualBool(true, GValue = 5);
+  testAssertEqualPtr(LP, address of GValue);
+end;
+
+test "every assert fails"
+var
+  LP: ptr to int32;
+  LU: uint64;
+begin
+  LU := 32;
+  LP := ptr to int32(LU);
+  testAssert(GValue = 6);
+  testAssertTrue(false);
+  testAssertFalse(true);
+  testAssertNil(LP);
+  testAssertNotNil(nil);
+  testFail("on purpose");
+  testAssertEqualInt(3, -4);
+  testAssertEqualUInt(18446744073709551615u, 5);
+  testAssertEqualFloat(1.5, 1.5000001);
+  testAssertEqualStr("a", "b");
+  testAssertEqualBool(true, false);
+  testAssertEqualPtr(LP, nil);
+end;

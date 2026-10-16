@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_overlay_err_method.pcpp - break step of type_overlay.pcpp:
+  an overlay holds no methods; an object does (PR0034)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_overlay_err_method.pcpp
+    pcpp res\tests\type_overlay_err_method.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_overlay_err_method;
+
+type
+  TV = overlay
+    A: int32;
+    method M(); // ERROR PR0034@5: 'method' is not allowed in an overlay
+    begin
+    end;
+  end;
+
+begin
+end.

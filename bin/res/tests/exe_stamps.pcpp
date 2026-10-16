@@ -1,0 +1,43 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_stamps.pcpp - Build-kind compliance: the icon and version info stamped on an exe
+
+  @exeicon and @addverinfo on with the @vi* fields (BNF.md sec 2) are
+  stamped on the built Windows exe after the build. Built by the tester,
+  never run: a person checks Explorer.
+
+  How to check, from repo\bin:
+    pcpp res\tests\exe_stamps.pcpp
+  CHECK: Explorer shows output\zig-out\bin\exe_stamps.exe with the PaskalCPP icon;
+  its Properties > Details tab shows version 1.2.3.0, product "PaskalCPP
+  Compliance", description "exe_stamps test program".
+*******************************************************************************/
+
+module exe exe_stamps;
+@exeicon "$P:res/assets/icons/paskalcpp.ico";
+@addverinfo on;
+@vimajor 1;
+@viminor 2;
+@vipatch 3;
+@viproductname "PaskalCPP Compliance";
+@videscription "exe_stamps test program";
+@vifilename "exe_stamps.exe";
+@vicompanyname "tinyBigGAMES LLC";
+@vicopyright "Copyright 2026 tinyBigGAMES LLC";
+
+begin
+  println("stamped");
+end.

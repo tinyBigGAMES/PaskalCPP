@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_array_err_bounds_float.pcpp - break step of type_array.pcpp:
+  a static bound is an integer, a char or a choice value: not a float (SM0322)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_array_err_bounds_float.pcpp
+    pcpp res\tests\type_array_err_bounds_float.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_array_err_bounds_float;
+
+type
+  TA = array[1.5..2.5] of int32; // ERROR SM0322@8: array bounds are integer, char or choices of one family
+
+begin
+end.

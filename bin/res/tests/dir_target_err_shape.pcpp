@@ -1,0 +1,29 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_target_err_shape.pcpp - break step of dir_target.pcpp: a triple of one
+  part (a triple has three or four; it is not applied)
+
+  How to check, from repo\bin:
+    pcpp res\tests\dir_target_err_shape.pcpp
+    pcpp res\tests\dir_target_err_shape.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe dir_target_err_shape;
+@target "x86_64"; // ERROR CD0010@9: Malformed target triple "x86_64"
+
+begin
+end.

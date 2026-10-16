@@ -1,0 +1,30 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_prologue_err_shape.pcpp - break step of dir_prologue.pcpp: a directive
+  argument of the wrong shape (@optimize takes a word, not a string)
+
+  How to check, from repo\bin:
+    pcpp res\tests\dir_prologue_err_shape.pcpp
+    pcpp res\tests\dir_prologue_err_shape.pcpp -t x86_64-linux-gnu
+  The marked line reports that code (at the argument); nothing else is
+  reported.
+*******************************************************************************/
+
+module exe dir_prologue_err_shape;
+@optimize "debug"; // ERROR PR0006@11
+
+begin
+end.

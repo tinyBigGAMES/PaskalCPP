@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_guard_err_cpp_jump.pcpp - break step of stmt_guard.pcpp:
+  a C++ break inside a guard body leaves only its hidden function (SM0614)
+
+  How to check, from repo\bin:
+    pcpp res\tests\stmt_guard_err_cpp_jump.pcpp
+    pcpp res\tests\stmt_guard_err_cpp_jump.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe stmt_guard_err_cpp_jump;
+
+var
+  LN: int32;
+
+begin
+  LN := 0;
+  while LN < 3 do
+    guard
+      cppstart source
+      break; // ERROR SM0614@7: leaves only the guard
+      cppend;
+    except
+      LN := 9;
+    end;
+    LN += 1;
+  end;
+end.

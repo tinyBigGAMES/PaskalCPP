@@ -1,0 +1,30 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addsourcefile_err_missing.pcpp - break step of dir_addsourcefile.pcpp: a
+  file that does not exist (a relative path resolves against the folder you
+  run pcpp in)
+
+  How to check, from repo\bin:
+    pcpp res\tests\dir_addsourcefile_err_missing.pcpp
+    pcpp res\tests\dir_addsourcefile_err_missing.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe dir_addsourcefile_err_missing;
+@addsourcefile "missing.c"; // ERROR SM0105@16
+
+begin
+end.

@@ -1,0 +1,4 @@
+# Store and check out every file byte for byte: no line-ending conversion.
+# PaskalCPP's line endings are content (lexer tests on newlines and splices,
+# .pas CRLF + BOM, res/tests LF), so git must never rewrite them.
+* -text

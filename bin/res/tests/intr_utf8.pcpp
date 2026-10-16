@@ -1,0 +1,50 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_utf8.pcpp - Intrinsic compliance: utf8
+
+  utf8(W) (BNF.md sec 7) converts a wstring (wide characters; a wchar is
+  the target's wchar_t) to a string (UTF-8): one character can take more
+  bytes than wide characters.
+
+  How to check, from repo\bin:
+    pcpp res\tests\intr_utf8.pcpp -r
+    pcpp res\tests\intr_utf8.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    text café
+    units bytes 4 5
+    literal wide
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // comment on its marked line says, and nothing else:
+    intr_utf8_err_narrow.pcpp
+      utf8 of a narrow string literal (SM0409)
+*******************************************************************************/
+
+module exe intr_utf8;
+
+var
+  LW: wstring = L"caf\u00e9";
+  LS: string;
+
+begin
+  LS := utf8(LW);
+  println("text {}", LS);
+  println("units bytes {} {}", len(LW), len(LS));
+  println("literal {}", utf8(L"wide"));
+end.

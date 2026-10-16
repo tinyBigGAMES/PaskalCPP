@@ -1,0 +1,80 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_guard.pcpp - Statement compliance: guard
+
+  guard ... [except ...] [finally ...] end; (BNF.md sec 5) with at least
+  one of except and finally: except runs when the body raises (exccode,
+  excmsg read the exception there only), finally runs either way, last; a
+  guard nests in a guard and an inner raise reaches the outer except.
+
+  How to check, from repo\bin:
+    pcpp res\tests\stmt_guard.pcpp -r
+    pcpp res\tests\stmt_guard.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    caught boom
+    code 7 seven
+    body
+    finally
+    inner finally
+    outer inner
+    after
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // comment on its marked line says, and nothing else:
+    stmt_guard_err_empty.pcpp
+      a guard with neither except nor finally (PR0052)
+    stmt_guard_err_cpp_jump.pcpp
+      a C++ break inside a guard body leaves only its hidden function (SM0614)
+    stmt_guard_err_cpp_jump_finally.pcpp
+      a C++ break inside a finally body leaves only its hidden function (SM0614)
+    stmt_guard_err_cpp_jump_except.pcpp
+      a C++ break inside the except body of a guard with finally (SM0614)
+    stmt_guard_err_exccode.pcpp
+      exccode outside an except body (SM0615)
+*******************************************************************************/
+
+module exe stmt_guard;
+
+begin
+  guard
+    raise("boom");
+  except
+    println("caught {}", excmsg());
+  end;
+  guard
+    raisecode(7, "seven");
+  except
+    println("code {} {}", exccode(), excmsg());
+  end;
+  guard
+    println("body");
+  finally
+    println("finally");
+  end;
+  guard
+    guard
+      raise("inner");
+    finally
+      println("inner finally");
+    end;
+  except
+    println("outer {}", excmsg());
+  end;
+  println("after");
+end.

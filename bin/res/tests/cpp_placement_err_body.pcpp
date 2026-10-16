@@ -1,0 +1,29 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  cpp_placement_err_body.pcpp - break step of cpp_placement.pcpp:
+  cpp header; inside a body (PR0050)
+
+  How to check, from repo\bin:
+    pcpp res\tests\cpp_placement_err_body.pcpp
+    pcpp res\tests\cpp_placement_err_body.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe cpp_placement_err_body;
+
+begin
+  cpp header; // ERROR PR0050@3: 'cpp header' / 'cpp source' set the placement
+end.

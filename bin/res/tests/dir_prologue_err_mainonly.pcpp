@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_prologue_err_mainonly.pcpp - break step of dir_prologue.pcpp: the unit
+  this exe imports (dir_prologue_err_mainonly_unit.pcpp) sets @optimize, which
+  only the main module sets
+
+  How to check, from repo\bin:
+    pcpp res\tests\dir_prologue_err_mainonly.pcpp
+    pcpp res\tests\dir_prologue_err_mainonly.pcpp -t x86_64-linux-gnu
+  The marked line in dir_prologue_err_mainonly_unit.pcpp reports that code;
+  nothing else is reported.
+*******************************************************************************/
+
+module exe dir_prologue_err_mainonly;
+import dir_prologue_err_mainonly_unit;
+
+begin
+end.

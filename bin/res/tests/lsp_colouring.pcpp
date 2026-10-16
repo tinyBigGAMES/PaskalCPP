@@ -1,0 +1,89 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lsp_colouring.pcpp - LSP compliance: keyword and type colouring
+
+  The language server colours PaskalCPP's own words from the real lexer:
+  keywords in the keyword colour, the builtin types in the type colour. The
+  word lists come from the server too (nothing is baked into the editor).
+  C++ inside a cppstart ... cppend block is C++ text: PaskalCPP's words in it
+  are NOT coloured as PaskalCPP's.
+
+  How to check:
+    1. Open this file. Every word listed on a CHECK line has the colour the
+       CHECK names.
+    2. Colours are case-sensitive: `Begin` and `INT32` (in the comment below)
+       are not words of the language and stay plain when typed as code.
+*******************************************************************************/
+
+module exe lsp_colouring;
+
+// CHECK keyword colour: module exe type record end var const routine begin
+//       return if then else while do for to
+// CHECK type colour: int8 int16 int32 int64 uint8 uint16 uint32 uint64
+//       float32 float64 bool char wchar string wstring
+type
+  TAll = record
+    A: int8;
+    B: int16;
+    C: int32;
+    D: int64;
+    E: uint8;
+    F: uint16;
+    G: uint32;
+    H: uint64;
+    I: float32;
+    J: float64;
+    K: bool;
+    L: char;
+    M: wchar;
+    N: string;
+    O: wstring;
+  end;
+
+const
+  KLimit: int32 = 10;
+
+// CHECK: in the block below `int`, `begin` and `return` are C++ text: they
+//        do NOT get PaskalCPP's keyword or type colour (cppstart / cppend do)
+cppstart source
+int begin_count() { int begin = 0; return begin; }
+cppend;
+
+routine Count(const AN: int32): int32;
+var
+  LI: int32;
+  LSum: int32;
+begin
+  LSum := 0;
+  for LI := 1 to AN do
+    if LI < KLimit then
+      LSum := LSum + LI;
+    else
+      LSum := LSum - 1;
+    end;
+  end;
+  while LSum > 100 do
+    LSum := LSum - 100;
+  end;
+  return LSum;
+end;
+
+var
+  GAll: TAll;
+
+begin
+  GAll.C := Count(5);
+end.

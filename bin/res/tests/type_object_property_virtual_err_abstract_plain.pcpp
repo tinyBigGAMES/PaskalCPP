@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property_virtual_err_abstract_plain.pcpp - break step of type_object_property_virtual.pcpp:
+  an abstract accessor is virtual (SM0337)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_property_virtual_err_abstract_plain.pcpp
+    pcpp res\tests\type_object_property_virtual_err_abstract_plain.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_property_virtual_err_abstract_plain;
+
+type
+  TBox = object
+    property A: int32 read abstract; // ERROR SM0337@28: an abstract accessor is virtual: write 'virtual property A'
+  end;
+
+begin
+end.

@@ -1,0 +1,53 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_stdin.pcpp - Build-kind compliance: a program reading its standard input
+
+  A program reads stdin the way C++ does (it is the surface: std::getline
+  in mixed C++, BNF.md sec 10). With pcpp -r and a redirected stdin the
+  program reads that file itself, so it sees the end of input where the
+  file ends (exe_stdin_input.txt holds the two lines), on both targets.
+
+  How to check, from repo\bin:
+    pcpp res\tests\exe_stdin.pcpp -r < res\tests\exe_stdin_input.txt
+    pcpp res\tests\exe_stdin.pcpp -r -t x86_64-linux-gnu < res\tests\exe_stdin_input.txt   (runs in WSL)
+  EXPECT:
+    line 1: first line
+    line 2: second line
+    end of input after 2 lines
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+*******************************************************************************/
+
+module exe exe_stdin;
+
+#include <iostream>
+#include <string>
+
+bool ReadInputLine(std::string& ALine) { return static_cast<bool>(std::getline(std::cin, ALine)); }
+
+var
+  LLine: string;
+  LCount: int32;
+
+begin
+  LCount := 0;
+  while ReadInputLine(LLine) do
+    LCount := LCount + 1;
+    println("line {}: {}", LCount, LLine);
+  end;
+  println("end of input after {} lines", LCount);
+end.

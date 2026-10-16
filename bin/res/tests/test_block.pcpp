@@ -1,0 +1,103 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  test_block.pcpp - Unit testing compliance: the test block
+
+  A test block (BNF.md sec 8) follows the module's end., has a name and may
+  take one var block before its begin; it sees the module's routines and
+  variables. With @unitTestMode on the runner runs every test in source order
+  (the body does not run) and the exit code is the number of failed tests:
+  here every test passes, so 0.
+
+  How to check, from repo\bin:
+    pcpp res\tests\test_block.pcpp -r
+    pcpp res\tests\test_block.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    init
+
+    ╔══════════════════════════════════════════════════════════════╗
+    ║                     Unit Test Runner                         ║
+    ╚══════════════════════════════════════════════════════════════╝
+
+    Running 3 test(s)...
+
+    ✅ PASS: a routine of the module
+    ✅ PASS: with its own var block
+    ✅ PASS: module state
+
+    ════════════════════════════════════════════════════════════════
+    Results: 3 passed, 0 failed, 3 total
+    ════════════════════════════════════════════════════════════════
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // comment on its marked line says, and nothing else:
+    test_block_err_place.pcpp
+      a test block before the module's end. (PR0019)
+    test_block_err_const.pcpp
+      a const block before a test's begin (PR0025)
+    test_block_err_two_var.pcpp
+      a second var block before a test's begin (PR0025)
+    test_block_err_empty.pcpp
+      a test with an empty name (SM0111)
+    test_block_err_duplicate.pcpp
+      two tests of one module with one name (SM0112)
+*******************************************************************************/
+
+module exe test_block;
+
+@unitTestMode on;
+
+var
+  GCount: int32 = 0;
+
+routine Twice(AN: int32): int32;
+begin
+  return AN * 2;
+end;
+
+initialize
+begin
+  println("init");
+end;
+
+begin
+  println("the body does not run in test mode");
+end.
+
+test "a routine of the module"
+begin
+  testAssertEqualInt(4, Twice(2));
+end;
+
+test "with its own var block"
+var
+  LSum: int32;
+  LI: int32;
+begin
+  LSum := 0;
+  for LI := 1 to 4 do
+    LSum := LSum + LI;
+  end;
+  testAssertEqualInt(10, LSum);
+end;
+
+test "module state"
+begin
+  GCount := GCount + 1;
+  testAssertEqualInt(1, GCount);
+end;

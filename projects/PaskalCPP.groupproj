@@ -1,0 +1,60 @@
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+    <PropertyGroup>
+        <ProjectGuid>{31018F4E-AD6A-4A62-B47F-00A7F33ED169}</ProjectGuid>
+    </PropertyGroup>
+    <ItemGroup>
+        <Projects Include="testbed\testbed.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="pcppdev\pcppdev.dproj">
+            <Dependencies/>
+        </Projects>
+        <Projects Include="pcpp\pcpp.dproj">
+            <Dependencies>testbed\testbed.dproj</Dependencies>
+        </Projects>
+    </ItemGroup>
+    <ProjectExtensions>
+        <Borland.Personality>Default.Personality.12</Borland.Personality>
+        <Borland.ProjectType/>
+        <BorlandProject>
+            <Default.Personality/>
+        </BorlandProject>
+    </ProjectExtensions>
+    <Target Name="testbed">
+        <MSBuild Projects="testbed\testbed.dproj"/>
+    </Target>
+    <Target Name="testbed:Clean">
+        <MSBuild Projects="testbed\testbed.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="testbed:Make">
+        <MSBuild Projects="testbed\testbed.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="pcppdev">
+        <MSBuild Projects="pcppdev\pcppdev.dproj"/>
+    </Target>
+    <Target Name="pcppdev:Clean">
+        <MSBuild Projects="pcppdev\pcppdev.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="pcppdev:Make">
+        <MSBuild Projects="pcppdev\pcppdev.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="pcpp" DependsOnTargets="testbed">
+        <MSBuild Projects="pcpp\pcpp.dproj"/>
+    </Target>
+    <Target Name="pcpp:Clean" DependsOnTargets="testbed:Clean">
+        <MSBuild Projects="pcpp\pcpp.dproj" Targets="Clean"/>
+    </Target>
+    <Target Name="pcpp:Make" DependsOnTargets="testbed:Make">
+        <MSBuild Projects="pcpp\pcpp.dproj" Targets="Make"/>
+    </Target>
+    <Target Name="Build">
+        <CallTarget Targets="testbed;pcppdev;pcpp"/>
+    </Target>
+    <Target Name="Clean">
+        <CallTarget Targets="testbed:Clean;pcppdev:Clean;pcpp:Clean"/>
+    </Target>
+    <Target Name="Make">
+        <CallTarget Targets="testbed:Make;pcppdev:Make;pcpp:Make"/>
+    </Target>
+    <Import Project="$(BDS)\Bin\CodeGear.Group.Targets" Condition="Exists('$(BDS)\Bin\CodeGear.Group.Targets')"/>
+</Project>

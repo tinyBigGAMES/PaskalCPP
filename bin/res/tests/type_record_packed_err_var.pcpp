@@ -1,0 +1,45 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_packed_err_var.pcpp - break step of type_record_packed.pcpp:
+  a field of a packed record passed to a var parameter: it may sit below its alignment (SM0270)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_record_packed_err_var.pcpp
+    pcpp res\tests\type_record_packed_err_var.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_record_packed_err_var;
+
+type
+  TS = set of 0..15;
+  TPk = record packed
+    C: int8;
+    I: int32;
+    S: TS;
+  end;
+
+routine Bump(var AN: int32);
+begin
+  AN := AN + 1;
+end;
+
+var
+  LP: TPk;
+
+begin
+  Bump(LP.I); // ERROR SM0270@8: it may be misaligned
+end.

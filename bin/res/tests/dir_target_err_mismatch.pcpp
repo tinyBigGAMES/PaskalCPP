@@ -1,0 +1,30 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_target_err_mismatch.pcpp - break step of dir_target.pcpp: the imported
+  unit dir_target_err_mismatch_unit.pcpp names another target than this main
+  module (only the main module's @target applies; the unit's is reported)
+
+  How to check, from repo\bin:
+    pcpp res\tests\dir_target_err_mismatch.pcpp
+  The marked line, in the unit, reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe dir_target_err_mismatch;
+@target "x86_64-pc-windows-gnu";
+import dir_target_err_mismatch_unit;
+
+begin
+end.

@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_splices_err_cppstart.pcpp - break step of lex_splices.pcpp:
+  a cppstart block whose last line ends in a splice (LX0014)
+
+  How to check, from repo\bin:
+    pcpp res\tests\lex_splices_err_cppstart.pcpp
+    pcpp res\tests\lex_splices_err_cppstart.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe lex_splices_err_cppstart;
+
+cppstart source
+int GX = 1; /* // ERROR LX0014@41 // */ \
+cppend;
+
+begin
+  println("{}", 1);
+end.

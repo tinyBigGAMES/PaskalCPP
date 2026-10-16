@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_err_align_below_cpp_value.pcpp - break step of type_record.pcpp:
+  align(cpp("2")) on an int32 field: a value written in C++ is judged the same way (SM0311, at the align value)
+
+  How to check, from repo\bin:
+  (the compiler judges it in the emitted C++: the build runs, the program is
+  never started)
+    pcpp res\tests\type_record_err_align_below_cpp_value.pcpp
+    pcpp res\tests\type_record_err_align_below_cpp_value.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_record_err_align_below_cpp_value;
+
+type
+  TR = record align(cpp("2")) // ERROR SM0311@21: align 2 is below the natural alignment 4 of 'TR', lower it with packed
+    G: int32;
+  end;
+
+var
+  V: TR;
+
+begin
+  V.G := 1;
+end.

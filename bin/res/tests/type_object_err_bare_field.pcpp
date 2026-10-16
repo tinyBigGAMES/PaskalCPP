@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_err_bare_field.pcpp - break step of type_object.pcpp:
+  a field named bare in a method: write self.N (SM0018)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_err_bare_field.pcpp
+    pcpp res\tests\type_object_err_bare_field.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_err_bare_field;
+
+type
+  TA = object
+    N: int32;
+    method Get(): int32;
+    begin
+      return N; // ERROR SM0018@14: 'N' is a member of 'TA': write self.N
+    end;
+  end;
+
+begin
+end.

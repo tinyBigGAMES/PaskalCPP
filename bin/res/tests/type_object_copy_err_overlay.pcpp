@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_copy_err_overlay.pcpp - break step of type_object_copy.pcpp:
+  an overlay holding an array of objects: an overlay is plain data (SM0357)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_copy_err_overlay.pcpp
+    pcpp res\tests\type_object_copy_err_overlay.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_copy_err_overlay;
+
+type
+  TA = object
+    N: int32;
+  end;
+  TOv = overlay
+    I: int64;
+    A: array[0..1] of TA; // ERROR SM0357@8: field 'A': a record or an overlay holds no object
+  end;
+
+begin
+end.

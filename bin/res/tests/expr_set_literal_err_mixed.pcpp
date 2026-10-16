@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_set_literal_err_mixed.pcpp - break step of expr_set_literal.pcpp:
+  an int32 and a char element in one literal (SM0266)
+
+  How to check, from repo\bin:
+    pcpp res\tests\expr_set_literal_err_mixed.pcpp
+    pcpp res\tests\expr_set_literal_err_mixed.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe expr_set_literal_err_mixed;
+
+type
+  TDigits = set of 0..9;
+
+var
+  LD: TDigits;
+
+begin
+  LD := [1, 'a']; // ERROR SM0266@13: set literal elements are of different ordinal types
+end.

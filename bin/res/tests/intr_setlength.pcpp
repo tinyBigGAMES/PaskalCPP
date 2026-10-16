@@ -1,0 +1,69 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_setlength.pcpp - Intrinsic compliance: setlength
+
+  setlength(V, N) sets the length of a dynamic array or a string variable
+  (BNF.md sec 7): growing adds zeroed elements, shrinking drops the tail.
+  A negative length raises code 12 (as getmem of a negative size) and
+  leaves the variable as it was.
+
+  How to check, from repo\bin:
+    pcpp res\tests\intr_setlength.pcpp -r
+    pcpp res\tests\intr_setlength.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    grow 3 9
+    shrink 1
+    string 5
+    string cut a
+    12 negative length -1
+    kept 1
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // comment on its marked line says, and nothing else:
+    intr_setlength_err_int.pcpp
+      setlength of an int32 (SM0409)
+    intr_setlength_err_value.pcpp
+      setlength used as a value (SM0408)
+    intr_setlength_err_unsigned.pcpp
+      setlength given a uint64 length (SM0409)
+*******************************************************************************/
+
+module exe intr_setlength;
+
+var
+  LA: array of int32;
+  LS: string = "ab";
+
+begin
+  setlength(LA, 3);
+  LA[2] := 9;
+  println("grow {} {}", len(LA), LA[2]);
+  setlength(LA, 1);
+  println("shrink {}", len(LA));
+  setlength(LS, 5);
+  println("string {}", len(LS));
+  setlength(LS, 1);
+  println("string cut {}", LS);
+  guard
+    setlength(LA, -1);
+  except
+    println("{} {}", exccode(), excmsg());
+  end;
+  println("kept {}", len(LA));
+end.

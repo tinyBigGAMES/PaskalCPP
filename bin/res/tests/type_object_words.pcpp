@@ -1,0 +1,93 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_words.pcpp - Type compliance: the object type's words are not
+  reserved
+
+  The words an object type uses (init done embed implements interface
+  property read write hidden override final abstract copy own ref weak is
+  as; PLAN-OBJECT H1) are words only where an object type expects them.
+  Everywhere else they are ordinary names: record fields, variables,
+  routines and parameters, as here, and a C library's read() / write()
+  keep their names.
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_words.pcpp -r
+    pcpp res\tests\type_object_words.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    fields 1 2 3 4 5 6 7 8 9
+    vars 10 11 12 13 14 15 16 17 18
+    routine 19
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+*******************************************************************************/
+
+module exe type_object_words;
+
+type
+  TWords = record
+    init: int32;
+    done: int32;
+    embed: int32;
+    implements: int32;
+    interface: int32;
+    property: int32;
+    read: int32;
+    write: int32;
+    hidden: int32;
+  end;
+
+var
+  LW: TWords;
+  override: int32;
+  final: int32;
+  abstract: int32;
+  copy: int32;
+  own: int32;
+  ref: int32;
+  weak: int32;
+  is: int32;
+  as: int32;
+
+routine write(const read: int32): int32;
+begin
+  return read + 1;
+end;
+
+begin
+  LW.init := 1;
+  LW.done := 2;
+  LW.embed := 3;
+  LW.implements := 4;
+  LW.interface := 5;
+  LW.property := 6;
+  LW.read := 7;
+  LW.write := 8;
+  LW.hidden := 9;
+  override := 10;
+  final := 11;
+  abstract := 12;
+  copy := 13;
+  own := 14;
+  ref := 15;
+  weak := 16;
+  is := 17;
+  as := 18;
+  println("fields {} {} {} {} {} {} {} {} {}", LW.init, LW.done, LW.embed, LW.implements,
+    LW.interface, LW.property, LW.read, LW.write, LW.hidden);
+  println("vars {} {} {} {} {} {} {} {} {}", override, final, abstract, copy, own, ref, weak, is, as);
+  println("routine {}", write(18));
+end.

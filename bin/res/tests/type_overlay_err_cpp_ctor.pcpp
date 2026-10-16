@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_overlay_err_cpp_ctor.pcpp - break step of type_overlay.pcpp:
+  a C++ type that builds itself (a constructor) cannot share an overlay's storage (SM0313, judged in the emitted C++)
+
+  How to check, from repo\bin:
+  (the compiler judges it in the emitted C++: the build runs, the program is
+  never started)
+    pcpp res\tests\type_overlay_err_cpp_ctor.pcpp
+    pcpp res\tests\type_overlay_err_cpp_ctor.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_overlay_err_cpp_ctor;
+
+struct CName { CName() : Len(0) {} int Len; };
+
+type
+  TV = overlay
+    A: int32;
+    N: CName; // ERROR SM0313@5: is not plain data
+  end;
+
+var
+  V: TV;
+
+begin
+  V.A := 1;
+end.

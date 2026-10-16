@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_iface_err_parent.pcpp - break step of type_object_iface.pcpp:
+  an interface as an object's parent: write implements (SM0308)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_iface_err_parent.pcpp
+    pcpp res\tests\type_object_iface_err_parent.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_iface_err_parent;
+
+type
+  IShape = interface
+    method Area(): int32;
+  end;
+  TBox = object(IShape) // ERROR SM0308@17: 'IShape' is an interface
+  end;
+
+begin
+end.

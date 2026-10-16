@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_pointer_err_target.pcpp - break step of type_pointer.pcpp:
+  a ptr to int32 is no ptr to int64: cast it (SM0200)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_pointer_err_target.pcpp
+    pcpp res\tests\type_pointer_err_target.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_pointer_err_target;
+
+var
+  LP: ptr to int32;
+  LW: ptr to int64;
+
+begin
+  LP := nil;
+  LW := LP; // ERROR SM0200@9: 'ptr to int32' does not convert implicitly to 'ptr to int64'; write ptr to int64(LP)
+end.

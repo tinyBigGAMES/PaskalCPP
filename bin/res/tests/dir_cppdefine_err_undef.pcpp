@@ -1,0 +1,30 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_cppdefine_err_undef.pcpp - break step of dir_cppdefine.pcpp: @cppundef of
+  a name @cppdefine sets (one name has one meaning)
+
+  How to check, from repo\bin:
+    pcpp res\tests\dir_cppdefine_err_undef.pcpp
+    pcpp res\tests\dir_cppdefine_err_undef.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe dir_cppdefine_err_undef;
+@cppdefine "DIR_CPPDEF_ON";
+@cppundef "DIR_CPPDEF_ON"; // ERROR SM0118@11
+
+begin
+end.

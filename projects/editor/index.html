@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<!--
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  ---
+
+  PaskalCPP Editor - the editor window's page (renderer).
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- Local files only. Monaco injects styles (inline) and starts its
+       workers from blob: URLs; fonts/images may be data: URIs. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; font-src 'self' data:; img-src 'self' data:">
+  <title>PaskalCPP Editor</title>
+  <link rel="stylesheet" href="vendor/xterm/xterm.css">
+  <link rel="stylesheet" href="src/editor.css">
+</head>
+<body>
+  <!-- Title bar: drag region; Windows draws min/max/close at the right
+       (titleBarOverlay). Controls inside are no-drag. -->
+  <header id="titlebar">
+    <button id="tb-logo" class="tb-logo" title="Menu"><img class="tb-logo-img" src="assets/icon.ico" alt="PaskalCPP" draggable="false"></button>
+    <div class="tb-group tb-file">
+      <button class="tb-btn tb-icon" data-cmd="new" title="New File (Ctrl+N)"><svg class="tb-svg" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.5h5l3 3v10H4z"/><path d="M9 1.5v3h3"/><path d="M8 8v4M6 10h4"/></svg></button>
+      <button class="tb-btn tb-icon" data-cmd="open" title="Open File (Ctrl+O)"><svg class="tb-svg" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 3.5h4.5l1.5 1.5h7v8h-13z"/></svg></button>
+      <button class="tb-btn tb-icon" data-cmd="save" title="Save (Ctrl+S)" disabled><svg class="tb-svg" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 2.5h9l2 2v9h-11z"/><path d="M5 2.5v3.5h5v-3.5"/><path d="M5 13.5v-4h6v4"/></svg></button>
+      <button class="tb-btn tb-icon" data-cmd="saveAs" title="Save As (Ctrl+Shift+S)"><svg class="tb-svg" viewBox="0 0 16 16" aria-hidden="true"><path d="M8.5 13.5h-6v-11h9l2 2v2.5"/><path d="M5 2.5v3.5h5v-3.5"/><path d="M9.5 14.5l1-3 4-4 2 2-4 4z"/></svg></button>
+      <button class="tb-btn tb-icon" data-cmd="saveAll" title="Save All" disabled><svg class="tb-svg" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 1.5h8l2 2v8"/><path d="M1.5 4.5h8l2 2v8h-10z"/><path d="M4 4.5v3h4.5v-3"/></svg></button>
+      <button class="tb-btn tb-icon" data-cmd="rename" title="Rename File" disabled><svg class="tb-svg" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 5.5h13v5h-13z"/><path d="M4 8h3"/><path d="M10 3.5v9M8.5 3.5h3M8.5 12.5h3"/></svg></button>
+    </div>
+    <div class="tb-group tb-build">
+      <button class="tb-btn" data-cmd="build" title="Build (Ctrl+B)"><span class="tb-ico">&#9881;</span>Build</button>
+      <button class="tb-btn tb-run" data-cmd="run" title="Run (Ctrl+F5)"><span class="tb-ico">&#9654;</span>Run</button>
+      <button class="tb-btn tb-stop" data-cmd="stop" title="Stop (Shift+F5)" disabled><span class="tb-ico">&#9632;</span>Stop</button>
+    </div>
+    <div class="tb-group tb-debug">
+      <!-- Debug = a bug; once stopped the button is Continue = the play glyph (shell.js tb-continue) -->
+      <button class="tb-btn tb-debug-start" data-cmd="debugStart" title="Debug (F5)"><span class="tb-ico"><svg class="tb-svg tb-ico-bug" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 7.5a3 3 0 0 1 6 0v3a3 3 0 0 1-6 0z"/><path d="M6.2 4.6a2 2 0 0 1 3.6 0"/><path d="M8 6.5v7"/><path d="M5 9.5H2.5M11 9.5h2.5M5 7.2L3 6M11 7.2l2-1.2M5 11.8L3 13M11 11.8l2 1.2"/><path d="M6.6 3.2L5.5 1.8M9.4 3.2l1.1-1.4"/></svg><span class="tb-ico-continue">&#9655;</span></span><span class="tb-label">Debug</span></button>
+      <button class="tb-btn" data-cmd="debugPause" title="Pause (F6)" disabled><span class="tb-ico">&#10074;&#10074;</span>Pause</button>
+      <button class="tb-btn" data-cmd="debugStepOver" title="Step Over (F10)" disabled><span class="tb-ico">&#8631;</span>Over</button>
+      <button class="tb-btn" data-cmd="debugStepIn" title="Step Into (F11)" disabled><span class="tb-ico">&#8595;</span>Into</button>
+      <button class="tb-btn" data-cmd="debugStepOut" title="Step Out (Shift+F11)" disabled><span class="tb-ico">&#8593;</span>Out</button>
+    </div>
+    <div class="tb-group">
+      <select id="tb-mode" class="tb-select" title="Optimize level">
+        <option value="debug">debug</option>
+        <option value="release_safe">release_safe</option>
+        <option value="release_fast">release_fast</option>
+        <option value="release_small">release_small</option>
+      </select>
+      <select id="tb-target" class="tb-select" title="Target">
+        <option value="x86_64-windows-gnu">x86_64-windows-gnu</option>
+        <option value="x86_64-linux-gnu">x86_64-linux-gnu</option>
+      </select>
+    </div>
+    <div class="tb-group tb-report">
+      <button class="tb-btn tb-icon" data-cmd="reportIssue" title="Report Issue"><svg class="tb-svg" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 2.5h13v9h-7l-3 3v-3h-3z"/><path d="M8 4.5v3.5M8 9.5v1"/></svg></button>
+    </div>
+    <div id="tb-title" class="tb-title">PaskalCPP Editor</div>
+  </header>
+
+  <main id="workbench">
+    <aside id="explorer">
+      <div class="pane-header">
+        <span>EXPLORER</span>
+        <span class="pane-icons">
+          <button id="explorer-refresh" class="pane-icon" title="Refresh Explorer">&#8635;</button>
+          <button id="explorer-open" class="pane-icon" title="Open Folder">&#128193;</button>
+        </span>
+      </div>
+      <div id="explorer-body">
+        <div id="tree-folder" class="tree-root"></div>
+        <div id="tree-examples" class="tree-root"></div>
+      </div>
+    </aside>
+    <div id="sash-v" class="sash sash-v"></div>
+
+    <section id="center">
+      <div id="tabs"></div>
+      <div id="editor"></div>
+      <div id="sash-h" class="sash sash-h"></div>
+      <section id="panel">
+        <div class="panel-bar">
+          <button class="panel-tab active" data-panel="output">OUTPUT</button>
+          <button class="panel-tab" data-panel="terminal">TERMINAL</button>
+          <button class="panel-tab" data-panel="problems">PROBLEMS <span id="problems-count" class="badge">0</span></button>
+          <button class="panel-tab" data-panel="calls">CALL HIERARCHY</button>
+          <button class="panel-tab" data-panel="debug">DEBUG</button>
+          <span class="panel-spacer"></span>
+          <button id="panel-clear" class="panel-icon" title="Clear output">&#8856;</button>
+          <button id="panel-toggle" class="panel-icon" title="Collapse panel">&#8964;</button>
+        </div>
+        <pre id="panel-output" class="panel-body"></pre>
+        <!-- TERMINAL tab: the debugged program's terminal (src/terminal.js) -->
+        <div id="panel-terminal" class="panel-body hidden"></div>
+        <div id="panel-problems" class="panel-body hidden"><div class="pane-empty">No problems</div></div>
+        <div id="panel-calls" class="panel-body hidden"><div class="pane-empty">Put the cursor on a routine and press Shift+Alt+H</div></div>
+        <!-- DEBUG tab: src/debug-panel.js renders the three lists -->
+        <div id="panel-debug" class="panel-body hidden">
+          <div class="dv-col">
+            <div class="dv-head">CALL STACK</div>
+            <div id="dbg-stack" class="dv-list"></div>
+          </div>
+          <div class="dv-col">
+            <div class="dv-head">VARIABLES</div>
+            <div id="dbg-vars" class="dv-list"></div>
+          </div>
+          <div class="dv-col">
+            <div class="dv-head">WATCH</div>
+            <input id="dbg-watch-input" type="text" spellcheck="false" placeholder="Add expression (Enter)">
+            <div id="dbg-watch" class="dv-list"></div>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer id="status">
+    <span id="st-mode" class="st-item">debug</span>
+    <span id="st-target" class="st-item">x86_64-windows-gnu</span>
+    <span id="st-lsp" class="st-item">LSP: off</span>
+    <span id="st-counts" class="st-item">&#10005; 0 &#9888; 0</span>
+    <span id="st-build" class="st-item"></span>
+    <span class="st-spacer"></span>
+    <span id="st-pos" class="st-item">Ln 1, Col 1</span>
+    <span class="st-item">UTF-8</span>
+    <span class="st-item">PaskalCPP</span>
+  </footer>
+
+  <!-- Ctrl+T quick pick (src/quickpick.js builds its content) -->
+  <div id="quickpick" class="hidden"></div>
+
+  <!-- Help > About (src/about.js builds its content) -->
+  <div id="about" class="hidden"></div>
+
+  <!-- xterm.js 6.0.0 + addon-fit 0.11.0 + addon-unicode11 0.9.0 (vendor/xterm,
+       UMD): BEFORE Monaco's AMD loader, or they register as AMD modules
+       instead of the globals Terminal / FitAddon / Unicode11Addon -->
+  <script src="vendor/xterm/xterm.js"></script>
+  <script src="vendor/xterm/addon-fit.js"></script>
+  <script src="vendor/xterm/addon-unicode11.js"></script>
+  <!-- Monaco 0.56.0 AMD build, vendored (vendor/monaco/VERSION) -->
+  <script src="vendor/monaco/min/vs/loader.js"></script>
+  <script src="src/pcpp-lang.js"></script>
+  <script src="src/shell.js"></script>
+  <script src="src/explorer.js"></script>
+  <script src="src/lsp-client.js"></script>
+  <script src="src/dap-client.js"></script>
+  <script src="src/terminal.js"></script>
+  <script src="src/lsp-providers.js"></script>
+  <script src="src/quickpick.js"></script>
+  <script src="src/calltree.js"></script>
+  <script src="src/about.js"></script>
+  <script src="src/debug-panel.js"></script>
+  <script src="src/debug.js"></script>
+  <script src="src/renderer.js"></script>
+  <script src="src/boot.js"></script>
+</body>
+</html>

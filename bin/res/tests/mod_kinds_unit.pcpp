@@ -1,0 +1,30 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_kinds_unit.pcpp - the unit mod_kinds.pcpp imports: no begin body, it ends
+  with end. alone, and it emits nothing of its own.
+
+  Nothing to check here: mod_kinds.pcpp checks it (a unit cannot be the main
+  module, so it is never handed to pcpp itself).
+*******************************************************************************/
+
+module unit mod_kinds_unit;
+
+exported routine Answer(): int32;
+begin
+  return 42;
+end;
+
+end.

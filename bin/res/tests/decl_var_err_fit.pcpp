@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_var_err_fit.pcpp - break step of decl_var.pcpp:
+  a local's constant initializer that does not fit its type
+
+  How to check, from repo\bin:
+    pcpp res\tests\decl_var_err_fit.pcpp
+    pcpp res\tests\decl_var_err_fit.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe decl_var_err_fit;
+
+routine Use(): int32;
+var
+  LByte: uint8 = 256; // ERROR SM0200@18
+begin
+  return LByte;
+end;
+
+begin
+  println("{}", Use());
+end.

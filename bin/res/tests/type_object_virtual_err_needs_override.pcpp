@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_virtual_err_needs_override.pcpp - break step of type_object_virtual.pcpp:
+  a method named like an ancestor's virtual method without override (SM0332)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_virtual_err_needs_override.pcpp
+    pcpp res\tests\type_object_virtual_err_needs_override.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_virtual_err_needs_override;
+
+type
+  TA = object
+    virtual method M();
+    begin
+    end;
+  end;
+  TB = object(TA)
+    method M(); // ERROR SM0332@12: 'M' is virtual in 'TA': write 'override method M'
+    begin
+    end;
+  end;
+
+begin
+end.

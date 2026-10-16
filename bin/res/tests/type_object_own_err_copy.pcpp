@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_own_err_copy.pcpp - break step of type_object_own.pcpp:
+  an own copied from a variable: an own is the sole owner (SM0427)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_own_err_copy.pcpp
+    pcpp res\tests\type_object_own_err_copy.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_own_err_copy;
+
+type
+  TPlain = object
+    X: int32;
+  end;
+
+routine Use();
+var
+  LA: own TPlain;
+  LB: own TPlain;
+begin
+  LA := own TPlain;
+  LB := LA; // ERROR SM0427@9: an own is the sole owner of its object
+end;
+
+begin
+end.

@@ -1,0 +1,73 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_linklibrary.pcpp - Directive compliance: @linklibrary
+
+  @linklibrary "<name>"; links a library by its NAME (m, user32), as the
+  system linker finds it; it is never a path (BNF.md sec 2). A path separator,
+  a drive colon or a library file's suffix (.a .lib .so .dll) is an error.
+  @linklibrary may be given more than once, the same name twice is harmless,
+  and an imported unit's @linklibrary adds to the one build.
+
+  This program links winmm on Windows (a system library zig does not link by
+  default: without it the call to timeGetTime fails to link) and calls it.
+  Its unit dir_linklibrary_unit.pcpp names lib_plain (built by lib_plain.pcpp)
+  with its own @linklibrary and @addlibrarypath; the program calls lib_plain
+  through the unit. Linux has no system library to show here: glibc's m, dl,
+  pthread, rt and util are part of libc, linked with or without their name.
+
+  How to check, from repo\bin (lib_plain.pcpp's two build commands first):
+    pcpp res\tests\dir_linklibrary.pcpp -r
+    pcpp res\tests\dir_linklibrary.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT windows:
+    winmm: timeGetTime() linked and called
+    lib_plain_add(2, 3) through the unit = 5
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXPECT linux:
+    lib_plain_add(2, 3) through the unit = 5
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The winmm line is Windows only: winmm is a Windows library.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // ERROR / WARN / HINT comment on its marked line says,
+  and nothing else:
+    dir_linklibrary_err_path.pcpp     a path, not a name
+    dir_linklibrary_err_file.pcpp     a library file's name (winmm.lib)
+    dir_linklibrary_err_nolink.pcpp   this program without @linklibrary "winmm"
+                                      (Windows only: the call fails to link)
+*******************************************************************************/
+
+module exe dir_linklibrary;
+@ifndef TARGET_X86_64_LINUX_GNU
+@linklibrary "winmm";
+@linklibrary "winmm";
+@endif
+import dir_linklibrary_unit;
+
+@ifndef TARGET_X86_64_LINUX_GNU
+routine clink timeGetTime(): uint32; external;
+
+var
+  GTicks: uint32;
+@endif
+
+begin
+@ifndef TARGET_X86_64_LINUX_GNU
+  GTicks := timeGetTime();
+  println("winmm: timeGetTime() linked and called");
+@endif
+  println("lib_plain_add(2, 3) through the unit = {}", dir_linklibrary_unit.Add(2, 3));
+end.

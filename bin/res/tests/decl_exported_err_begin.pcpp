@@ -1,0 +1,29 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_exported_err_begin.pcpp - break step of decl_exported.pcpp:
+  'exported' with nothing after it but the main block
+
+  How to check, from repo\bin:
+    pcpp res\tests\decl_exported_err_begin.pcpp
+    pcpp res\tests\decl_exported_err_begin.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe decl_exported_err_begin;
+
+exported
+begin // ERROR PR0024@1
+end.

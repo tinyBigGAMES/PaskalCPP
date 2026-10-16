@@ -1,0 +1,85 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_runtime_faults.pcpp - Build-kind compliance: faults caught by a guard
+
+  A guard catches a hardware fault as it catches a raise (research\runtime\
+  api.md): a nil dereference is exccode 3, a div by zero 2, the lowest
+  int64 div -1 5, a stack overflow 4 (caught, and caught again: the guard
+  page is re-armed); the program goes on after each. The same on both
+  targets.
+
+  How to check, from repo\bin:
+    pcpp res\tests\exe_runtime_faults.pcpp -r
+    pcpp res\tests\exe_runtime_faults.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    nil 3 Access violation
+    div 2 Divide by zero
+    overflow 5 Numeric overflow
+    stack 4 Stack overflow
+    stack again 4 Stack overflow
+    still running
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+*******************************************************************************/
+
+module exe exe_runtime_faults;
+
+var
+  LP: ptr to int32;
+  LN: int64;
+  LZero: int64;
+  LLow: int64;
+  LMinus: int64;
+
+routine Deep(AN: int64): int64;
+begin
+  return Deep(AN + 1) + 1;
+end;
+
+begin
+  LP := nil;
+  guard
+    LN := LP^;
+  except
+    println("nil {} {}", exccode(), excmsg());
+  end;
+  LZero := 0;
+  guard
+    LN := 10 div LZero;
+  except
+    println("div {} {}", exccode(), excmsg());
+  end;
+  LLow := -9223372036854775807;
+  LLow := LLow - 1;
+  LMinus := -1;
+  guard
+    LN := LLow div LMinus;
+  except
+    println("overflow {} {}", exccode(), excmsg());
+  end;
+  guard
+    LN := Deep(0);
+  except
+    println("stack {} {}", exccode(), excmsg());
+  end;
+  guard
+    LN := Deep(0);
+  except
+    println("stack again {} {}", exccode(), excmsg());
+  end;
+  println("still running");
+end.

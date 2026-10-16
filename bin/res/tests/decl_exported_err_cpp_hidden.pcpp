@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_exported_err_cpp_hidden.pcpp - break step of decl_exported.pcpp:
+  verbatim C++ naming GStep: not exported, so not in the unit's header (clang's error)
+
+  How to check, from repo\bin:
+    pcpp res\tests\decl_exported_err_cpp_hidden.pcpp
+    pcpp res\tests\decl_exported_err_cpp_hidden.pcpp -t x86_64-linux-gnu
+  The marked line reports that code (clang's, through the build);
+  nothing else is reported.
+*******************************************************************************/
+
+module exe decl_exported_err_cpp_hidden;
+
+import decl_exported_unit;
+
+begin
+  println("{}", cpp("::pcpp_m_decl_exported_unit::GStep")); // ERROR ZB0016@51
+end.

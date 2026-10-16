@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  cpp_keyword_names.pcpp - C++ integration compliance: C++ names spelled like PaskalCPP keywords
+
+  A C/C++ name spelled like a PaskalCPP keyword (match, until) is reached
+  with :: before it (BNF.md sec 10): ::match(4) calls the C++ function.
+
+  How to check, from repo\bin:
+    pcpp res\tests\cpp_keyword_names.pcpp -r
+    pcpp res\tests\cpp_keyword_names.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    match 5
+    until 9
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+*******************************************************************************/
+
+module exe cpp_keyword_names;
+
+int match(int AValue) { return AValue + 1; }
+int until(int AValue) { return AValue * 3; }
+
+begin
+  println("match {}", ::match(4));
+  println("until {}", ::until(3));
+end.

@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_variadic_err_overload.pcpp - break step of decl_variadic.pcpp:
+  a cpplink variadic routine that shares its name with another routine
+
+  How to check, from repo\bin:
+    pcpp res\tests\decl_variadic_err_overload.pcpp
+    pcpp res\tests\decl_variadic_err_overload.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe decl_variadic_err_overload;
+
+routine Show(...); // ERROR SM0330@1
+begin
+  println("{}", varargs.count);
+end;
+
+routine Show(AN: int32);
+begin
+  println("{}", AN);
+end;
+
+begin
+end.

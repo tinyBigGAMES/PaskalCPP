@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_print_err_record.pcpp - break step of intr_print.pcpp:
+  a record printed (SM0425)
+
+  How to check, from repo\bin:
+    pcpp res\tests\intr_print_err_record.pcpp
+    pcpp res\tests\intr_print_err_record.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe intr_print_err_record;
+
+type
+  TP = record
+    X: int32;
+  end;
+
+var
+  LR: TP;
+
+begin
+  println("{}", LR); // ERROR SM0425@17: 'TP' cannot be printed
+end.

@@ -1,0 +1,148 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_overload.pcpp - Declaration compliance: routine overloads
+
+  Routines of one name in one scope are overloads when their parameter
+  TYPES differ: the count, or a type (BNF.md sec 3). Parameter names,
+  var / const, linkage and the return type make no overload (the break
+  steps below). A call considers only the overloads that take its
+  arguments by PaskalCPP's implicit conversions (BNF.md sec 6, no hidden
+  conversions); among those, C++'s ranking picks.
+  - Kind by type: bool, string, int32, int64. Kind("text") calls the string
+    one: a string literal never becomes a bool (C++ alone would pick bool).
+    Kind(LI64) calls the int64 one: int64 does not narrow to int32. Kind(5)
+    and Kind(LI16) are taken by int32 and int64: C++ picks int32.
+  - A C/C++ value is taken by every overload: C++ picks (int32 for a C++ 7).
+  - Sum by count: two or three parameters.
+  - Bump by the type of a var parameter: int32 or string, both changed.
+  - Pair: one overload is declared forward first; the forward and its full
+    declaration are one overload, the string one another (with its own
+    return type: len gives an int64).
+  - decl_overload_unit.Show: an imported overload set, qualified (mod_import).
+  An overloaded clink routine gets C++ linkage and a warning: decl_linkage.
+
+  How to check, from repo\bin:
+    pcpp res\tests\decl_overload.pcpp -r
+    pcpp res\tests\decl_overload.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    Kind(true) = bool
+    Kind("text") = string
+    Kind(5) = int32
+    Kind(LI16) = int32
+    Kind(LI64) = int64
+    Kind(cpp("7")) = int32
+    Sum(1, 2) = 3
+    Sum(1, 2, 3) = 6
+    Bump: 8 go!
+    Pair(3) = 6
+    Pair("ab") = 2
+    Show(1) = unit int32
+    Show("s") = unit string
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  Both targets print the same; the [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // ERROR comment on its marked line says, and nothing else:
+    decl_overload_err_same_types.pcpp    two routines with the same parameters
+    decl_overload_err_names.pcpp         the same types, other parameter names
+    decl_overload_err_return.pcpp        the same parameters, another return type
+    decl_overload_err_var.pcpp           the same type, one parameter var
+    decl_overload_err_const.pcpp         the same type, one parameter const
+    decl_overload_err_none.pcpp          a call no overload takes
+    decl_overload_err_not_routine.pcpp   a var and a routine of one name
+    decl_overload_err_unqualified.pcpp   an import's overloads do not join the module's own
+*******************************************************************************/
+
+module exe decl_overload;
+
+import decl_overload_unit;
+
+routine Kind(AB: bool): string;
+begin
+  return "bool";
+end;
+
+routine Kind(AS: string): string;
+begin
+  return "string";
+end;
+
+routine Kind(AN: int32): string;
+begin
+  return "int32";
+end;
+
+routine Kind(AN: int64): string;
+begin
+  return "int64";
+end;
+
+routine Sum(AA: int32; AB: int32): int32;
+begin
+  return AA + AB;
+end;
+
+routine Sum(AA: int32; AB: int32; AC: int32): int32;
+begin
+  return AA + AB + AC;
+end;
+
+routine Bump(var AN: int32);
+begin
+  AN := AN + 1;
+end;
+
+routine Bump(var AS: string);
+begin
+  AS := AS + "!";
+end;
+
+forward routine Pair(AN: int32): int32;
+
+routine Pair(AS: string): int64;
+begin
+  return len(AS);
+end;
+
+routine Pair(AN: int32): int32;
+begin
+  return AN * 2;
+end;
+
+var
+  LI16: int16 = 3;
+  LI64: int64 = 9;
+  LN: int32 = 7;
+  LS: string = "go";
+
+begin
+  println("Kind(true) = {}", Kind(true));
+  println("Kind(\"text\") = {}", Kind("text"));
+  println("Kind(5) = {}", Kind(5));
+  println("Kind(LI16) = {}", Kind(LI16));
+  println("Kind(LI64) = {}", Kind(LI64));
+  println("Kind(cpp(\"7\")) = {}", Kind(cpp("7")));
+  println("Sum(1, 2) = {}", Sum(1, 2));
+  println("Sum(1, 2, 3) = {}", Sum(1, 2, 3));
+  Bump(LN);
+  Bump(LS);
+  println("Bump: {} {}", LN, LS);
+  println("Pair(3) = {}", Pair(3));
+  println("Pair(\"ab\") = {}", Pair("ab"));
+  println("Show(1) = {}", decl_overload_unit.Show(1));
+  println("Show(\"s\") = {}", decl_overload_unit.Show("s"));
+end.

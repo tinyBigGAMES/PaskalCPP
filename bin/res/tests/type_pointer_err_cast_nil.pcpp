@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_pointer_err_cast_nil.pcpp - break step of type_pointer.pcpp:
+  nil needs no cast: it converts to every pointer (SM0265)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_pointer_err_cast_nil.pcpp
+    pcpp res\tests\type_pointer_err_cast_nil.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_pointer_err_cast_nil;
+
+var
+  LP: ptr to int32;
+
+begin
+  LP := ptr to int32(nil); // ERROR SM0265@22: 'nil' cannot be cast to 'ptr to int32': a pointer cast takes a pointer that keeps const, or an integer of pointer width
+end.

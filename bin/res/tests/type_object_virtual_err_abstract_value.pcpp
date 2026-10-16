@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_virtual_err_abstract_value.pcpp - break step of type_object_virtual.pcpp:
+  a variable of an abstract object: it has a method with no body (SM0338)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_virtual_err_abstract_value.pcpp
+    pcpp res\tests\type_object_virtual_err_abstract_value.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_virtual_err_abstract_value;
+
+type
+  TA = object
+    virtual method M(); abstract;
+  end;
+
+var
+  GA: TA; // ERROR SM0338@7: 'TA' is abstract ('TA.M' has no body): it cannot be held by value or created
+
+begin
+end.

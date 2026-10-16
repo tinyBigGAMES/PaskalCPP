@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  test_block_err_place.pcpp - break step of test_block.pcpp:
+  a test block before the module's end. (PR0019)
+
+  How to check, from repo\bin:
+    pcpp res\tests\test_block_err_place.pcpp
+    pcpp res\tests\test_block_err_place.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe test_block_err_place;
+
+test "early" // ERROR PR0019@1: test blocks follow the module's end.
+begin
+end;
+
+begin
+end.

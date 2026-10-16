@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_overlay_err_anon_wstring.pcpp - break step of type_overlay.pcpp:
+  an anonymous record in an overlay shares the overlay's storage: it holds no wstring (SM0313)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_overlay_err_anon_wstring.pcpp
+    pcpp res\tests\type_overlay_err_anon_wstring.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_overlay_err_anon_wstring;
+
+type
+  TV = overlay
+    A: int32;
+    record
+      W: wstring; // ERROR SM0313@7: cannot share an overlay's storage
+      N: int16;
+    end;
+  end;
+
+begin
+end.

@@ -1,0 +1,30 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  cpp_placement_err_target.pcpp - break step of cpp_placement.pcpp:
+  cpp takes header or source (PR0015)
+
+  How to check, from repo\bin:
+    pcpp res\tests\cpp_placement_err_target.pcpp
+    pcpp res\tests\cpp_placement_err_target.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe cpp_placement_err_target;
+
+cpp middle; // ERROR PR0015@5: expected header or source after 'cpp', found 'middle'
+
+begin
+end.

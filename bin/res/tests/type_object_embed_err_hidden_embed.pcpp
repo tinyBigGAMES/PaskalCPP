@@ -1,0 +1,43 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_embed_err_hidden_embed.pcpp - break step of type_object_embed.pcpp:
+  a member reached through a hidden embed outside its methods (SM0019)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_embed_err_hidden_embed.pcpp
+    pcpp res\tests\type_object_embed_err_hidden_embed.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_embed_err_hidden_embed;
+
+type
+  TCounter = object
+    Count: int32;
+  end;
+  TBox = object
+    hidden embed C: TCounter;
+  end;
+
+routine Use();
+var
+  LB: TBox;
+begin
+  LB.Count := 1; // ERROR SM0019@6: 'C' is hidden in 'TBox'
+end;
+
+begin
+end.

@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_own_err_target.pcpp - break step of type_object_own.pcpp:
+  own of a type that is no object: own / ref / weak hold an object (SM0358)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_own_err_target.pcpp
+    pcpp res\tests\type_object_own_err_target.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_own_err_target;
+
+routine Use();
+var
+  LI: own int32; // ERROR SM0358@11: own, ref and weak hold an object
+begin
+end;
+
+begin
+end.

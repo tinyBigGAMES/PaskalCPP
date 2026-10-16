@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_embed_err_bare.pcpp - break step of type_object_embed.pcpp:
+  an embed's member named bare in a method: write self.Count (SM0018)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_embed_err_bare.pcpp
+    pcpp res\tests\type_object_embed_err_bare.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_embed_err_bare;
+
+type
+  TCounter = object
+    Count: int32;
+  end;
+  TBox = object
+    embed C: TCounter;
+    method Put();
+    begin
+      Count := 1; // ERROR SM0018@7: write self.Count
+    end;
+  end;
+
+begin
+end.

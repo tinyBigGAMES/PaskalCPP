@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_copydll_dll.pcpp - the dll dir_copydll.pcpp copies beside itself with
+  @copydll and loads at run time: one exported C routine.
+
+  Build it first, from repo\bin (dir_copydll.pcpp names these folders):
+    pcpp res\tests\dir_copydll_dll.pcpp
+    pcpp res\tests\dir_copydll_dll.pcpp -t x86_64-linux-gnu
+  Nothing else to check here: dir_copydll.pcpp checks it.
+*******************************************************************************/
+
+module dll dir_copydll_dll;
+@ifdef TARGET_X86_64_LINUX_GNU
+@outputpath "$P:output/dir_copydll_dll_linux";
+@else
+@outputpath "$P:output/dir_copydll_dll";
+@endif
+
+exported routine clink dir_copydll_twice(AN: int32): int32;
+begin
+  return AN * 2;
+end;
+
+end.

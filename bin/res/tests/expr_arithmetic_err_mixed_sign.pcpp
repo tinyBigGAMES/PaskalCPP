@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_arithmetic_err_mixed_sign.pcpp - break step of expr_arithmetic.pcpp:
+  an int32 added to a uint32 (SM0200 at the int32): the sum is computed in
+  uint32, so -1 would become 4294967295; write int64(LA) + LU or
+  uint32(LA) + LU
+
+  How to check, from repo\bin:
+    pcpp res\tests\expr_arithmetic_err_mixed_sign.pcpp
+    pcpp res\tests\expr_arithmetic_err_mixed_sign.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe expr_arithmetic_err_mixed_sign;
+
+var
+  LA: int32 = -1;
+  LU: uint32 = 1;
+  LR: int64;
+
+begin
+  LR := LA + LU; // ERROR SM0200@9: 'int32' does not convert implicitly to 'uint32'
+end.

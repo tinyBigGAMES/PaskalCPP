@@ -1,0 +1,86 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lsp_hover.pcpp - LSP compliance: hover
+
+  Resting the mouse on a name shows its declaration in a code box. Names
+  from another file also show that file's name under the box.
+
+  How to check: hover each name a CHECK line names (on the code line below
+  it) and compare the box with the text after "->".
+  Needs lsp_unit.pcpp in the same folder.
+*******************************************************************************/
+
+module exe lsp_hover;
+
+import lsp_unit;
+
+#include <cstdio>
+
+type
+  TPoint = record
+    X: int32;
+    Y: int32;
+  end;
+
+const
+  KLimit: int32 = 10;
+
+var
+  GPoint: TPoint;
+  GTotal: int32;
+
+routine Add(const AA: int32; const AB: int32): int32;
+begin
+  // CHECK: AA -> const AA: int32
+  return AA + AB;
+end;
+
+routine Show(const AN: int32);
+begin
+end;
+
+routine Show(const AS: string);
+begin
+end;
+
+begin
+  // CHECK: GPoint -> var GPoint: TPoint
+  // CHECK: X      -> X: int32 (a field, reached through GPoint.)
+  GPoint.X := 1;
+
+  // CHECK: Add    -> routine Add(const AA: int32; const AB: int32): int32
+  // CHECK: KLimit -> const KLimit: int32 = 10
+  GTotal := Add(KLimit, GPoint.X);
+
+  // CHECK: lsp_unit -> module lsp_unit, and *lsp_unit.pcpp* below the box
+  // CHECK: Twice    -> routine Twice(const AX: int32): int32, its doc
+  //                    ("Doubles a value." ...), and *lsp_unit.pcpp*
+  GTotal := lsp_unit.Twice(GTotal);
+
+  // CHECK: Show -> routine Show(const AN: int32) only (an overload set: only
+  //                that routine takes an int32, so the call is that one)
+  Show(GTotal);
+
+  // CHECK: Show -> BOTH routines Show (a C++ value: every routine Show takes
+  //                it, so which one is called is C++'s, and every member is listed)
+  Show(cpp("1"));
+
+  // CHECK: puts -> nothing (a C/C++ name: C++ is clang's, not PaskalCPP's)
+  puts("hello");
+
+  // CHECK: TPoint (in the type block above) -> type TPoint = record
+  // CHECK: GTotal on its own declaration line above -> var GTotal: int32
+end.

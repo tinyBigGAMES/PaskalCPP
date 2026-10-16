@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_choices_err_bit_ordinals.pcpp - break step of type_choices.pcpp:
+  a choices bitfield holds every number as a signed value: 2 bits hold -2 .. 1, cBlue is 2 (SM0316)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_choices_err_bit_ordinals.pcpp
+    pcpp res\tests\type_choices_err_bit_ordinals.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_choices_err_bit_ordinals;
+
+type
+  TColor = choices(cRed, cGreen, cBlue);
+
+  TS = record
+    Col: TColor : 2; // ERROR SM0316@19: does not hold the ordinals of 'TColor' as signed values
+  end;
+
+begin
+end.

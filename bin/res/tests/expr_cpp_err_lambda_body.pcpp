@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_cpp_err_lambda_body.pcpp - break step of expr_cpp.pcpp:
+  a lambda with no { } body (PR0044)
+
+  How to check, from repo\bin:
+    pcpp res\tests\expr_cpp_err_lambda_body.pcpp
+    pcpp res\tests\expr_cpp_err_lambda_body.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe expr_cpp_err_lambda_body;
+
+var
+  LN: int32;
+
+begin
+  LN := [](int a); // ERROR PR0044@18: a lambda needs a { ... } body
+end.

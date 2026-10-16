@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_array_err_too_large_element.pcpp - break step of type_array.pcpp:
+  the elements together: 2^58 int32 are 2^60 bytes (SM0277)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_array_err_too_large_element.pcpp
+    pcpp res\tests\type_array_err_too_large_element.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_array_err_too_large_element;
+
+var
+  LA: array[0..288230376151711743] of int32; // ERROR SM0277@7: 'array[0..288230376151711743] of int32' is too large: a type holds at most 1152921504606846975 bytes
+
+begin
+end.

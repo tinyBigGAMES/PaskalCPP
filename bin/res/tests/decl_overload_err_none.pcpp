@@ -1,0 +1,43 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_overload_err_none.pcpp - break step of decl_overload.pcpp:
+  a call no overload takes: an int32 is no bool and no string
+
+  How to check, from repo\bin:
+    pcpp res\tests\decl_overload_err_none.pcpp
+    pcpp res\tests\decl_overload_err_none.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe decl_overload_err_none;
+
+routine Kind(AB: bool): string;
+begin
+  return "bool";
+end;
+
+routine Kind(AS: string): string;
+begin
+  return "string";
+end;
+
+var
+  LN: int32 = 5;
+  LS: string;
+
+begin
+  LS := Kind(LN); // ERROR SM0402@9: no overload of 'Kind' takes (int32)
+end.

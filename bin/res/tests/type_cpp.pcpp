@@ -1,0 +1,138 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_cpp.pcpp - Type compliance: C++ types written as C++ spells them
+
+  Any C++ type is a type expr (BNF.md sec 4 cpp type): fundamentals and
+  their combinations (unsigned int, short, long long, double, auto), cv
+  qualifiers before or after (const int, int const, volatile int), * with
+  its own cv (int* const), a reference last (int& and int&& parameters, a
+  const std::string& parameter), qualified names with a leading :: (::std::
+  size_t), template arguments holding a type, a constant or a C++ type id
+  (std::vector<std::vector<int>> with >> closing two, std::array<int, 3>,
+  std::function<int(int)>), an elaborated key (struct tm) and decltype(...).
+  PaskalCPP values and routines move into them by C++'s rules (a routine
+  into a std::function, nil into a pointer); a C++ mistake inside one is
+  clang's (type_alias_err_unknown), a mistake in its shape is the parser's
+  (the break steps).
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_cpp.pcpp -r
+    pcpp res\tests\type_cpp.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    fundamentals 4 7 -3 9000000000 18000000000 2.5
+    cv 6 8 5
+    pointers hi true
+    nested 2
+    function 10
+    decltype 3
+    elaborated 126
+    qualified 11
+    template 3 2
+    auto 12
+    references 5 5 3
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // ERROR comment on its marked line says, and nothing else:
+    type_cpp_err_cv_repeated.pcpp
+      one cv qualifier written twice in one slot (PR0029)
+    type_cpp_err_ref_not_last.pcpp
+      a * after a reference: & or && stands last and once (PR0030)
+    type_cpp_err_template_open.pcpp
+      template arguments never closed by > (PR0031)
+    type_cpp_err_elaborated.pcpp
+      struct with no name after it (PR0036)
+    type_cpp_err_decltype.pcpp
+      decltype with no ( ... ) after it (PR0037)
+    type_cpp_err_decltype_open.pcpp
+      decltype( never closed (PR0063 at its "(")
+    type_cpp_err_template_group_open.pcpp
+      a ( inside template arguments never closed (PR0063 at it)
+*******************************************************************************/
+
+module exe type_cpp;
+
+#include <array>
+#include <cstddef>
+#include <ctime>
+#include <functional>
+#include <string>
+#include <vector>
+
+type
+  TNested = std::vector<std::vector<int>>;
+  TFn = std::function<int(int)>;
+
+routine Twice(AN: int32): int32;
+begin
+  return AN * 2;
+end;
+
+routine Bump(AV: int&);
+begin
+  AV := AV + 1;
+end;
+
+routine Take(AV: int&&): int32;
+begin
+  return int32(AV);
+end;
+
+routine Len(AS: const std::string&): int64;
+begin
+  return int64(AS.size());
+end;
+
+var
+  LI: int = 4;
+  LU: unsigned int = 7;
+  LS: short = -3;
+  LLL: long long = 9000000000;
+  LULL: unsigned long long = 18000000000;
+  LD: double = 2.5;
+  LCI: const int = 6;
+  LIC: int const = 8;
+  LVol: volatile int = 5;
+  LStr: const char* = "hi";
+  LPC: int* const = nil;
+  LNest: TNested;
+  LFn: TFn;
+  LDt: decltype(1 + 2) = 3;
+  LTm: struct tm;
+  LSz: ::std::size_t = 11;
+  LArr: std::array<int, 3>;
+  LAuto: auto = 12;
+
+begin
+  println("fundamentals {} {} {} {} {} {}", LI, LU, LS, LLL, LULL, LD);
+  println("cv {} {} {}", LCI, LIC, int32(LVol));
+  println("pointers {} {}", LStr, LPC = nil);
+  LNest.resize(2);
+  println("nested {}", LNest.size());
+  LFn := Twice;
+  println("function {}", LFn(5));
+  println("decltype {}", LDt);
+  LTm.tm_year := 126;
+  println("elaborated {}", LTm.tm_year);
+  println("qualified {}", LSz);
+  LArr.fill(2);
+  println("template {} {}", LArr.size(), LArr.front());
+  println("auto {}", LAuto);
+  Bump(LI);
+  println("references {} {} {}", LI, Take(5), Len("abc"));
+end.

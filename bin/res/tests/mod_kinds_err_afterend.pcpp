@@ -1,0 +1,29 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_kinds_err_afterend.pcpp - break step of mod_kinds.pcpp: text after the
+  module's end. (only test blocks may follow it)
+
+  How to check, from repo\bin:
+    pcpp res\tests\mod_kinds_err_afterend.pcpp
+    pcpp res\tests\mod_kinds_err_afterend.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe mod_kinds_err_afterend;
+
+begin
+end.
+leftover; // ERROR PR0020@1

@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_predefined_unit.pcpp - the unit dir_predefined.pcpp imports: its own
+  BUILD_ symbol is BUILD_UNIT (the predefined symbols are per file).
+
+  Nothing to check here: dir_predefined.pcpp checks it.
+*******************************************************************************/
+
+module unit dir_predefined_unit;
+
+exported routine ShowKind();
+begin
+@ifdef BUILD_UNIT
+  println("in the unit, BUILD_UNIT: defined");
+@else
+  println("in the unit, BUILD_UNIT: not defined");
+@endif
+@ifdef BUILD_EXE
+  println("in the unit, BUILD_EXE: defined");
+@else
+  println("in the unit, BUILD_EXE: not defined");
+@endif
+end;
+
+end.

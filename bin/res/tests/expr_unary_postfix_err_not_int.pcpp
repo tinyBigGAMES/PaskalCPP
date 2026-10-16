@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_unary_postfix_err_not_int.pcpp - break step of expr_unary_postfix.pcpp:
+  not on an int32 (SM0250)
+
+  How to check, from repo\bin:
+    pcpp res\tests\expr_unary_postfix_err_not_int.pcpp
+    pcpp res\tests\expr_unary_postfix_err_not_int.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe expr_unary_postfix_err_not_int;
+
+var
+  LN: int32;
+
+begin
+  LN := 1;
+  if not LN then // ERROR SM0250@6: operator 'not' does not take
+  end;
+end.

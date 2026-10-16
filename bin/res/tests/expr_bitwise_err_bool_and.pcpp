@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_bitwise_err_bool_and.pcpp - break step of expr_bitwise.pcpp:
+  & on two bools (SM0250): the symbols are bitwise and take integers; the
+  logical words are and / or / not (xor takes two bools as well)
+
+  How to check, from repo\bin:
+    pcpp res\tests\expr_bitwise_err_bool_and.pcpp
+    pcpp res\tests\expr_bitwise_err_bool_and.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe expr_bitwise_err_bool_and;
+
+var
+  LB: bool = true;
+  LC: bool = false;
+
+begin
+  LB := LB & LC; // ERROR SM0250@9: operator '&' does not take 'bool' and 'bool'
+end.

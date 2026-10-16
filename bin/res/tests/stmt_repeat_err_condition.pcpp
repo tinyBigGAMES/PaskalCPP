@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_repeat_err_condition.pcpp - break step of stmt_repeat.pcpp:
+  an int32 until condition: a condition is bool (SM0263)
+
+  How to check, from repo\bin:
+    pcpp res\tests\stmt_repeat_err_condition.pcpp
+    pcpp res\tests\stmt_repeat_err_condition.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe stmt_repeat_err_condition;
+
+var
+  LN: int32;
+
+begin
+  LN := 1;
+  repeat
+    LN := 0;
+  until LN; // ERROR SM0263@9: a condition is bool
+end.

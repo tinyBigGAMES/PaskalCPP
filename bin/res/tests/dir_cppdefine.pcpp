@@ -1,0 +1,58 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_cppdefine.pcpp - Directive compliance: @cppdefine / @cppundef
+
+  @cppdefine "NAME"; / @cppdefine "NAME" "VALUE"; / @cppundef "NAME"; set a C
+  preprocessor macro (clang's -DNAME, -DNAME=VALUE, -UNAME) for every
+  translation unit of the build: the emitted C++, the runtime and every
+  @addsourcefile file (BNF.md sec 2). C/C++ #if / #ifdef see them; PaskalCPP's
+  own @define / @ifdef do not (those are this file's conditional symbols).
+  dir_cppdefine_c.c #errors unless DIR_CPPDEF_ON is defined and returns
+  DIR_CPPDEF_V; the second println reads DIR_CPPDEF_V in the emitted C++.
+
+  How to check, from repo\bin:
+    pcpp res\tests\dir_cppdefine.pcpp -r
+    pcpp res\tests\dir_cppdefine.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    from C: DIR_CPPDEF_V = 7
+    from the emitted C++: DIR_CPPDEF_V = 7
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  Both targets print the same; the [Heap] line is the debug build's heap report.
+  CHECK: output\build.zig holds "-DDIR_CPPDEF_ON", "-DDIR_CPPDEF_V=7" and
+  "-UDIR_CPPDEF_GONE" in every addCSourceFiles block's .flags line
+
+  Break it: run each file below the same way; each reports exactly what the
+  // ERROR / WARN / HINT comment on its marked line says, and nothing else:
+    dir_cppdefine_err_conflict.pcpp     a second @cppdefine of DIR_CPPDEF_V, another value
+    dir_cppdefine_err_undef.pcpp        @cppundef of a name @cppdefine sets
+    dir_cppdefine_err_reserved.pcpp     a PCPP_ name (the compiler's and the runtime's)
+    dir_cppdefine_err_name.pcpp         a name that is no C/C++ macro name
+    dir_cppdefine_err_notdefined.pcpp   DIR_CPPDEF_ON missing: clang's #error in its C file
+*******************************************************************************/
+
+module exe dir_cppdefine;
+@cppdefine "DIR_CPPDEF_ON";
+@cppdefine "DIR_CPPDEF_V" "7";
+@cppundef "DIR_CPPDEF_GONE";
+@addsourcefile "$P:res/tests/dir_cppdefine_c.c";
+
+routine clink dir_cppdef_value(): int32; external;
+
+begin
+  println("from C: DIR_CPPDEF_V = {}", dir_cppdef_value());
+  println("from the emitted C++: DIR_CPPDEF_V = {}", cpp("DIR_CPPDEF_V"));
+end.

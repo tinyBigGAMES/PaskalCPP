@@ -1,0 +1,6 @@
+{
+  "name": "editor",
+  "productName": "PaskalCPP Editor",
+  "private": true,
+  "main": "main.js"
+}

@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_array_err_index_outside.pcpp - break step of type_array.pcpp:
+  a constant index lies inside the bounds: 4 is past array[0..3] (SM0276)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_array_err_index_outside.pcpp
+    pcpp res\tests\type_array_err_index_outside.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_array_err_index_outside;
+
+var
+  LA: array[0..3] of int32;
+
+begin
+  LA[4] := 1; // ERROR SM0276@6: index 4 is outside 'array[0..3] of int32' (0..3)
+end.

@@ -1,0 +1,87 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dbg_stepping.pcpp - Debugger compliance: stepping
+
+  Stepping over (n), into (s) and out (finish): over a call, into a routine
+  past its prologue, out to the next line, a recursive call stepped over
+  comes back in the same frame, and a raise inside a guard stops on the
+  except line, then on its first statement.
+
+  How to check, from repo\bin:
+    REPL:   pcpp res\tests\dbg_stepping.pcpp -d   then type each step's words
+    Editor: open res\tests\dbg_stepping.pcpp, F5, then each step's keys
+  Each step: what to type, then "->" what both front-ends show.
+
+  Keys (REPL word = editor key):
+    c = F5 (continue)   n = F10 (over)   s = F11 (into)
+    finish = Shift+F11 (out)   q = Shift+F5 (stop)
+    b N = click the gutter left of line N
+    bt = the CALL STACK   f N = click CALL STACK row N (0 = top)
+    locals = the VARIABLES pane   p X = a WATCH row for X (hover is the same)
+    the program's output and keyboard = the console the REPL runs in /
+    the editor's TERMINAL tab
+
+  Steps:
+   1. (start)          -> stops at 78 (breakpoint)
+   2. n                -> 79: over the call
+   3. s                -> 60 in Twice;  p AV -> 6
+   4. finish           -> 80: out, at the next line's start
+   5. s                -> 65 in Fact;  p AN -> 3
+   6. n                -> 68
+   7. n                -> 69, the same frame:  p AN -> 3
+   8. n                -> 81, back in dbg_stepping: the guard line
+   9. n                -> 82: into the guard's body
+  10. n                -> 83: Boom raised, the except line
+  11. n                -> 84
+  12. n                -> 86
+  13. c                -> prints 7, the program ends
+*******************************************************************************/
+
+module exe dbg_stepping;
+
+var
+  GA: int32;
+
+routine Twice(const AV: int32): int32;
+begin
+  return AV * 2;
+end;
+
+routine Fact(const AN: int32): int32;
+begin
+  if AN <= 1 then
+    return 1;
+  end;
+  return AN * Fact(AN - 1);
+end;
+
+routine Boom();
+begin
+  raisecode(5, "boom");
+end;
+
+begin
+  @breakpoint;
+  GA := Twice(3);
+  GA := Twice(GA);
+  GA := Fact(3);
+  guard
+    Boom();
+  except
+    GA := GA + 1;
+  end;
+  println("{}", GA);
+end.

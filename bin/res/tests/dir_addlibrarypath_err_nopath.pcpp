@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addlibrarypath_err_nopath.pcpp - break step of dir_addlibrarypath.pcpp:
+  lib_plain linked by name with no @addlibrarypath for its folder; the
+  linker cannot find it, and the report points at the @linklibrary naming it
+
+  How to check, from repo\bin:
+    pcpp res\tests\dir_addlibrarypath_err_nopath.pcpp
+    pcpp res\tests\dir_addlibrarypath_err_nopath.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe dir_addlibrarypath_err_nopath;
+@linklibrary "lib_plain"; // ERROR ZB0016@14: unable to find
+
+routine clink lib_plain_add(AA: int32; AB: int32): int32; external;
+
+begin
+  println("lib_plain_add(2, 3) = {}", lib_plain_add(2, 3));
+end.

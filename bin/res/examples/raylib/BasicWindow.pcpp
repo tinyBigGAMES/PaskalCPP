@@ -1,0 +1,42 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  BasicWindow.pcpp - raylib example: opens an 800 x 450 window and draws
+  a line of text until the window is closed.
+==============================================================================*/
+
+module exe BasicWindow;
+
+import
+  raylib;
+
+const
+  CScreenWidth: int32  = 800;
+  CScreenHeight: int32 = 450;
+
+begin
+  InitWindow(CScreenWidth, CScreenHeight, "Raylib Window");
+  SetTargetFPS(60);
+
+  while not WindowShouldClose() do
+    BeginDrawing();
+    ClearBackground(RAYWHITE);
+    DrawText("Congrats! You created your first window!", 190, 200, 20,
+      LIGHTGRAY);
+    EndDrawing();
+  end;
+
+  CloseWindow();
+end.

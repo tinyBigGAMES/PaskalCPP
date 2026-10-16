@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_casts_err_one_arg.pcpp - break step of expr_casts.pcpp:
+  a builtin type cast with two arguments (PR0041)
+
+  How to check, from repo\bin:
+    pcpp res\tests\expr_casts_err_one_arg.pcpp
+    pcpp res\tests\expr_casts_err_one_arg.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe expr_casts_err_one_arg;
+
+var
+  LN: int32;
+
+begin
+  LN := int32(1, 2); // ERROR PR0041@16: takes exactly one argument
+end.

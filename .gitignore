@@ -86,3 +86,4 @@ bin/build.toml
 /bin/res/zig
 bin/warmup.cmd
 /docs/html
+/projects/pcppdev

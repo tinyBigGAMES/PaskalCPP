@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_rules_err_semicolon.pcpp - break step of stmt_rules.pcpp:
+  two expressions in a row with no ; between them (PR0001)
+
+  How to check, from repo\bin:
+    pcpp res\tests\stmt_rules_err_semicolon.pcpp
+    pcpp res\tests\stmt_rules_err_semicolon.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe stmt_rules_err_semicolon;
+
+var
+  LN: int32;
+
+begin
+  LN := 1 // ERROR PR0001: expected
+  LN := 2;
+end.

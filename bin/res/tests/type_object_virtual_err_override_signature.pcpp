@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_virtual_err_override_signature.pcpp - break step of type_object_virtual.pcpp:
+  an override taking other parameter types than the method it overrides (SM0334)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_virtual_err_override_signature.pcpp
+    pcpp res\tests\type_object_virtual_err_override_signature.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_virtual_err_override_signature;
+
+type
+  TA = object
+    virtual method M(AX: int32);
+    begin
+    end;
+  end;
+  TB = object(TA)
+    override method M(AX: int64); // ERROR SM0334@21: 'M' must take the parameters and return the type of 'TA.M' it overrides
+    begin
+    end;
+  end;
+
+begin
+end.

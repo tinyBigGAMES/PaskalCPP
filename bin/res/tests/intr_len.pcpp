@@ -1,0 +1,68 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_len.pcpp - Intrinsic compliance: len
+
+  len(x) (BNF.md sec 7) is the length of a string, a wstring, a string
+  literal or an array (dynamic or static) as an int64: bytes for a string,
+  wide characters for a wstring (a wchar is the target's wchar_t), elements
+  for an array. A literal counts its characters, never a terminator: an
+  escape is one, joined literals are one text.
+
+  How to check, from repo\bin:
+    pcpp res\tests\intr_len.pcpp -r
+    pcpp res\tests\intr_len.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    string 5
+    wstring 4
+    dynamic array 3
+    static array 4
+    literal 4
+    empty 0
+    escape 3
+    joined 4
+    wide literal 4
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // comment on its marked line says, and nothing else:
+    intr_len_err_int.pcpp
+      len of an int32 (SM0409)
+    intr_len_err_value.pcpp
+      len named as a value, not called (SM0423)
+*******************************************************************************/
+
+module exe intr_len;
+
+var
+  LS: string = "hello";
+  LW: wstring = L"wide";
+  LA: array of int32;
+  LF: array[0..3] of int32;
+
+begin
+  setlength(LA, 3);
+  println("string {}", len(LS));
+  println("wstring {}", len(LW));
+  println("dynamic array {}", len(LA));
+  println("static array {}", len(LF));
+  println("literal {}", len("four"));
+  println("empty {}", len(""));
+  println("escape {}", len("a\tb"));
+  println("joined {}", len("ab" "cd"));
+  println("wide literal {}", len(L"wide"));
+end.

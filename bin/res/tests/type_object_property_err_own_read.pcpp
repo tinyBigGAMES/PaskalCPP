@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property_err_own_read.pcpp - break step of type_object_property.pcpp:
+  a read reads its field, never its own property (SM0374)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_property_err_own_read.pcpp
+    pcpp res\tests\type_object_property_err_own_read.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_property_err_own_read;
+
+type
+  TBox = object
+    FN: int32;
+    property N: int32 read
+      begin
+        return self.N; // ERROR SM0374@21: the read of 'N' reads the property again, forever
+      end;
+  end;
+
+begin
+end.

@@ -1,0 +1,64 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lib_plain.pcpp - Build-kind compliance: a lib that does not use the runtime
+
+  A `module lib` is a static library. This one's code never calls into the
+  PaskalCPP runtime (no div / mod, guard, raise, sets, ...), so it ships
+  alone: no startup hook, no pcpp_runtime beside it, and a C program links it
+  with a plain C driver. lib_plain_host.pcpp (PaskalCPP) and lib_plain_host.c
+  (C, another toolchain) are its consumers. lib_runtime.pcpp is the other case.
+  It builds and is not run: lib_plain_host.pcpp holds the output to expect.
+
+  How to check, from repo\bin:
+    pcpp res\tests\lib_plain.pcpp
+    pcpp res\tests\lib_plain.pcpp -t x86_64-linux-gnu
+  CHECK: output\lib_plain\zig-out\lib holds lib_plain.lib and nothing else;
+  output\lib_plain_linux\zig-out\lib holds liblib_plain.a and nothing else.
+  Then lib_plain_host.pcpp (a PaskalCPP program that links it).
+
+  A C program built by another toolchain, a C driver, the lib alone:
+    res\zig\zig.exe cc -target x86_64-windows-gnu res\tests\lib_plain_host.c output\lib_plain\zig-out\lib\lib_plain.lib -o output\lib_plain_c.exe
+    output\lib_plain_c.exe
+    res\zig\zig.exe cc -target x86_64-linux-gnu res\tests\lib_plain_host.c output\lib_plain_linux\zig-out\lib\liblib_plain.a -o output\lib_plain_c
+    wsl ./output/lib_plain_c
+  CHECK: both print   from C: lib_plain_add(2, 3) = 5
+
+  Break it (by hand, one step at a time, undo each before the next):
+    1. in this file, "AA + AB" -> "AA div AB", then build it (windows) and run
+       the C program steps (windows) again.
+       CHECK: the build prints "Publishing pcpp_runtime.lib to ...output/lib_plain/zig-out/lib..."
+       and pcpp_runtime.lib now sits beside lib_plain.lib (div calls the runtime);
+       the C link fails: lld-link: error: undefined symbol: pcpp::init(int, char**)
+       (a runtime-using lib needs pcpp_runtime and a C++ driver: lib_runtime.pcpp).
+       Undo: restore the line and build it (windows) again.
+       CHECK: it prints "Removed ...output/lib_plain/zig-out/lib/pcpp_runtime.lib: this
+       lib no longer uses the runtime" and lib_plain.lib is alone again
+    2. lib_plain_host_err_nolink.pcpp: the host without its @linklibrary line
+*******************************************************************************/
+
+module lib lib_plain;
+@ifdef TARGET_X86_64_LINUX_GNU
+@outputpath "$P:output/lib_plain_linux";
+@else
+@outputpath "$P:output/lib_plain";
+@endif
+
+exported routine clink lib_plain_add(AA: int32; AB: int32): int32;
+begin
+  return AA + AB;
+end;
+
+end.

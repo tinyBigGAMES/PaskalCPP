@@ -1,0 +1,48 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_args.pcpp - Build-kind compliance: program arguments
+
+  Everything after -- on pcpp's command line is the program's (pcpp reads
+  nothing after it, so -o and --lsp here are arguments, not options), split
+  as the C runtime splits a command line: quotes group words, \" is a quote.
+  paramcount() counts them, paramstr(i) reads one; the same on both targets.
+
+  How to check, from repo\bin:
+    pcpp res\tests\exe_args.pcpp -r -- one "two words" "a\"b" -o --lsp
+    pcpp res\tests\exe_args.pcpp -r -t x86_64-linux-gnu -- one "two words" "a\"b" -o --lsp   (runs in WSL)
+  EXPECT:
+    count 5
+    param 1 one
+    param 2 two words
+    param 3 a"b
+    param 4 -o
+    param 5 --lsp
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+*******************************************************************************/
+
+module exe exe_args;
+
+var
+  LI: int32;
+
+begin
+  println("count {}", paramcount());
+  for LI := 1 to paramcount() do
+    println("param {} {}", LI, paramstr(LI));
+  end;
+end.

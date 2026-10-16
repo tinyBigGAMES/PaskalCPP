@@ -1,0 +1,30 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_splices_err_space_comment.pcpp - break step of lex_splices.pcpp:
+  the same in a // comment (LX0201, a warning, at the backslash)
+
+  How to check, from repo\bin:
+    pcpp res\tests\lex_splices_err_space_comment.pcpp
+    pcpp res\tests\lex_splices_err_space_comment.pcpp -t x86_64-linux-gnu
+  The marked line reports that warning; nothing else is reported.
+*******************************************************************************/
+
+module exe lex_splices_err_space_comment;
+
+begin
+  // a comment // WARN LX0201@37 // \ 
+  that goes on
+end.

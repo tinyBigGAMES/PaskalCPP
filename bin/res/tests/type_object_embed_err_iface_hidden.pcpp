@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_embed_err_iface_hidden.pcpp - break step of type_object_embed.pcpp:
+  a hidden embedded method fulfilling an interface method (SM0367)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_embed_err_iface_hidden.pcpp
+    pcpp res\tests\type_object_embed_err_iface_hidden.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_embed_err_iface_hidden;
+
+type
+  INamed = interface
+    method Name(): string;
+  end;
+  TA = object
+    hidden method Name(): string;
+    begin
+      return "a";
+    end;
+  end;
+  TBox = object implements INamed // ERROR SM0367@28: an interface member is never hidden
+    embed A: TA;
+  end;
+
+begin
+end.

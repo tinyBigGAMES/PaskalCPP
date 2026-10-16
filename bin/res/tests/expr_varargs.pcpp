@@ -1,0 +1,101 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_varargs.pcpp - Expression compliance: varargs
+
+  varargs.count, next(T), get(I, T), reset() and copy() read the extra
+  arguments of a cpplink variadic (BNF.md sec 6 varargs expr); a varargs
+  local holds a copy with the same members (count is a value, not a call).
+  Every argument travels with its type, checked at run time: a next / get
+  of another type raises code 8, an index past the arguments code 9.
+  Literals pack as int32 (int64 when larger), float64 and string.
+
+  How to check, from repo\bin:
+    pcpp res\tests\expr_varargs.pcpp -r
+    pcpp res\tests\expr_varargs.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    count 2
+    local count 2
+    next 7
+    next seven
+    local next 7
+    local get seven
+    local after reset 7
+    wrong type code 8
+    bad index code 9
+    int32 1
+    int64 5000000000
+    float64 0.5
+    string s
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // comment on its marked line says, and nothing else:
+    expr_varargs_err_value.pcpp
+      a bare varargs used as a value (SM0421)
+    expr_varargs_err_type_module.pcpp
+      a module variable of type varargs (SM0422)
+    expr_varargs_err_local_assign.pcpp
+      a varargs local set from something else than copy() (SM0422)
+    expr_varargs_err_local_shape.pcpp
+      a varargs local's next given a value, not a type (SM0409)
+    expr_varargs_err_count_call.pcpp
+      varargs.count called (SM0424)
+    expr_varargs_err_local_count_call.pcpp
+      a varargs local's count called (SM0424)
+*******************************************************************************/
+
+module exe expr_varargs;
+
+routine Show(...);
+var
+  LCopy: varargs;
+begin
+  println("count {}", varargs.count);
+  LCopy := varargs.copy();
+  println("local count {}", LCopy.count);
+  println("next {}", varargs.next(int32));
+  println("next {}", varargs.next(string));
+  println("local next {}", LCopy.next(int32));
+  println("local get {}", LCopy.get(1, string));
+  LCopy.reset();
+  println("local after reset {}", LCopy.next(int32));
+  guard
+    varargs.reset();
+    println("never {}", varargs.next(string));
+  except
+    println("wrong type code {}", exccode());
+  end;
+  guard
+    println("never {}", varargs.get(5, int32));
+  except
+    println("bad index code {}", exccode());
+  end;
+end;
+
+routine Literals(...);
+begin
+  println("int32 {}", varargs.next(int32));
+  println("int64 {}", varargs.next(int64));
+  println("float64 {}", varargs.next(float64));
+  println("string {}", varargs.next(string));
+end;
+
+begin
+  Show(7, "seven");
+  Literals(1, 5000000000, 0.5, "s");
+end.

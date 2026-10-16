@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_set_err_wchar.pcpp - break step of type_set.pcpp:
+  set of wchar: its size differs by target, its range is written (SM0319)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_set_err_wchar.pcpp
+    pcpp res\tests\type_set_err_wchar.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_set_err_wchar;
+
+type
+  TA = set of wchar; // ERROR SM0319@15: set of wchar: its size differs by target: write set of 0..65535
+
+begin
+end.

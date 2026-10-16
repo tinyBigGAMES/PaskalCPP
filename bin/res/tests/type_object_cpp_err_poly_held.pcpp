@@ -1,0 +1,52 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_cpp_err_poly_held.pcpp - break step of type_object_cpp.pcpp:
+  a copy from a const parameter whose object is polymorphic through its C++ base (SM0428)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_cpp_err_poly_held.pcpp
+    pcpp res\tests\type_object_cpp_err_poly_held.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_cpp_err_poly_held;
+
+struct CNode {
+  virtual ~CNode() = default;
+  virtual int kind() { return 1; }
+};
+
+type
+  TA = object(CNode)
+    N: int32;
+  end;
+  TB = object(TA)
+    M: int32;
+  end;
+
+routine Keep(const AA: TA): int32;
+var
+  LC: TA;
+begin
+  LC := AA; // ERROR SM0428
+  return LC.N;
+end;
+
+var
+  LB: TB;
+begin
+  println("{}", Keep(LB));
+end.

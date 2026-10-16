@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_varargs_err_local_assign.pcpp - break step of expr_varargs.pcpp:
+  a varargs local set from something else than copy() (SM0422)
+
+  How to check, from repo\bin:
+    pcpp res\tests\expr_varargs_err_local_assign.pcpp
+    pcpp res\tests\expr_varargs_err_local_assign.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe expr_varargs_err_local_assign;
+
+routine V(...);
+var
+  LCopy: varargs;
+begin
+  LCopy := varargs.count; // ERROR SM0422@12: set from a copy()
+end;
+
+begin
+  V(1);
+end.

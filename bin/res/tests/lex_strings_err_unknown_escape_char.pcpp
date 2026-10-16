@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_strings_err_unknown_escape_char.pcpp - break step of lex_strings.pcpp:
+  an escape C++ does not know in a character literal (PR0064, a warning:
+  the character is the q)
+
+  How to check, from repo\bin:
+    pcpp res\tests\lex_strings_err_unknown_escape_char.pcpp -r
+    pcpp res\tests\lex_strings_err_unknown_escape_char.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  The marked line reports that warning, once (the build reports nothing
+  more about it), then the program prints:
+  EXPECT:
+    q
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+*******************************************************************************/
+
+module exe lex_strings_err_unknown_escape_char;
+
+begin
+  println("{}", '\q'); // WARN PR0064@17: character literal: unknown escape sequence '\q'
+end.

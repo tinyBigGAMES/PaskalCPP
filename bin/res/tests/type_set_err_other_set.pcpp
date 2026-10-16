@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_set_err_other_set.pcpp - break step of type_set.pcpp:
+  two set types are two types: a set of TColor is no set of 0..15 (SM0200)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_set_err_other_set.pcpp
+    pcpp res\tests\type_set_err_other_set.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_set_err_other_set;
+
+type
+  TColor = choices(cRed, cGreen, cBlue);
+  TS = set of 0..15;
+  TColors = set of TColor;
+
+var
+  LS: TS;
+  LC: TColors;
+  LB: bool;
+
+begin
+  LS := [1];
+  LC := [TColor.cRed];
+  LS := LC; // ERROR SM0200@9: 'TColors' does not convert implicitly to 'TS'
+end.

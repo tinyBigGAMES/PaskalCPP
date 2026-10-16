@@ -1,0 +1,118 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_variadic.pcpp - Declaration compliance: variadic routines
+
+  params = "..." | param { ";" param } [ ";" "..." ] (BNF.md sec 3, sec 6
+  varargs expr). A trailing ... makes a routine variadic; varargs reads the
+  extra arguments.
+  - cpplink (the default): every argument travels with its type. Describe
+    is written with a bare ... (no fixed parameter: a cpplink variadic needs
+    none) and reads count, next, get, reset and copy (a varargs local holds
+    an independent copy, its cursor included). Integer literals pack as
+    int32 (int64 when larger), float literals as float64, string literals
+    as string. Total has a fixed parameter before ; ... and a call with no
+    extra arguments (count 0).
+  - clink: the C convention, so the routine needs a fixed parameter before
+    ... when it has a body (CSum, the count passed by hand) and reads only
+    varargs.next. An external clink routine may be declared with no fixed
+    parameter: decl_variadic_csum is C23 C (decl_variadic_c.c).
+
+  How to check, from repo\bin:
+    pcpp res\tests\decl_variadic.pcpp -r
+    pcpp res\tests\decl_variadic.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    count = 4
+    next int32 = 7
+    next int64 = 5000000000
+    next float64 = 2.5
+    copy next float64 = 2.5
+    next string = text
+    get(1, int64) = 5000000000
+    after reset next int32 = 7
+    copy next string = text
+    Total(100, 1, 2, 3) = 106
+    Total(5) = 5
+    CSum(3, 1, 2, 3) = 6
+    decl_variadic_csum(2, 10, 32) = 42
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  Both targets print the same; the [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // ERROR comment on its marked line says, and nothing else:
+    decl_variadic_err_clink_nofixed.pcpp  a clink variadic with a body and no fixed parameter
+    decl_variadic_err_overload.pcpp       a cpplink variadic sharing its name with a routine
+    decl_variadic_err_outside.pcpp        varargs in a routine that is not variadic
+    decl_variadic_err_clink_count.pcpp    varargs.count in a clink variadic
+*******************************************************************************/
+
+module exe decl_variadic;
+@addsourcefile "$P:res/tests/decl_variadic_c.c";
+
+routine clink decl_variadic_csum(...): int32; external;
+
+routine Describe(...);
+var
+  LCopy: varargs;
+begin
+  println("count = {}", varargs.count);
+  println("next int32 = {}", varargs.next(int32));
+  println("next int64 = {}", varargs.next(int64));
+  LCopy := varargs.copy();
+  println("next float64 = {}", varargs.next(float64));
+  println("copy next float64 = {}", LCopy.next(float64));
+  println("next string = {}", varargs.next(string));
+  println("get(1, int64) = {}", varargs.get(1, int64));
+  varargs.reset();
+  println("after reset next int32 = {}", varargs.next(int32));
+  println("copy next string = {}", LCopy.next(string));
+end;
+
+routine Total(ABase: int32; ...): int64;
+var
+  LT: int64;
+  LI: int32;
+begin
+  LT := ABase;
+  LI := 0;
+  while LI < varargs.count do
+    LT := LT + varargs.get(LI, int32);
+    LI := LI + 1;
+  end;
+  return LT;
+end;
+
+routine clink CSum(ACount: int32; ...): int32;
+var
+  LT: int32;
+  LI: int32;
+begin
+  LT := 0;
+  LI := 0;
+  while LI < ACount do
+    LT := LT + varargs.next(int32);
+    LI := LI + 1;
+  end;
+  return LT;
+end;
+
+begin
+  Describe(7, 5000000000, 2.5, "text");
+  println("Total(100, 1, 2, 3) = {}", Total(100, 1, 2, 3));
+  println("Total(5) = {}", Total(5));
+  println("CSum(3, 1, 2, 3) = {}", CSum(3, 1, 2, 3));
+  println("decl_variadic_csum(2, 10, 32) = {}", decl_variadic_csum(2, 10, 32));
+end.

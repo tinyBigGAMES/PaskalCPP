@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_varargs_err_type_module.pcpp - break step of expr_varargs.pcpp:
+  a module variable of type varargs (SM0422)
+
+  How to check, from repo\bin:
+    pcpp res\tests\expr_varargs_err_type_module.pcpp
+    pcpp res\tests\expr_varargs_err_type_module.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe expr_varargs_err_type_module;
+
+var
+  LV: varargs; // ERROR SM0422@7: is only the type of a variadic routine
+
+begin
+end.

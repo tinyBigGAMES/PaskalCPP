@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_own_err_record.pcpp - break step of type_object_own.pcpp:
+  a record holding a ref: a record is plain data (SM0357)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_own_err_record.pcpp
+    pcpp res\tests\type_object_own_err_record.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_own_err_record;
+
+type
+  TPlain = object
+    X: int32;
+  end;
+  TR = record
+    R: ref TPlain; // ERROR SM0357@8: field 'R': a record or an overlay holds no object
+  end;
+
+begin
+end.

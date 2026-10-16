@@ -1,0 +1,59 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lsp_diagnostics.pcpp - LSP compliance: squiggles while you type
+
+  This file has mistakes ON PURPOSE. The editor checks the text as you type
+  (no build needed) and underlines each mistake. Every CHECK below says
+  which mistake is underlined and where; the Problems list shows the same.
+
+  How to check:
+    1. Open this file. Every line marked CHECK has a red squiggle exactly
+       under the text it names, nowhere else.
+    2. Hover a squiggle: the message is the one the CHECK names.
+    3. Fix one (follow its FIX note) WITHOUT saving: its squiggle disappears
+       within a moment; the others stay.
+    4. Undo the fix: the squiggle comes back.
+    5. The disk counts too: open dll_build.pcpp and leave it open. Delete
+       repo\bin\output\dll_build_dll in Explorer: within about two seconds
+       its @addlibrarypath and @copydll lines are underlined (SM0106 /
+       SM0105), and the delete itself succeeds (nothing holds the folder).
+       Build dll_build_dll.pcpp (Ctrl+B): both squiggles in dll_build.pcpp
+       go, without touching it.
+*******************************************************************************/
+
+module exe lsp_diagnostics;
+
+routine Add(const AA: int32; const AB: int32): int32;
+begin
+  return AA + AB;
+end;
+
+var
+  GCount: int32;
+  // CHECK: the WHOLE declaration below is underlined (from GCount to ';'):
+  //        SM0004 'GCount' is already declared in this scope
+  // FIX:   rename it, e.g. GCount2
+  GCount: int32; // ERROR SM0004@3: is already declared in this scope
+  GText: string;
+
+begin
+  // CHECK: the "x" inside Add(...) is underlined:
+  //        SM0404 argument 1 of 'Add': 'string literal' does not convert
+  //        implicitly to 'int32'
+  // FIX:   pass a number, e.g. Add(1, 2)
+  GText := "x";
+  Add("x", 2); // ERROR SM0404@7: does not convert implicitly to 'int32'
+end.

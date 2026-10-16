@@ -1,0 +1,131 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_predefined.pcpp - Directive compliance: the predefined conditional
+  symbols
+
+  BNF.md sec 2, per file: PASKALCPP always; BUILD_EXE / BUILD_DLL / BUILD_LIB /
+  BUILD_UNIT from the file's own module kind (this exe sees BUILD_EXE, the unit
+  dir_predefined_unit.pcpp it imports sees BUILD_UNIT); TARGET_<ARCH>,
+  TARGET_<OS>, TARGET_<ABI>, the whole triple as zig spells it with - -> _,
+  and TARGET_64BIT for 64-bit pointers. Each symbol below prints defined or
+  not defined.
+
+  How to check, from repo\bin:
+    pcpp res\tests\dir_predefined.pcpp -r
+    pcpp res\tests\dir_predefined.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  The targets differ by design: the TARGET_ symbols name the target.
+  EXPECT windows:
+    PASKALCPP: defined
+    BUILD_EXE: defined
+    BUILD_DLL: not defined
+    BUILD_LIB: not defined
+    BUILD_UNIT: not defined
+    in the unit, BUILD_UNIT: defined
+    in the unit, BUILD_EXE: not defined
+    TARGET_X86_64: defined
+    TARGET_WINDOWS: defined
+    TARGET_LINUX: not defined
+    TARGET_GNU: defined
+    TARGET_X86_64_WINDOWS_GNU: defined
+    TARGET_X86_64_LINUX_GNU: not defined
+    TARGET_64BIT: defined
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXPECT linux:
+    PASKALCPP: defined
+    BUILD_EXE: defined
+    BUILD_DLL: not defined
+    BUILD_LIB: not defined
+    BUILD_UNIT: not defined
+    in the unit, BUILD_UNIT: defined
+    in the unit, BUILD_EXE: not defined
+    TARGET_X86_64: defined
+    TARGET_WINDOWS: not defined
+    TARGET_LINUX: defined
+    TARGET_GNU: defined
+    TARGET_X86_64_WINDOWS_GNU: not defined
+    TARGET_X86_64_LINUX_GNU: defined
+    TARGET_64BIT: defined
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+*******************************************************************************/
+
+module exe dir_predefined;
+import dir_predefined_unit;
+
+begin
+@ifdef PASKALCPP
+  println("PASKALCPP: defined");
+@else
+  println("PASKALCPP: not defined");
+@endif
+@ifdef BUILD_EXE
+  println("BUILD_EXE: defined");
+@else
+  println("BUILD_EXE: not defined");
+@endif
+@ifdef BUILD_DLL
+  println("BUILD_DLL: defined");
+@else
+  println("BUILD_DLL: not defined");
+@endif
+@ifdef BUILD_LIB
+  println("BUILD_LIB: defined");
+@else
+  println("BUILD_LIB: not defined");
+@endif
+@ifdef BUILD_UNIT
+  println("BUILD_UNIT: defined");
+@else
+  println("BUILD_UNIT: not defined");
+@endif
+  dir_predefined_unit.ShowKind();
+@ifdef TARGET_X86_64
+  println("TARGET_X86_64: defined");
+@else
+  println("TARGET_X86_64: not defined");
+@endif
+@ifdef TARGET_WINDOWS
+  println("TARGET_WINDOWS: defined");
+@else
+  println("TARGET_WINDOWS: not defined");
+@endif
+@ifdef TARGET_LINUX
+  println("TARGET_LINUX: defined");
+@else
+  println("TARGET_LINUX: not defined");
+@endif
+@ifdef TARGET_GNU
+  println("TARGET_GNU: defined");
+@else
+  println("TARGET_GNU: not defined");
+@endif
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  println("TARGET_X86_64_WINDOWS_GNU: defined");
+@else
+  println("TARGET_X86_64_WINDOWS_GNU: not defined");
+@endif
+@ifdef TARGET_X86_64_LINUX_GNU
+  println("TARGET_X86_64_LINUX_GNU: defined");
+@else
+  println("TARGET_X86_64_LINUX_GNU: not defined");
+@endif
+@ifdef TARGET_64BIT
+  println("TARGET_64BIT: defined");
+@else
+  println("TARGET_64BIT: not defined");
+@endif
+end.

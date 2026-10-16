@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_primary_err_parent_none.pcpp - break step of expr_primary.pcpp:
+  parent in an object with no parent (SM0012)
+
+  How to check, from repo\bin:
+    pcpp res\tests\expr_primary_err_parent_none.pcpp
+    pcpp res\tests\expr_primary_err_parent_none.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe expr_primary_err_parent_none;
+
+type
+  TBase = object
+    N: int32;
+    method Get(): int32;
+    begin
+      return parent.N; // ERROR SM0012@14: parent: 'TBase' has no parent type
+    end;
+  end;
+
+begin
+end.

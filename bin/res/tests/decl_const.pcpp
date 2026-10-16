@@ -1,0 +1,92 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_const.pcpp - Declaration compliance: const blocks and const declarations
+
+  const name: type = value; (BNF.md sec 3). The type is always written: no
+  type is inferred from the value. A const block holds any number of
+  declarations; a module, a routine body and the main block may hold
+  several. The value is a constant: a literal (a string too), an earlier
+  const, an operator over constants, or opaque C++ (INT_MAX: clang judges
+  it). It converts to the declared type only when no value can be lost
+  (BNF.md sec 6: integer widening, float32 -> float64, a constant that fits:
+  the int32 const CSize into int8). A const stands wherever a constant is
+  required: CLast bounds GList.
+
+  How to check, from repo\bin:
+    pcpp res\tests\decl_const.pcpp -r
+    pcpp res\tests\decl_const.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    CSize = 4, CLast = 3, CWide = 4, CTiny = 4
+    CByte = 255, COn = true
+    CHalf = 0.5, CScale = 1.5
+    CName = PaskalCPP, len(CName) = 9
+    CMax = 2147483647
+    len(GList) = 4
+    Area(5) = 15
+    CLocal = 7
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  Both targets print the same; the [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // ERROR comment on its marked line says, and nothing else:
+    decl_const_err_notype.pcpp   a const with no type (C = 5;)
+    decl_const_err_var.pcpp      a const whose value is a variable
+    decl_const_err_call.pcpp     a const whose value is a routine call
+    decl_const_err_fit.pcpp      a constant that does not fit its type (300 into int8)
+    decl_const_err_negative.pcpp a negative constant for an unsigned type (-1 into uint8)
+    decl_const_err_float.pcpp    a float value for an integer const
+*******************************************************************************/
+
+module exe decl_const;
+
+#include <climits>
+
+const
+  CSize: int32 = 4;
+  CLast: int32 = CSize - 1;
+  CWide: int64 = CSize;
+  CTiny: int8 = CSize;
+  CByte: uint8 = 255;
+  COn: bool = CSize > 2;
+
+const
+  CHalf: float64 = 0.5;
+  CScale: float32 = 1.5;
+  CName: string = "PaskalCPP";
+  CMax: int32 = INT_MAX;
+
+var
+  GList: array[0..CLast] of int32;
+
+routine Area(AN: int32): int32;
+const
+  CSide: int32 = CSize - 1;
+begin
+  return CSide * AN;
+end;
+
+begin
+  println("CSize = {}, CLast = {}, CWide = {}, CTiny = {}", CSize, CLast, CWide, CTiny);
+  println("CByte = {}, COn = {}", CByte, COn);
+  println("CHalf = {}, CScale = {}", CHalf, CScale);
+  println("CName = {}, len(CName) = {}", CName, len(CName));
+  println("CMax = {}", CMax);
+  println("len(GList) = {}", len(GList));
+  println("Area(5) = {}", Area(5));
+  const CLocal: int32 = CSize + CLast;
+  println("CLocal = {}", CLocal);
+end.

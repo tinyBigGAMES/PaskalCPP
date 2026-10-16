@@ -1,0 +1,52 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_cpp_err_poly_assign.pcpp - break step of type_object_cpp.pcpp:
+  an assignment into a var parameter whose object is polymorphic through its C++ base (SM0429)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_object_cpp_err_poly_assign.pcpp
+    pcpp res\tests\type_object_cpp_err_poly_assign.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_object_cpp_err_poly_assign;
+
+struct CNode {
+  virtual ~CNode() = default;
+  virtual int kind() { return 1; }
+};
+
+type
+  TA = object(CNode)
+    N: int32;
+  end;
+  TB = object(TA)
+    M: int32;
+  end;
+
+routine Reset(var AA: TA);
+var
+  LC: TA;
+begin
+  AA := LC; // ERROR SM0429
+end;
+
+var
+  LB: TB;
+begin
+  Reset(LB);
+  println("{}", LB.N);
+end.

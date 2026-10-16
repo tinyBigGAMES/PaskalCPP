@@ -1,0 +1,74 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_casts.pcpp - Expression compliance: casts
+
+  A type cast T(x) for a builtin type or an alias of one, a pointer cast
+  ptr to T(x), a C-style cast (T)x and a named cast static_cast<T>(x)
+  (BNF.md sec 6). A cast always takes one value; (text) is a cast when the
+  text is unmistakably a type, else (a name) is a cast only when an operand
+  follows, so (LN) - 1 is a subtraction.
+
+  How to check, from repo\bin:
+    pcpp res\tests\expr_casts.pcpp -r
+    pcpp res\tests\expr_casts.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    builtin 3 4464 300
+    alias 4464
+    pointer 300
+    c style 3 -1
+    named 3 301
+    paren name 299
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // comment on its marked line says, and nothing else:
+    expr_casts_err_one_arg.pcpp
+      a builtin type cast with two arguments (PR0041)
+    expr_casts_err_named_args.pcpp
+      a named cast with two types (PR0043)
+    expr_casts_err_operand.pcpp
+      a C-style cast with no operand (PR0047)
+    expr_casts_err_alias_args.pcpp
+      an alias cast with two arguments (SM0412)
+    expr_casts_err_type_value.pcpp
+      a type used as a value (SM0269)
+*******************************************************************************/
+
+module exe expr_casts;
+
+type
+  TSmall = int16;
+
+var
+  LF: float64 = 3.75;
+  LN: int32 = 300;
+  LBig: int32 = 70000;
+  LP: ptr to int32;
+  LU: uint64;
+
+begin
+  println("builtin {} {} {}", int32(LF), int16(LBig), float32(LN));
+  println("alias {}", TSmall(LBig));
+  LP := address of LN;
+  LU := uint64(LP);
+  LP := ptr to int32(LU);
+  println("pointer {}", LP^);
+  println("c style {} {}", (int)LF, (int32_t)-1);
+  println("named {} {}", static_cast<int>(LF), static_cast<int32_t>(LN) + 1);
+  println("paren name {}", (LN) - 1);
+end.

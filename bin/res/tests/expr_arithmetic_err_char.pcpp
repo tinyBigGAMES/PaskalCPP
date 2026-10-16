@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_arithmetic_err_char.pcpp - break step of expr_arithmetic.pcpp:
+  a char plus an int32 (SM0250): a char, a wchar and a bool are no numbers
+  (a wchar's width differs per target); write int32(LC) + 1
+
+  How to check, from repo\bin:
+    pcpp res\tests\expr_arithmetic_err_char.pcpp
+    pcpp res\tests\expr_arithmetic_err_char.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe expr_arithmetic_err_char;
+
+var
+  LC: char = 'a';
+  LN: int32;
+
+begin
+  LN := LC + 1; // ERROR SM0250@9: operator '+' does not take 'char' and 'int32'
+end.

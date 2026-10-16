@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_initfinal_b.pcpp - a unit mod_initfinal.pcpp and mod_initfinal_a.pcpp
+  import. Its initialize leaves early with return; (the line after it must
+  never print).
+
+  Nothing to check here: mod_initfinal.pcpp checks it.
+*******************************************************************************/
+
+module unit mod_initfinal_b;
+
+initialize
+var
+  LDone: bool;
+begin
+  println("1. mod_initfinal_b initialize");
+  LDone := true;
+  if LDone then
+    return;
+  end;
+  println("mod_initfinal_b initialize did not return early");
+end;
+
+finalize
+begin
+  println("7. mod_initfinal_b finalize");
+end;
+
+end.

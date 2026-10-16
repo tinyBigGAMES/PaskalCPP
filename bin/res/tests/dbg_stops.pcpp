@@ -1,0 +1,87 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dbg_stops.pcpp - Debugger compliance: where a run stops
+
+  Where a run stops: an @breakpoint, a breakpoint on a code line, on a
+  comment line, on a routine header, inside a loop (once per pass), and an
+  unguarded fault.
+
+  How to check, from repo\bin:
+    REPL:   pcpp res\tests\dbg_stops.pcpp -d   then type each step's words
+    Editor: open res\tests\dbg_stops.pcpp, F5, then each step's keys
+  Each step: what to type, then "->" what both front-ends show.
+
+  Keys (REPL word = editor key):
+    c = F5 (continue)   n = F10 (over)   s = F11 (into)
+    finish = Shift+F11 (out)   q = Shift+F5 (stop)
+    b N = click the gutter left of line N
+    bt = the CALL STACK   f N = click CALL STACK row N (0 = top)
+    locals = the VARIABLES pane   p X = a WATCH row for X (hover is the same)
+    the program's output and keyboard = the console the REPL runs in /
+    the editor's TERMINAL tab
+
+  Steps:
+   1. (start)          -> stops at 75 (breakpoint): the @breakpoint on
+                          74 stops on the next code line
+   2. b 59           -> Square's header line: "(code at line 61)"
+      b 76           -> a comment line: "(code at line 78)"
+      b 82           -> breakpoint inside the loop
+   3. c                -> stops at 61 in Square: past its prologue
+   4. c                -> stops at 78
+   5. c                -> stops at 82;  p GI -> 1
+   6. c                -> stops at 82;  p GI -> 2 (one stop per pass)
+   7. c                -> stops at 82;  p GI -> 3
+   8. c                -> stops at 70 in Fault (exception $C0000005)
+      bt               -> Fault at 70, then dbg_stops at 85
+   9. c                -> the program ends
+*******************************************************************************/
+
+module exe dbg_stops;
+
+var
+  GHits: int32;
+  GSum: int32;
+  GI: int32;
+
+routine Square(const AV: int32): int32;
+var
+  LSquare: int32;
+begin
+  LSquare := AV * AV;
+  return LSquare;
+end;
+
+routine Fault();
+begin
+  println("about to fault");
+  cpp("*(volatile int*)0 = 1");
+end;
+
+begin
+  @breakpoint;
+  GHits := Square(3);
+  // a comment line: a breakpoint here moves to the next code line
+
+  GSum := GHits + 1;
+  GI := 0;
+  while GI < 3 do
+    GI := GI + 1;
+    GSum := GSum + GI;
+  end;
+  println("sum {}", GSum);
+  Fault();
+  println("unreached");
+end.

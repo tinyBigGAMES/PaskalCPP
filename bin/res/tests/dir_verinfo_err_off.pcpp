@@ -1,0 +1,30 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_verinfo_err_off.pcpp - break step of dir_verinfo.pcpp: a @vi* with
+  @addverinfo off (a warning: no version info is stamped, the build goes on)
+
+  How to check, from repo\bin:
+    pcpp res\tests\dir_verinfo_err_off.pcpp
+    pcpp res\tests\dir_verinfo_err_off.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe dir_verinfo_err_off;
+@addverinfo off;
+@viproductname "PaskalCPP Compliance"; // WARN SM0104@1: has no effect without @addverinfo on
+
+begin
+end.

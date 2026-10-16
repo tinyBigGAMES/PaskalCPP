@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_scope_err_before_var.pcpp - break step of decl_scope.pcpp:
+  a module variable used before its declaration
+
+  How to check, from repo\bin:
+    pcpp res\tests\decl_scope_err_before_var.pcpp
+    pcpp res\tests\decl_scope_err_before_var.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe decl_scope_err_before_var;
+
+var
+  GFirst: int32 = GSecond; // ERROR SM0002@19
+  GSecond: int32 = 1;
+
+begin
+  println("{}", GFirst);
+end.

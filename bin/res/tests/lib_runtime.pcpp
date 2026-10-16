@@ -1,0 +1,62 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lib_runtime.pcpp - Build-kind compliance: a lib that uses the runtime
+
+  This lib's code calls into the PaskalCPP runtime (div: checked, raises on a
+  zero divisor), so it gets a startup hook and pcpp builds pcpp_runtime and
+  publishes it beside the lib. A PaskalCPP program that links the lib brings
+  its own runtime and never links pcpp_runtime (lib_runtime_host.pcpp: a raise
+  inside the lib is caught by the program's guard); a C program built by
+  another toolchain links the lib, then pcpp_runtime, through a C++ driver
+  (lib_runtime_host.c). lib_plain.pcpp is the other case.
+  It builds and is not run: lib_runtime_host.pcpp holds the output to expect.
+
+  How to check, from repo\bin:
+    pcpp res\tests\lib_runtime.pcpp
+    pcpp res\tests\lib_runtime.pcpp -t x86_64-linux-gnu
+  CHECK: each prints "Publishing pcpp_runtime.lib to ..." (Linux: libpcpp_runtime.a);
+  output\lib_runtime\zig-out\lib holds lib_runtime.lib and pcpp_runtime.lib;
+  output\lib_runtime_linux\zig-out\lib holds liblib_runtime.a and libpcpp_runtime.a.
+  Then lib_runtime_host.pcpp (a PaskalCPP program that links it).
+
+  A C program built by another toolchain: the lib, then pcpp_runtime, a C++ driver:
+    res\zig\zig.exe c++ -target x86_64-windows-gnu res\tests\lib_runtime_host.c output\lib_runtime\zig-out\lib\lib_runtime.lib output\lib_runtime\zig-out\lib\pcpp_runtime.lib -o output\lib_runtime_c.exe
+    output\lib_runtime_c.exe
+    res\zig\zig.exe c++ -target x86_64-linux-gnu res\tests\lib_runtime_host.c output\lib_runtime_linux\zig-out\lib\liblib_runtime.a output\lib_runtime_linux\zig-out\lib\libpcpp_runtime.a -o output\lib_runtime_c
+    wsl ./output/lib_runtime_c
+  CHECK: both print   from C: lib_rt_div(7, 2) = 3
+  and the [Heap] line (pcpp_runtime was built debug, as the lib), exit code 0.
+
+  Break it (by hand):
+    1. do the C program steps (windows) with "cc" for "c++" and without the
+       pcpp_runtime.lib argument.
+       CHECK: lld-link: error: undefined symbol: pcpp::init(int, char**)
+       (and pcpp::enter, pcpp::raise, libc++ names: the lib calls the runtime)
+*******************************************************************************/
+
+module lib lib_runtime;
+@ifdef TARGET_X86_64_LINUX_GNU
+@outputpath "$P:output/lib_runtime_linux";
+@else
+@outputpath "$P:output/lib_runtime";
+@endif
+
+exported routine clink lib_rt_div(AA: int32; AB: int32): int32;
+begin
+  return AA div AB;
+end;
+
+end.

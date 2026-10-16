@@ -1,0 +1,71 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_linkage.pcpp - Declaration compliance: routine linkage (clink, cpplink)
+
+  routine [clink | cpplink] name ... (BNF.md sec 3). cpplink is the default:
+  C++ linkage, a mangled name (Twice has no linkage word, Tenfold spells
+  cpplink). clink gives a routine C linkage (extern "C", its plain name):
+  decl_linkage_c.c calls decl_linkage_triple by that name, so the program
+  links only because the routine is clink. It is exported, as a routine C
+  code calls must be: a module's other routines are private to its own file.
+  PaskalCPP calls a clink routine as any other, and binds a C routine
+  (decl_linkage_from_c) with clink + external. C has no overloads: an
+  overloaded clink routine gets C++ linkage, with a warning (break step below).
+
+  How to check, from repo\bin:
+    pcpp res\tests\decl_linkage.pcpp -r
+    pcpp res\tests\decl_linkage.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    Twice(21) = 42
+    Tenfold(4) = 40
+    decl_linkage_triple(2) = 6
+    decl_linkage_from_c(5) = 16
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  Both targets print the same; the [Heap] line is the debug build's heap report.
+
+  Break it: run the file below the same way, without -r; it reports exactly
+  what the // WARN comments on its marked lines say, and nothing else:
+    decl_linkage_err_overload.pcpp   two exported clink routines of one name
+                                     (each warned: it gets C++ linkage)
+*******************************************************************************/
+
+module exe decl_linkage;
+@addsourcefile "$P:res/tests/decl_linkage_c.c";
+
+routine Twice(AN: int32): int32;
+begin
+  return AN * 2;
+end;
+
+routine cpplink Tenfold(AN: int32): int32;
+begin
+  return AN * 10;
+end;
+
+exported routine clink decl_linkage_triple(AN: int32): int32;
+begin
+  return AN * 3;
+end;
+
+routine clink decl_linkage_from_c(AN: int32): int32; external;
+
+begin
+  println("Twice(21) = {}", Twice(21));
+  println("Tenfold(4) = {}", Tenfold(4));
+  println("decl_linkage_triple(2) = {}", decl_linkage_triple(2));
+  println("decl_linkage_from_c(5) = {}", decl_linkage_from_c(5));
+end.

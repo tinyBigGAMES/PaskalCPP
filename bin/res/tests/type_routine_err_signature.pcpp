@@ -1,0 +1,47 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_routine_err_signature.pcpp - break step of type_routine.pcpp:
+  a routine whose parameter is int64 into a field of type routine(AN: int32): int32 (SM0200)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_routine_err_signature.pcpp
+    pcpp res\tests\type_routine_err_signature.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_routine_err_signature;
+
+type
+  TOps = record
+    F: routine(AN: int32): int32;
+  end;
+
+routine Double(AN: int32): int32;
+begin
+  return AN * 2;
+end;
+
+routine Wrong(AN: int64): int32;
+begin
+  return 0;
+end;
+
+var
+  LOps: TOps;
+
+begin
+  LOps.F := Wrong; // ERROR SM0200@13: does not convert implicitly
+end.

@@ -1,0 +1,55 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_subsystem_gui.pcpp - Directive compliance: @subsystem gui (the Windows
+  side of dir_subsystem.pcpp), checked by a person
+
+  An exe built with the gui subsystem: Windows starts it without a console
+  window. A gui program has no console, so what it would print is not shown;
+  this one says what it is in a message box instead. On Linux the same
+  directive is a warning (dir_subsystem_err_linux.pcpp), so this file is for
+  Windows only. The testbed builds it but does not run it: what it shows is a
+  window, a person checks that.
+
+  How to check, from repo\bin:
+    pcpp res\tests\dir_subsystem_gui.pcpp -r
+  CHECK: no console window opens; a message box titled "dir_subsystem_gui"
+  says "subsystem: gui"; closing it ends the program
+  CHECK: started from Explorer (output\zig-out\bin\dir_subsystem_gui.exe),
+  the same, and still no console window
+*******************************************************************************/
+
+module exe dir_subsystem_gui;
+@subsystem gui;
+
+#include <windows.h>
+
+// The subsystem field of this program's own PE header, shown in a message box
+static void dir_subsystem_show()
+{
+  const unsigned char* LBase = reinterpret_cast<const unsigned char*>(GetModuleHandleW(nullptr));
+  const IMAGE_DOS_HEADER* LDos = reinterpret_cast<const IMAGE_DOS_HEADER*>(LBase);
+  const IMAGE_NT_HEADERS* LNt = reinterpret_cast<const IMAGE_NT_HEADERS*>(LBase + LDos->e_lfanew);
+  const wchar_t* LText = L"subsystem: other";
+  if (LNt->OptionalHeader.Subsystem == IMAGE_SUBSYSTEM_WINDOWS_CUI)
+    LText = L"subsystem: console";
+  else if (LNt->OptionalHeader.Subsystem == IMAGE_SUBSYSTEM_WINDOWS_GUI)
+    LText = L"subsystem: gui";
+  MessageBoxW(nullptr, LText, L"dir_subsystem_gui", MB_OK);
+}
+
+begin
+  cpp("dir_subsystem_show()");
+end.

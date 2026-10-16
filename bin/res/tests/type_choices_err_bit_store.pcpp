@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_choices_err_bit_store.pcpp - break step of type_choices.pcpp:
+  a choices bitfield holds the value it is given: TColor : 3 holds -4 .. 3, (TColor)4 does not fit (SM0200)
+
+  How to check, from repo\bin:
+    pcpp res\tests\type_choices_err_bit_store.pcpp
+    pcpp res\tests\type_choices_err_bit_store.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe type_choices_err_bit_store;
+
+type
+  TColor = choices(cRed, cGreen, cBlue);
+
+  TS = record
+    Col: TColor : 3;
+  end;
+
+var
+  LS: TS;
+
+begin
+  LS.Col := (TColor)4; // ERROR SM0200@13: 4 does not fit in 'TColor : 3' (-4..3)
+end.
