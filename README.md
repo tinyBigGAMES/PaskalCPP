@@ -173,6 +173,7 @@ PaskalCPP is free and open source under the **Mozilla Public License 2.0**: see 
 
 **PaskalCPP**&#8482; Programming Language
 
-Copyright &copy; 2026-present tinyBigGAMES&#8482; LLC
+Copyright &copy; 2026-present tinyBigGAMES&#8482; LLC  
+All Rights Reserved.
 
 </div>
