@@ -77,3 +77,12 @@ __recovery/
 
 # Castalia statistics file (since XE7 Castalia is distributed with Delphi)
 *.stat
+/bin/output
+bin/build-pcpp.cmd
+bin/build.toml
+/bin/res/editor
+/bin/res/libs/vendor
+/bin/res/warmup
+/bin/res/zig
+bin/warmup.cmd
+/docs/html
