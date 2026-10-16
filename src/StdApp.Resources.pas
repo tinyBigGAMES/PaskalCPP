@@ -1,8 +1,10 @@
 ﻿{===============================================================================
-  StdApp Components™
+  PaskalCPP™ Programming Language
 
   Copyright © 2026-present tinyBigGAMES™ LLC
   All Rights Reserved.
+
+  https://paskalcpp.org
 
   SPDX-License-Identifier: MPL-2.0
 
