@@ -691,6 +691,8 @@ begin
   DoAdd('exe_runtime_faults', 'exe', cmRun, [], [], [], '');
   DoAdd('exe_debug_heap', 'exe', cmRun, [], [], [], '');
   DoAdd('exe_debug_heap_release', 'exe', cmRun, [], [], [], '');
+  DoAdd('exe_release_guards', 'exe', cmRun, [], [], [], '');
+  DoAdd('exe_release_guards_safe', 'exe', cmRun, [], [], [], '');
   DoAdd('dir_outputpath', 'dir', cmRun, [], [], ['', ''], '');
   DoAdd('dir_outputpath_err_twice', 'dir', cmCheck, [], [], [], '');
   DoAdd('dir_outputpath_err_shape', 'dir', cmCheck, [], [], [], '');

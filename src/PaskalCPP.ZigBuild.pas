@@ -2207,6 +2207,12 @@ begin
     begin
       // Required for hardware exception handling
       LFlags.Add('"-fno-sanitize=undefined"');
+      // A store or load through nil stays a real access at every optimize
+      // level, so a guard catches it as exception 3. Without it clang treats a
+      // nil it can prove as undefined and deletes the access or makes it a
+      // trap at release_safe / release_fast: the guard never ran and the
+      // program died (PLAN-RELEASE R2, TODO 13 (a))
+      LFlags.Add('"-fno-delete-null-pointer-checks"');
       // Suppress warning about ((a == b)) in if statements
       LFlags.Add('"-Wno-parentheses-equality"');
       LFlags.Add('"-fdeclspec"');
