@@ -160,7 +160,6 @@ PaskalCPP is free and open source under the **Mozilla Public License 2.0**: see 
 ## 🔗 Links
 
 - 🌐 [Homepage](https://paskalcpp.org)
-- 🧑‍💻 [GitHub](https://github.com/tinyBigGAMES/PaskalCPP)
 - 🐞 [Issues](https://github.com/tinyBigGAMES/PaskalCPP/issues)
 - 📝 [Report an issue](https://paskalcpp.org/report/)
 - 📖 [Documentation](https://paskalcpp.org/docs/index.html)
