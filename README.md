@@ -134,6 +134,32 @@ For contributors who want to change the compiler itself.
 2. Download the latest release and unzip it into the repo folder, so the toolchain, the libraries and the binaries are in place. A build from source needs them too.
 3. Run `bin\build-pcpp.cmd` (it loads RAD Studio's `rsvars.bat` from `Studio\37.0`: edit that line for another install), or open `projects\PaskalCPP.groupproj` in the Delphi IDE and build the `pcpp` and `testbed` projects. This produces `pcpp.exe` and the test runner `testbed.exe` in `bin\`. `bin\testbed.exe -all` runs the test suite and exits 0 when it passes; `bin\testbed.exe -h` lists the rest.
 
+## ❓ FAQ
+
+<details>
+<summary><b>Every build fails with <code>ZB0016</code>: "unable to find zig installation directory"</b></summary>
+
+The bundled Zig toolchain is incomplete. zig needs its `lib` folder beside `zig.exe`, and when `bin\res\zig\lib\std\std.zig` is missing every build fails with this message, which is zig's own.
+
+To fix it:
+
+1. Delete the `bin\res\zig` folder.
+2. Extract the release zip again with 7-Zip or WinRAR.
+3. Check that `bin\res\zig\lib\std\std.zig` exists.
+
+</details>
+
+<details>
+<summary><b>The first build is slow</b></summary>
+
+The first build for a target also compiles the libraries every program links (the C runtime, libc++, libc++abi, libunwind, compiler_rt and the system import libraries) and keeps them in zig's cache, `bin\res\zig\.zig-cache`. That build can take a few minutes.
+
+Later builds for that target reuse them, at another optimize level too, and take seconds. The first build for the other target (x86_64-linux-gnu) compiles its own libraries once in the same way. Deleting `bin\res\zig\.zig-cache` makes the next build of each target slow again.
+
+</details>
+
+More answers are in the [FAQ](https://paskalcpp.org/docs/faq.html).
+
 ## 🤝 Contributing
 
 - **Report bugs** with a minimal `.pcpp` reproduction, the exact command used, and the compiler's diagnostics.
