@@ -202,6 +202,10 @@ resourcestring
   RSZigBuildClearFailed = 'Failed to clear %s: %s';
   { RSZigBuildClearStillPresent }
   RSZigBuildClearStillPresent = 'the directory is still present';
+  { RSZigBuildClearFileStillPresent }
+  RSZigBuildClearFileStillPresent = 'the file is still present';
+  { RSZigBuildClearLink }
+  RSZigBuildClearLink = 'it is a link (junction or symbolic link): nothing deleted through it';
   { RSZigBuildCopyFailed }
   RSZigBuildCopyFailed = 'Failed to copy %s: %s';
   { RSZigBuildLoadFailed }
@@ -1412,6 +1416,44 @@ resourcestring
   RSCmpRemovedStaleRuntime = 'Removed %s: this lib no longer uses the runtime';
   { RSCmpStaleRuntime }
   RSCmpStaleRuntime = 'cannot remove the stale runtime library %s (this lib no longer uses the runtime): %s';
+  { RSCmpRecordFailed }
+  RSCmpRecordFailed = 'cannot write the output record %s: %s (pcpp --clean will refuse this folder)';
+  { RSCmpCleanBadFolder }
+  RSCmpCleanBadFolder = 'cannot use the folder %s: %s';
+  { RSCmpCleanRefused }
+  RSCmpCleanRefused = 'refusing to clean %s: %s';
+  { RSCmpCleanNotFolder }
+  RSCmpCleanNotFolder = 'it is not a folder';
+  { RSCmpCleanIsLink }
+  RSCmpCleanIsLink = 'it is a link (junction or symbolic link)';
+  { RSCmpCleanDriveRoot }
+  RSCmpCleanDriveRoot = 'it is the root of a drive';
+  { RSCmpCleanNoRecord }
+  RSCmpCleanNoRecord = 'it holds no %s, so it is not a pcpp output folder';
+  { RSCmpCleanBadRecord }
+  RSCmpCleanBadRecord = '%s cannot be read: %s';
+  { RSCmpCleanRecordNotJson }
+  RSCmpCleanRecordNotJson = '%s is not a JSON object';
+  { RSCmpCleanRecordFormat }
+  RSCmpCleanRecordFormat = '%s does not have format %d (a newer pcpp may have written it)';
+  { RSCmpCleanRecordKey }
+  RSCmpCleanRecordKey = '%s has no text for "%s"';
+  { RSCmpCleanOtherFolder }
+  RSCmpCleanOtherFolder = '%s was written for another output folder: %s';
+  { RSCmpCleanNoBuildZig }
+  RSCmpCleanNoBuildZig = 'it holds no build.zig';
+  { RSCmpCleanBuildZigBad }
+  RSCmpCleanBuildZigBad = 'its build.zig is not one pcpp wrote (%s)';
+  { RSCmpCleanProjectMismatch }
+  RSCmpCleanProjectMismatch = '%s names the project %s, build.zig names %s';
+  { RSCmpCleanNoGenerated }
+  RSCmpCleanNoGenerated = 'its build.zig builds nothing from this folder''s generated folder';
+  { RSCmpCleanGeneratedElsewhere }
+  RSCmpCleanGeneratedElsewhere = 'its build.zig builds %s, outside this folder';
+  { RSCmpCleanHoldsSource }
+  RSCmpCleanHoldsSource = 'it holds the source %s (the project''s own folder or above it)';
+  { RSCmpCleanTargetLink }
+  RSCmpCleanTargetLink = '%s is a link (junction or symbolic link)';
 
   // PaskalCPP.CLI (PLAN-COMPILER A-CLI)
 
@@ -1546,6 +1588,32 @@ resourcestring
   RSPcCliDebugHostOnExe = 'Error: --host is for a dll; this program is an exe';
   { RSPcCliHelpDap }
   RSPcCliHelpDap = 'Run the debug adapter (DAP) on stdin/stdout (takes no other argument)';
+  { RSPcCliHelpClean }
+  RSPcCliHelpClean = 'Clear a pcpp output folder (default: the current folder), after checks and a y/N question';
+  { RSPcCliHelpDryRun }
+  RSPcCliHelpDryRun = 'With --clean: check and list what would be deleted, delete nothing';
+  { RSPcCliDryRunWithoutClean }
+  RSPcCliDryRunWithoutClean = 'Error: --dry-run is used with --clean only';
+  { RSPcCliCleanWithOption }
+  RSPcCliCleanWithOption = 'Error: --clean builds nothing and takes no %s';
+  { RSPcCliCleanHeader }
+  RSPcCliCleanHeader = 'pcpp output folder %s. To delete:';
+  { RSPcCliCleanTarget }
+  RSPcCliCleanTarget = '  %s  (%d files, %s)';
+  { RSPcCliCleanEmpty }
+  RSPcCliCleanEmpty = 'Nothing to clean in %s.';
+  { RSPcCliCleanDryRun }
+  RSPcCliCleanDryRun = 'Dry run: nothing deleted.';
+  { RSPcCliCleanNotConsole }
+  RSPcCliCleanNotConsole = 'Error: --clean asks a person, and stdin is not a console: nothing deleted';
+  { RSPcCliCleanAsk }
+  RSPcCliCleanAsk = 'Delete these %d? [y/N] ';
+  { RSPcCliCleanNothing }
+  RSPcCliCleanNothing = 'Nothing deleted.';
+  { RSPcCliCleanDone }
+  RSPcCliCleanDone = 'Deleted %d.';
+  { RSPcCliCleanFailed }
+  RSPcCliCleanFailed = 'Clean failed.';
   { RSPcCliDapAlone }
   RSPcCliDapAlone = 'Error: --dap takes no other argument';
 

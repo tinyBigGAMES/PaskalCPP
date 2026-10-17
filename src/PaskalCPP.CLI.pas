@@ -91,6 +91,9 @@ type
     FRunArgs: string;           // after --: the program's arguments, as written
     FHasRunArgs: Boolean;       // -- was given (even with nothing after it)
     FRunHost: TPtyHost;         // owned: the -r program's keyboard and size (DoCreateRunHost)
+    FClean: Boolean;            // --clean: clear a pcpp output folder (FSourceFile = the folder, '' = current)
+    FDryRun: Boolean;           // --dry-run: with --clean, check and list only
+    FBuildFlag: string;         // the first build option on the line ('' = none): --clean takes none
     procedure ShowBanner();
     procedure DoCreateRunHost();
     procedure DoProgress(const AElapsedMs: UInt64);
@@ -107,6 +110,8 @@ type
     procedure DoReportFailure();
     procedure DoCompile();
     procedure DoDebug();
+    procedure DoClean();
+    function DoAskYes(const ACount: Integer): Boolean;
     function DoRunEditor(): Boolean;
     function DoHasFlag(const AFlag: string): Boolean;
     procedure DoServeStdio(const AAloneMessage: string; const AServe: TPCStdioServe);
@@ -313,6 +318,10 @@ begin
     '  ' + RSPcCliHelpLsp);
   TConsole.PrintLn('  ' + COLOR_CYAN + '--dap                      ' + COLOR_RESET +
     '  ' + RSPcCliHelpDap);
+  TConsole.PrintLn('  ' + COLOR_CYAN + '--clean         [<folder>] ' + COLOR_RESET +
+    '  ' + RSPcCliHelpClean);
+  TConsole.PrintLn('  ' + COLOR_CYAN + '--dry-run                  ' + COLOR_RESET +
+    '  ' + RSPcCliHelpDryRun);
   TConsole.PrintLn('  ' + COLOR_CYAN + '-h, --help                 ' + COLOR_RESET +
     '  ' + RSPcCliHelpHelp);
   TConsole.PrintLn('');
@@ -323,6 +332,7 @@ begin
   TConsole.PrintLn('  ' + COLOR_CYAN + LExeName + ' hello -d');
   TConsole.PrintLn('  ' + COLOR_CYAN + LExeName + ' hello --target x86_64-linux-gnu --output build');
   TConsole.PrintLn('  ' + COLOR_CYAN + LExeName + ' editor hello.pcpp');
+  TConsole.PrintLn('  ' + COLOR_CYAN + LExeName + ' --clean output --dry-run');
   TConsole.PrintLn('');
 end;
 
@@ -399,6 +409,12 @@ begin
   begin
     LFlag := ParamStr(LI).Trim();
 
+    // The first build option is kept: --clean builds nothing and takes none
+    // (an unknown flag is reported below either way)
+    if (FBuildFlag = '') and LFlag.StartsWith('-') and (LFlag <> '--clean') and
+      (LFlag <> '--dry-run') and (LFlag <> '-h') and (LFlag <> '--help') then
+      FBuildFlag := LFlag;
+
     if (LFlag = '-h') or (LFlag = '--help') then
     begin
       ShowHelp();
@@ -421,6 +437,10 @@ begin
       if not DoFlagValue(LFlag, RSPcCliNeedsOptimize, LI, FOptimize) then
         Exit;
     end
+    else if LFlag = '--clean' then
+      FClean := True
+    else if LFlag = '--dry-run' then
+      FDryRun := True
     else if LFlag = '--defaults' then
       FDefaults := True
     else if LFlag = '--progress' then
@@ -460,6 +480,24 @@ begin
     end;
 
     Inc(LI);
+  end;
+
+  if FDryRun and (not FClean) then
+  begin
+    DoArgError(RSPcCliDryRunWithoutClean, [], True);
+    Exit;
+  end;
+  // --clean [<folder>]: the positional is the folder ('' = the current
+  // one), no source and no build option; the folder is checked by the
+  // compiler (CheckCleanFolder), never here
+  if FClean then
+  begin
+    if FBuildFlag <> '' then
+    begin
+      DoArgError(RSPcCliCleanWithOption, [COLOR_YELLOW + FBuildFlag], True);
+      Exit;
+    end;
+    Exit(True);
   end;
 
   if FSourceFile = '' then
@@ -669,6 +707,156 @@ begin
   end;
 end;
 
+procedure DoMeasureTarget(const APath: string; var AFiles: Int64; var ABytes: Int64);
+var
+  LSearch: TSearchRec;
+  LAttr: DWORD;
+  LEntry: string;
+  LIsDir: Boolean;
+  LIsLink: Boolean;
+begin
+  // Files and bytes under APath as the delete sees them: a link is one
+  // entry, never entered (its target is not this folder's); a file target
+  // (the copy-DLL record) is itself. GetFileAttributes and SearchRec.Attr
+  // are the entries' own attributes (a reparse point is not followed)
+  LAttr := GetFileAttributes(PChar(APath));
+  if LAttr = INVALID_FILE_ATTRIBUTES then
+    Exit;
+  if (LAttr and FILE_ATTRIBUTE_DIRECTORY) = 0 then
+  begin
+    Inc(AFiles);
+    if System.SysUtils.FindFirst(APath, faAnyFile, LSearch) = 0 then
+    begin
+      ABytes := ABytes + LSearch.Size;
+      System.SysUtils.FindClose(LSearch);
+    end;
+    Exit;
+  end;
+  if System.SysUtils.FindFirst(TUtils.JoinResolvedPath(APath, '*'), faAnyFile, LSearch) <> 0 then
+    Exit;
+  try
+    repeat
+      if (LSearch.Name = '.') or (LSearch.Name = '..') then
+        Continue;
+      LEntry := TUtils.JoinResolvedPath(APath, LSearch.Name);
+      LIsDir := (DWORD(LSearch.Attr) and FILE_ATTRIBUTE_DIRECTORY) <> 0;
+      LIsLink := (DWORD(LSearch.Attr) and FILE_ATTRIBUTE_REPARSE_POINT) <> 0;
+      if LIsDir and (not LIsLink) then
+        DoMeasureTarget(LEntry, AFiles, ABytes)
+      else
+      begin
+        Inc(AFiles);
+        if not LIsLink then
+          ABytes := ABytes + LSearch.Size;
+      end;
+    until System.SysUtils.FindNext(LSearch) <> 0;
+  finally
+    System.SysUtils.FindClose(LSearch);
+  end;
+end;
+
+function DoSizeText(const ABytes: Int64): string;
+begin
+  // A size a person reads at a glance
+  if ABytes >= 1024 * 1024 * 1024 then
+    Result := Format('%.1f GB', [ABytes / (1024 * 1024 * 1024)])
+  else if ABytes >= 1024 * 1024 then
+    Result := Format('%.1f MB', [ABytes / (1024 * 1024)])
+  else if ABytes >= 1024 then
+    Result := Format('%.1f KB', [ABytes / 1024])
+  else
+    Result := Format('%d bytes', [ABytes]);
+end;
+
+function TPCCLI.DoAskYes(const ACount: Integer): Boolean;
+var
+  LAnswer: string;
+begin
+  // One line from the console: only y / Y is yes. An empty line, anything
+  // else, end of input (ReadLn gives '') or a read that fails is no: the
+  // caller then prints "Nothing deleted."
+  Result := False;
+  LAnswer := '';
+  TConsole.Print(RSPcCliCleanAsk, [ACount]);
+  DoFlushOutput();
+  try
+    ReadLn(Input, LAnswer);
+  except
+    on Exception do
+      Exit;
+  end;
+  Result := (LAnswer.Trim() = 'y') or (LAnswer.Trim() = 'Y');
+end;
+
+procedure TPCCLI.DoClean();
+var
+  LFolder: string;
+  LTargets: TArray<string>;
+  LTarget: string;
+  LFiles: Int64;
+  LBytes: Int64;
+begin
+  // pcpp --clean [<folder>] [--dry-run]: the compiler proves the folder is a
+  // pcpp output folder (CheckCleanFolder reads only), the targets are
+  // listed, a person answers y/N, and CleanFolder checks everything again
+  // before the first delete. Nothing is deleted on any other path
+  ExitCode := PC_CLI_EXIT_FAILED;
+  if not FCompiler.CheckCleanFolder(FSourceFile, LFolder, LTargets) then
+  begin
+    FCompiler.PrintErrors([esError, esFatal]);
+    TConsole.PrintLn(COLOR_RED + RSPcCliCleanNothing);
+    Exit;
+  end;
+  if Length(LTargets) = 0 then
+  begin
+    TConsole.PrintLn(RSPcCliCleanEmpty, [TUtils.StripLongPathPrefix(LFolder)]);
+    ExitCode := 0;
+    Exit;
+  end;
+
+  TConsole.PrintLn(RSPcCliCleanHeader, [TUtils.StripLongPathPrefix(LFolder)]);
+  for LTarget in LTargets do
+  begin
+    // FindFirst / FileGetAttr report failure by result, never raise: an
+    // entry that cannot be read is not counted
+    LFiles := 0;
+    LBytes := 0;
+    DoMeasureTarget(LTarget, LFiles, LBytes);
+    TConsole.PrintLn(RSPcCliCleanTarget,
+      [TUtils.StripLongPathPrefix(LTarget), LFiles, DoSizeText(LBytes)]);
+  end;
+
+  if FDryRun then
+  begin
+    TConsole.PrintLn(RSPcCliCleanDryRun);
+    ExitCode := 0;
+    Exit;
+  end;
+
+  // A person answers: a stdin that is not a console (a pipe, a file) is
+  // refused, never read as an answer
+  if GetFileType(GetStdHandle(STD_INPUT_HANDLE)) <> FILE_TYPE_CHAR then
+  begin
+    TConsole.PrintLn(COLOR_RED + RSPcCliCleanNotConsole);
+    Exit;
+  end;
+  if not DoAskYes(Length(LTargets)) then
+  begin
+    TConsole.PrintLn(RSPcCliCleanNothing);
+    ExitCode := 0;
+    Exit;
+  end;
+
+  if not FCompiler.CleanFolder(LFolder) then
+  begin
+    FCompiler.PrintErrors([esError, esFatal]);
+    TConsole.PrintLn(COLOR_RED + RSPcCliCleanFailed);
+    Exit;
+  end;
+  TConsole.PrintLn(RSPcCliCleanDone, [Length(LTargets)]);
+  ExitCode := 0;
+end;
+
 function TPCCLI.DoRunEditor(): Boolean;
 var
   LI: Integer;
@@ -815,7 +1003,9 @@ begin
     if not ParseArgs() then
       Exit;
 
-    if FDebug then
+    if FClean then
+      DoClean()
+    else if FDebug then
       DoDebug()
     else
       DoCompile();

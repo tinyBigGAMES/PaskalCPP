@@ -68,6 +68,30 @@ const
   PC_ERR_CMP_003 = 'CMP0003';   // internal error (an invariant)
   { PC_ERR_CMP_004 }
   PC_ERR_CMP_004 = 'CMP0004';   // warning: a stale published runtime library could not be removed
+  { PC_ERR_CMP_005 }
+  PC_ERR_CMP_005 = 'CMP0005';   // warning: the output record could not be written
+  { PC_ERR_CMP_006 }
+  PC_ERR_CMP_006 = 'CMP0006';   // pcpp --clean refuses a folder (the check that failed is named)
+
+  { PC_CMP_OUTPUT_RECORD }
+  // pcpp's own record of an output folder, written by every build (beside
+  // build.zig): what pcpp --clean proves the folder is a pcpp one with
+  PC_CMP_OUTPUT_RECORD = 'pcpp-output.json';
+  { PC_CMP_OUTPUT_FORMAT }
+  // The record's format: raised only for a change that breaks the meaning of
+  // an existing key (a new key is added without it; readers ignore unknown keys)
+  PC_CMP_OUTPUT_FORMAT = 1;
+  { PC_CMP_RECORD_FORMAT }
+  PC_CMP_RECORD_FORMAT = 'format';
+  { PC_CMP_RECORD_SOURCE }
+  PC_CMP_RECORD_SOURCE = 'source';
+  { PC_CMP_RECORD_OUTPUT }
+  PC_CMP_RECORD_OUTPUT = 'output';
+  { PC_CMP_RECORD_PROJECT }
+  PC_CMP_RECORD_PROJECT = 'project';
+  { PC_CMP_BUILD_FILE }
+  // The build file zig builds an output folder from (TPCZigBuild.SaveBuildFile)
+  PC_CMP_BUILD_FILE = 'build.zig';
 
   { PC_SYNTAX_CODE_PREFIXES }
   // The codes of the phases that read the text as written: the lexer
@@ -207,6 +231,17 @@ type
     procedure DoApplyDerived();
     function DoConfigureBuild(): Boolean;
     function DoValidateAutoRun(const AAutoRun: Boolean): Boolean;
+    procedure DoWriteOutputRecord();
+    // pcpp --clean's checks, each one concern; False = refused (CMP0006
+    // added, naming the folder and the reason)
+    procedure DoCleanRefuse(const AFolder: string; const AReason: string);
+    function DoCheckCleanPlace(const AFolder: string): Boolean;
+    function DoReadOutputRecord(const AFolder: string; out ASource: string;
+      out AProject: string): Boolean;
+    function DoCheckCleanBuildFile(const AFolder: string; const AProject: string): Boolean;
+    function DoCheckCleanSource(const AFolder: string; const ASource: string): Boolean;
+    function DoCollectCleanTargets(const AFolder: string;
+      out ATargets: TArray<string>): Boolean;
   public
     constructor Create(); override;
     destructor Destroy(); override;
@@ -244,6 +279,23 @@ type
     function Build(const AAutoRun: Boolean = False): Boolean;
     // Runs the last built exe; False when nothing was built or it failed
     function Run(): Boolean;
+    // Clears the output folder of the last Prepare: generated\ (what the
+    // Compiler writes), then the driver's folders (TPCZigBuild.ClearOutput).
+    // Each folder is tried and each failure reported; False when nothing was
+    // prepared (as Build / Run) or a folder stayed
+    function ClearOutput(): Boolean;
+    // pcpp --clean: proves AFolder ('' = the current folder) is a pcpp
+    // output folder, both records present and in step (pcpp-output.json and
+    // build.zig), and is no drive root and not the source's own folder or
+    // above it. AResolved = the folder; ATargets = what CleanFolder would
+    // delete that exists now, in its order. Reads only, never deletes. False
+    // = refused, the failed check reported (CMP0006)
+    function CheckCleanFolder(const AFolder: string; out AResolved: string;
+      out ATargets: TArray<string>): Boolean;
+    // Runs every CheckCleanFolder check again, then deletes the targets (the
+    // driver's link-safe delete). False = refused or a target stayed (each
+    // reported)
+    function CleanFolder(const AFolder: string): Boolean;
     function HasErrors(): Boolean;
     procedure PrintErrors(const ASeverities: TErrorSeverities = [esHint, esWarning, esError, esFatal]);
     function GetErrors(): TErrors;
@@ -321,7 +373,10 @@ type
 implementation
 
 uses
+  Winapi.Windows,
   System.IOUtils,
+  System.JSON,
+  StdApp.JSON,
   StdApp.Resources;
 
 { TPCCompiler }
@@ -1626,6 +1681,9 @@ begin
 
   try
     try
+      // pcpp's record of the folder before zig writes into it, so every
+      // build leaves one (pcpp --clean proves the folder with it)
+      DoWriteOutputRecord();
       if not FZigBuild.Process(False) then
         Exit;
       if (FMainModule.ModuleKind = mkLib) and FAst.UsesRuntime() then
@@ -1671,6 +1729,406 @@ begin
   except
     on E: Exception do
       DoInternalError(E);
+  end;
+end;
+
+function TPCCompiler.ClearOutput(): Boolean;
+var
+  LGeneratedCleared: Boolean;
+  LDriverCleared: Boolean;
+begin
+  Result := False;
+  if not FPrepared then
+    Exit;
+
+  // The driver owns the build root (its delete never enters a link): the
+  // Compiler's own folder goes through it by name, then the driver clears
+  // what zig and the driver wrote. The second runs even when the first fails
+  try
+    try
+      LGeneratedCleared := FZigBuild.ClearBuildDir(PC_CMP_GENERATED_DIR);
+      LDriverCleared := FZigBuild.ClearOutput();
+      Result := LGeneratedCleared and LDriverCleared;
+    except
+      on E: Exception do
+      begin
+        DoInternalError(E);
+        Result := False;
+      end;
+    end;
+  finally
+    FErrors.Flush();
+  end;
+end;
+
+procedure TPCCompiler.DoWriteOutputRecord();
+var
+  LObject: TJSONObject;
+  LPath: string;
+  LUtf8: TEncoding;
+begin
+  // <output>\pcpp-output.json: UTF-8 without a BOM, LF. A failure is a
+  // warning: the build still runs, and pcpp --clean refuses the folder
+  LPath := TUtils.JoinResolvedPath(FOutputPath, PC_CMP_OUTPUT_RECORD);
+  LObject := TJSONObject.Create();
+  LUtf8 := TUTF8Encoding.Create(False);
+  try
+    LObject.AddPair(PC_CMP_RECORD_FORMAT, TJSONNumber.Create(PC_CMP_OUTPUT_FORMAT));
+    LObject.AddPair(PC_CMP_RECORD_SOURCE, FSourceFile);
+    LObject.AddPair(PC_CMP_RECORD_OUTPUT, FOutputPath);
+    LObject.AddPair(PC_CMP_RECORD_PROJECT, FProjectName);
+    try
+      TUtils.EnsureDirectory(FOutputPath);
+      TFile.WriteAllText(LPath, LObject.Format(2).Replace(#13#10, #10) + #10, LUtf8);
+    except
+      on E: Exception do
+        FErrors.Add(esWarning, PC_ERR_CMP_005, RSCmpRecordFailed,
+          [TUtils.StripLongPathPrefix(LPath), E.Message]);
+    end;
+  finally
+    LUtf8.Free();
+    LObject.Free();
+  end;
+end;
+
+function DoFolderKey(const APath: string): string;
+begin
+  // One spelling of a folder for comparing places: plain, backslashes, a
+  // trailing separator, lower case (NTFS folder names ignore case)
+  Result := IncludeTrailingPathDelimiter(
+    TUtils.StripLongPathPrefix(APath).Replace('/', '\')).ToLower();
+end;
+
+procedure TPCCompiler.DoCleanRefuse(const AFolder: string; const AReason: string);
+begin
+  FErrors.Add(esError, PC_ERR_CMP_006, RSCmpCleanRefused,
+    [TUtils.StripLongPathPrefix(AFolder), AReason]);
+end;
+
+function DoOwnAttributes(const APath: string): DWORD;
+begin
+  // APath's own attributes, a link never followed (GetFileAttributes does
+  // not follow a reparse point); INVALID_FILE_ATTRIBUTES = absent
+  Result := GetFileAttributes(PChar(APath));
+end;
+
+function TPCCompiler.DoCheckCleanPlace(const AFolder: string): Boolean;
+var
+  LAttr: DWORD;
+  LKey: string;
+begin
+  // The folder exists as a real folder (its own attributes: a link is never
+  // followed) and is not a drive root
+  Result := False;
+  LAttr := DoOwnAttributes(AFolder);
+  if (LAttr = INVALID_FILE_ATTRIBUTES) or ((LAttr and FILE_ATTRIBUTE_DIRECTORY) = 0) then
+  begin
+    DoCleanRefuse(AFolder, RSCmpCleanNotFolder);
+    Exit;
+  end;
+  if (LAttr and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then
+  begin
+    DoCleanRefuse(AFolder, RSCmpCleanIsLink);
+    Exit;
+  end;
+  LKey := DoFolderKey(AFolder);
+  if (ExtractFileDrive(LKey) = '') or
+    (LKey = IncludeTrailingPathDelimiter(ExtractFileDrive(LKey))) then
+  begin
+    DoCleanRefuse(AFolder, RSCmpCleanDriveRoot);
+    Exit;
+  end;
+  Result := True;
+end;
+
+function TPCCompiler.DoReadOutputRecord(const AFolder: string; out ASource: string;
+  out AProject: string): Boolean;
+var
+  LPath: string;
+  LText: string;
+  LJson: TJSON;
+  LFormat: Integer;
+  LOutput: string;
+begin
+  // pcpp-output.json, read strictly: an object, format exactly 1, source /
+  // output / project as text, output naming this very folder. Keys this
+  // pcpp does not know are ignored (a later pcpp may add some)
+  Result := False;
+  ASource := '';
+  AProject := '';
+  LPath := TUtils.JoinResolvedPath(AFolder, PC_CMP_OUTPUT_RECORD);
+  if not TFile.Exists(LPath) then
+  begin
+    DoCleanRefuse(AFolder, Format(RSCmpCleanNoRecord, [PC_CMP_OUTPUT_RECORD]));
+    Exit;
+  end;
+  try
+    LText := TFile.ReadAllText(LPath, TEncoding.UTF8);
+  except
+    on E: Exception do
+    begin
+      DoCleanRefuse(AFolder, Format(RSCmpCleanBadRecord, [PC_CMP_OUTPUT_RECORD, E.Message]));
+      Exit;
+    end;
+  end;
+
+  LJson := nil;
+  try
+    if (not TJSON.TryFromString(LText, LJson)) or (LJson = nil) or (not LJson.IsObject()) then
+    begin
+      DoCleanRefuse(AFolder, Format(RSCmpCleanRecordNotJson, [PC_CMP_OUTPUT_RECORD]));
+      Exit;
+    end;
+    if (not LJson.TryGetInt32(PC_CMP_RECORD_FORMAT, LFormat)) or
+      (LFormat <> PC_CMP_OUTPUT_FORMAT) then
+    begin
+      DoCleanRefuse(AFolder, Format(RSCmpCleanRecordFormat,
+        [PC_CMP_OUTPUT_RECORD, PC_CMP_OUTPUT_FORMAT]));
+      Exit;
+    end;
+    if (not LJson.TryGetString(PC_CMP_RECORD_SOURCE, ASource)) or (ASource.Trim() = '') then
+    begin
+      DoCleanRefuse(AFolder, Format(RSCmpCleanRecordKey, [PC_CMP_OUTPUT_RECORD, PC_CMP_RECORD_SOURCE]));
+      Exit;
+    end;
+    if (not LJson.TryGetString(PC_CMP_RECORD_OUTPUT, LOutput)) or (LOutput.Trim() = '') then
+    begin
+      DoCleanRefuse(AFolder, Format(RSCmpCleanRecordKey, [PC_CMP_OUTPUT_RECORD, PC_CMP_RECORD_OUTPUT]));
+      Exit;
+    end;
+    if (not LJson.TryGetString(PC_CMP_RECORD_PROJECT, AProject)) or (AProject.Trim() = '') then
+    begin
+      DoCleanRefuse(AFolder, Format(RSCmpCleanRecordKey, [PC_CMP_OUTPUT_RECORD, PC_CMP_RECORD_PROJECT]));
+      Exit;
+    end;
+  finally
+    LJson.Free();
+  end;
+
+  // A record copied in from another folder (or the folder moved) is not
+  // this folder's
+  if DoFolderKey(LOutput) <> DoFolderKey(AFolder) then
+  begin
+    DoCleanRefuse(AFolder, Format(RSCmpCleanOtherFolder,
+      [PC_CMP_OUTPUT_RECORD, TUtils.StripLongPathPrefix(LOutput)]));
+    Exit;
+  end;
+  Result := True;
+end;
+
+function TPCCompiler.DoCheckCleanBuildFile(const AFolder: string; const AProject: string): Boolean;
+var
+  LPath: string;
+  LZig: TPCZigBuild;
+  LLoadErrors: TErrors;
+  LLoaded: Boolean;
+  LReason: string;
+  LGenerated: string;
+  LIndex: Integer;
+  LDir: string;
+  LGeneratedCount: Integer;
+begin
+  // build.zig, read by ZigBuild's own reader into a driver of its own: it
+  // must load with no error and no warning (a file pcpp did not write has
+  // lines that reader does not know), name the record's project, and build
+  // at least one TU from THIS folder's generated\ and none from another's
+  Result := False;
+  LPath := TUtils.JoinResolvedPath(AFolder, PC_CMP_BUILD_FILE);
+  if not TFile.Exists(LPath) then
+  begin
+    DoCleanRefuse(AFolder, RSCmpCleanNoBuildZig);
+    Exit;
+  end;
+
+  LGenerated := TUtils.JoinResolvedPath(AFolder, PC_CMP_GENERATED_DIR);
+  LLoadErrors := TErrors.Create();
+  LZig := TPCZigBuild.Create();
+  try
+    LLoadErrors.SetMaxErrors(100);
+    LZig.SetErrors(LLoadErrors);
+    LLoaded := LZig.LoadBuildFile(LPath);
+    if (not LLoaded) or (LLoadErrors.Count() > 0) then
+    begin
+      LReason := '';
+      if LLoadErrors.Count() > 0 then
+        LReason := LLoadErrors.GetItems()[0].Code + ' ' + LLoadErrors.GetItems()[0].Message;
+      DoCleanRefuse(AFolder, Format(RSCmpCleanBuildZigBad, [LReason]));
+      Exit;
+    end;
+    if LZig.GetProjectName() <> AProject then
+    begin
+      DoCleanRefuse(AFolder, Format(RSCmpCleanProjectMismatch,
+        [PC_CMP_OUTPUT_RECORD, AProject, LZig.GetProjectName()]));
+      Exit;
+    end;
+
+    LGeneratedCount := 0;
+    for LIndex := 0 to LZig.GetSourceFileCount() - 1 do
+    begin
+      LDir := TPath.GetDirectoryName(LZig.GetSourceFile(LIndex));
+      if not SameText(TPath.GetFileName(LDir), PC_CMP_GENERATED_DIR) then
+        Continue;
+      if DoFolderKey(LDir) <> DoFolderKey(LGenerated) then
+      begin
+        DoCleanRefuse(AFolder, Format(RSCmpCleanGeneratedElsewhere,
+          [TUtils.StripLongPathPrefix(LZig.GetSourceFile(LIndex))]));
+        Exit;
+      end;
+      Inc(LGeneratedCount);
+    end;
+    if LGeneratedCount = 0 then
+    begin
+      DoCleanRefuse(AFolder, RSCmpCleanNoGenerated);
+      Exit;
+    end;
+  finally
+    LZig.Free();
+    LLoadErrors.Free();
+  end;
+  Result := True;
+end;
+
+function TPCCompiler.DoCheckCleanSource(const AFolder: string; const ASource: string): Boolean;
+var
+  LSourceDir: string;
+begin
+  // The folder must not be the project's own folder or above it: its bin\ /
+  // lib\ may be the person's (an output folder of '.' or '..')
+  Result := False;
+  LSourceDir := DoFolderKey(TPath.GetDirectoryName(ASource));
+  if LSourceDir.StartsWith(DoFolderKey(AFolder)) then
+  begin
+    DoCleanRefuse(AFolder, Format(RSCmpCleanHoldsSource, [TUtils.StripLongPathPrefix(ASource)]));
+    Exit;
+  end;
+  Result := True;
+end;
+
+function TPCCompiler.DoCollectCleanTargets(const AFolder: string;
+  out ATargets: TArray<string>): Boolean;
+var
+  LZig: TPCZigBuild;
+  LNames: TArray<string>;
+  LName: string;
+  LPath: string;
+  LAttr: DWORD;
+begin
+  // generated\ (the Compiler's), then the driver's names, in the order
+  // CleanFolder deletes them; only what exists. A target that is a link
+  // refuses the whole clean (the delete would refuse it anyway, after the
+  // person said yes)
+  Result := False;
+  ATargets := nil;
+  LZig := TPCZigBuild.Create();
+  try
+    LNames := [PC_CMP_GENERATED_DIR] + LZig.GetClearNames();
+  finally
+    LZig.Free();
+  end;
+  for LName in LNames do
+  begin
+    LPath := TUtils.JoinResolvedPath(AFolder, LName);
+    LAttr := DoOwnAttributes(LPath);
+    if LAttr = INVALID_FILE_ATTRIBUTES then
+      Continue;
+    if (LAttr and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then
+    begin
+      DoCleanRefuse(AFolder, Format(RSCmpCleanTargetLink, [TUtils.StripLongPathPrefix(LPath)]));
+      Exit;
+    end;
+    ATargets := ATargets + [LPath];
+  end;
+  Result := True;
+end;
+
+function TPCCompiler.CheckCleanFolder(const AFolder: string; out AResolved: string;
+  out ATargets: TArray<string>): Boolean;
+var
+  LFolder: string;
+  LSource: string;
+  LProject: string;
+begin
+  // Reads only. Every check in order; the first that fails is the report
+  Result := False;
+  AResolved := '';
+  ATargets := nil;
+  FErrors.Clear();
+  try
+    try
+      LFolder := AFolder.Trim();
+      if LFolder = '' then
+        LFolder := TDirectory.GetCurrentDirectory();
+      try
+        AResolved := TUtils.ResolvePath(LFolder);
+      except
+        on E: Exception do
+        begin
+          FErrors.Add(esError, PC_ERR_CMP_006, RSCmpCleanBadFolder, [LFolder, E.Message]);
+          Exit;
+        end;
+      end;
+
+      if not DoCheckCleanPlace(AResolved) then
+        Exit;
+      if not DoReadOutputRecord(AResolved, LSource, LProject) then
+        Exit;
+      if not DoCheckCleanBuildFile(AResolved, LProject) then
+        Exit;
+      if not DoCheckCleanSource(AResolved, LSource) then
+        Exit;
+      if not DoCollectCleanTargets(AResolved, ATargets) then
+        Exit;
+      Result := True;
+    except
+      on E: Exception do
+      begin
+        DoInternalError(E);
+        Result := False;
+      end;
+    end;
+  finally
+    FErrors.Flush();
+  end;
+end;
+
+function TPCCompiler.CleanFolder(const AFolder: string): Boolean;
+var
+  LResolved: string;
+  LTargets: TArray<string>;
+  LZig: TPCZigBuild;
+  LGeneratedCleared: Boolean;
+  LDriverCleared: Boolean;
+begin
+  // The checks again, right before the first delete (the folder may have
+  // changed while the person read the list), then generated\ and the
+  // driver's names through the driver's delete, which never enters a link
+  Result := False;
+  if not CheckCleanFolder(AFolder, LResolved, LTargets) then
+    Exit;
+
+  try
+    try
+      LZig := TPCZigBuild.Create();
+      try
+        LZig.SetErrors(FErrors);
+        LZig.SetOutputPath(LResolved);
+        if LZig.GetOutputPath() = '' then
+          Exit;
+        LGeneratedCleared := LZig.ClearBuildDir(PC_CMP_GENERATED_DIR);
+        LDriverCleared := LZig.ClearOutput();
+        Result := LGeneratedCleared and LDriverCleared;
+      finally
+        LZig.Free();
+      end;
+    except
+      on E: Exception do
+      begin
+        DoInternalError(E);
+        Result := False;
+      end;
+    end;
+  finally
+    FErrors.Flush();
   end;
 end;
 

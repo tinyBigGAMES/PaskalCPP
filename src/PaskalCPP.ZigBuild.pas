@@ -465,9 +465,15 @@ type
       const AUserData: Pointer);
 
     // Deletes the directory AName under the build root (ClearCache /
-    // ClearOutput): False, with an error, when there is no output path or
-    // the directory is still there afterwards
+    // ClearOutput / ClearBuildDir): False, with an error, when there is no
+    // output path, AName is a link (never entered, nothing deleted) or the
+    // directory is still there afterwards
     function DoClearBuildDir(const AName: string): Boolean;
+    // Deletes everything inside ADir and ADir itself, never through a link:
+    // a junction or symbolic link inside it is removed as the link alone
+    // (its target untouched). Failures are left for the caller to see (the
+    // directory is still there); raises only what the RTL raises
+    procedure DoDeleteTree(const ADir: string);
     // Deletes the file AName under the build root (ClearOutput: the copy-DLL
     // record), the same rules as DoClearBuildDir
     function DoClearBuildFile(const AName: string): Boolean;
@@ -612,7 +618,16 @@ type
     function Process(const AAutoRun: Boolean = True): Boolean;
     function Run(): Boolean;
     function ClearCache(): Boolean;
+    // bin\, lib\, the project's .zig-cache\, pcpp-diag\ and the copy-DLL
+    // record; never the output folder itself, build.zig or anything else
     function ClearOutput(): Boolean;
+    // A folder of a caller's own under the build root (the Compiler's
+    // generated\): the same delete as ClearOutput's folders, one report per
+    // failure
+    function ClearBuildDir(const AName: string): Boolean;
+    // The names ClearOutput deletes under the build root, in its order (the
+    // folders, then the copy-DLL record): what a caller lists before asking
+    function GetClearNames(): TArray<string>;
 
     // Getters
     function GetLastExitCode(): DWORD;
@@ -3237,6 +3252,7 @@ function TPCZigBuild.DoClearBuildDir(const AName: string): Boolean;
 var
   LPath: string;
   LReason: string;
+  LAttr: Integer;
 begin
   Result := False;
 
@@ -3250,13 +3266,23 @@ begin
   end;
   LPath := TUtils.JoinResolvedPath(FOutputPath, AName);
 
-  // TDirectory can raise, and a recursive delete can also leave the
-  // directory behind (a locked file): the result is whether it is gone
+  // The entry's own attributes (FollowLink False): a junction or symbolic
+  // link is never entered, since TDirectory.Delete walks into one and
+  // empties the folder it points at; the link itself stays too (it is not
+  // a folder this driver wrote). Absent, or a file in its place: nothing to
+  // delete. A recursive delete can leave the directory behind (a locked
+  // file): the result is whether it is gone
   LReason := RSZigBuildClearStillPresent;
   try
-    if TDirectory.Exists(LPath) then
-      TDirectory.Delete(LPath, True);
-    Result := not TDirectory.Exists(LPath);
+    LAttr := FileGetAttr(LPath, False);
+    if (LAttr <> faInvalid) and ((LAttr and System.SysUtils.faSymLink) <> 0) then
+      LReason := RSZigBuildClearLink
+    else
+    begin
+      if (LAttr <> faInvalid) and ((LAttr and System.SysUtils.faDirectory) <> 0) then
+        DoDeleteTree(LPath);
+      Result := not TDirectory.Exists(LPath, False);
+    end;
   except
     on E: Exception do
       LReason := E.Message;
@@ -3265,6 +3291,56 @@ begin
   if (not Result) and Assigned(FErrors) then
     FErrors.Add(esError, PC_ERR_ZIGBUILD_CLEARFAILED, RSZigBuildClearFailed,
       [LPath, LReason]);
+end;
+
+procedure TPCZigBuild.DoDeleteTree(const ADir: string);
+var
+  LSearch: TSearchRec;
+  LEntry: string;
+  LIsDir: Boolean;
+  LIsLink: Boolean;
+  LKeep: Integer;
+begin
+  // Children first, then ADir (empty by then unless something stayed).
+  // SearchRec.Attr holds the entry's own attributes: a junction or a
+  // directory symbolic link is faDirectory + faSymLink and is removed with
+  // RemoveDir, which deletes the link and never its target; a file symbolic
+  // link is removed with DeleteFile, the link alone as well
+  if FindFirst(TUtils.JoinResolvedPath(ADir, '*'), System.SysUtils.faAnyFile,
+    LSearch) = 0 then
+  begin
+    try
+      repeat
+        if (LSearch.Name = '.') or (LSearch.Name = '..') then
+          Continue;
+        LEntry := TUtils.JoinResolvedPath(ADir, LSearch.Name);
+        LIsDir := (LSearch.Attr and System.SysUtils.faDirectory) <> 0;
+        LIsLink := (LSearch.Attr and System.SysUtils.faSymLink) <> 0;
+
+        // A read-only entry refuses deletion: clear that bit on the entry
+        // itself (FollowLink False: a link's target is not changed), keeping
+        // only the bits SetFileAttributes takes
+        if (LSearch.Attr and System.SysUtils.faReadOnly) <> 0 then
+        begin
+          LKeep := LSearch.Attr and (System.SysUtils.faHidden or
+            System.SysUtils.faSysFile or System.SysUtils.faArchive);
+          if LKeep = 0 then
+            LKeep := System.SysUtils.faNormal;
+          FileSetAttr(LEntry, LKeep, False);
+        end;
+
+        if LIsDir and (not LIsLink) then
+          DoDeleteTree(LEntry)
+        else if LIsDir then
+          RemoveDir(LEntry)
+        else
+          System.SysUtils.DeleteFile(LEntry);
+      until FindNext(LSearch) <> 0;
+    finally
+      FindClose(LSearch);
+    end;
+  end;
+  RemoveDir(ADir);
 end;
 
 function TPCZigBuild.DoClearBuildFile(const AName: string): Boolean;
@@ -3284,7 +3360,7 @@ begin
   LPath := TUtils.JoinResolvedPath(FOutputPath, AName);
 
   // The result is whether the file is gone (a locked file stays)
-  LReason := RSZigBuildClearStillPresent;
+  LReason := RSZigBuildClearFileStillPresent;
   try
     if TFile.Exists(LPath) then
       TFile.Delete(LPath);
@@ -3309,6 +3385,7 @@ var
   LBinCleared: Boolean;
   LLibCleared: Boolean;
   LCacheCleared: Boolean;
+  LDiagCleared: Boolean;
   LRecordCleared: Boolean;
 begin
   // Everything zig and this driver write into the build root: the artifact
@@ -3325,8 +3402,25 @@ begin
   LBinCleared := DoClearBuildDir(DoArtifactSubdir(bmExe));
   LLibCleared := DoClearBuildDir(DoArtifactSubdir(bmLib));
   LCacheCleared := ClearCache();
+  // clang's .dia files: every build checks the folder and deletes the old
+  // ones before zig runs, so nothing depends on them surviving a clear
+  LDiagCleared := DoClearBuildDir(PC_DIAG_FILE_DIR);
   LRecordCleared := DoClearBuildFile(PC_ZIG_COPYDLL_RECORD);
-  Result := LBinCleared and LLibCleared and LCacheCleared and LRecordCleared;
+  Result := LBinCleared and LLibCleared and LCacheCleared and LDiagCleared and
+    LRecordCleared;
+end;
+
+function TPCZigBuild.ClearBuildDir(const AName: string): Boolean;
+begin
+  Result := DoClearBuildDir(AName);
+end;
+
+function TPCZigBuild.GetClearNames(): TArray<string>;
+begin
+  // ClearOutput's own names, in its order: one list, so what is shown is
+  // what is deleted
+  Result := [DoArtifactSubdir(bmExe), DoArtifactSubdir(bmLib), '.zig-cache',
+    PC_DIAG_FILE_DIR, PC_ZIG_COPYDLL_RECORD];
 end;
 
 // Post-build resources
