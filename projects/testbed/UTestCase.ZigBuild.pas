@@ -1415,7 +1415,7 @@ begin
   // is 310 characters: the warning comes through cold, nothing when cached),
   // a project name of 80 (the artifact path is 294: manifest, icon and
   // version info stamped, then published) and a copy-DLL named 80 (copied
-  // into zig-out\bin). tests\probe\zb20 is removed first; round 2 is served
+  // into bin). tests\probe\zb20 is removed first; round 2 is served
   // from zig's cache.
   LBase := DoProbePath('zb20');
   LRoot := LBase + '\' + StringOfChar('d', PC_ZIG_BUILD_ROOT_MAX - Length(LBase) - 1);
@@ -1484,8 +1484,8 @@ begin
         (LInfo.VersionString = '1.2.3') and (LInfo.ProductName = 'Zb20');
       Check(LVersionOk, 'zb20: round %d: the published exe carries its version info',
         [LRound]);
-      Check(TFile.Exists(TUtils.ResolvePath('zig-out\bin\' + LDllName, LRoot)),
-        'zb20: round %d: the DLL is copied into zig-out\bin', [LRound]);
+      Check(TFile.Exists(TUtils.ResolvePath('bin\' + LDllName, LRoot)),
+        'zb20: round %d: the DLL is copied into bin', [LRound]);
       if LRound = 1 then
       begin
         Check(LErrors.Count() = 1, 'zb20: cold: exactly 1 item (the warning)');
@@ -1655,7 +1655,7 @@ begin
   LRuntime := TUtils.GetEnv('PCPP_TEST_RUNTIME');
   if LRuntime = '' then
     LRuntime := TUtils.ResolvePath('res\runtime', TPath.GetDirectoryName(ParamStr(0)));
-  LOutFile := TPath.Combine(LBase, 'zig-out\bin\' + AProgram + '_out.txt');
+  LOutFile := TPath.Combine(LBase, 'bin\' + AProgram + '_out.txt');
   try
     LWant := TFile.ReadAllText(TPath.Combine(LBase, AProgram + '_expected.txt'),
       TEncoding.UTF8).Replace(#13#10, #10);
@@ -1801,9 +1801,9 @@ begin
     Check(LOk and (LErrors.Count() = 0), 'zb13_copy_publish: builds and publishes (%d items)',
       [LErrors.Count()]);
     Check(DoSameFile(TPath.Combine(LBase, 'stub.dll'),
-      TPath.Combine(LBase, 'out.v1\zig-out\bin\stub.dll')),
+      TPath.Combine(LBase, 'out.v1\bin\stub.dll')),
       'zb13_copy_publish: the DLL beside the artifact');
-    Check(DoSameFile(TPath.Combine(LBase, 'out.v1\zig-out\bin\zb13.exe'),
+    Check(DoSameFile(TPath.Combine(LBase, 'out.v1\bin\zb13.exe'),
       TPath.Combine(LPub, 'zb13.exe')), 'zb13_copy_publish: the artifact published');
     Check(DoSameFile(TPath.Combine(LBase, 'a\data.txt'), TPath.Combine(LPub, 'data.txt')),
       'zb13_copy_publish: the file published');
@@ -1851,10 +1851,10 @@ begin
   try
     LErrors.SetMaxErrors(10);
     Check(DoZb13Prepare(LErrors, LBase), 'zb13: fixture written');
-    LBin := TPath.Combine(LBase, 'out.stale\zig-out\bin');
+    LBin := TPath.Combine(LBase, 'out.stale\bin');
     LRecord := TPath.Combine(LBase, 'out.stale\pcpp-copydll.txt');
     LMine := TPath.Combine(LBin, 'mine.txt');
-    LOutside := TPath.Combine(LBase, 'out.stale\zig-out\outside.txt');
+    LOutside := TPath.Combine(LBase, 'out.stale\outside.txt');
 
     // 1. With the copy-DLL: copied and recorded
     LOk := DoZb13StaleBuild(LBase, LErrors, True);
@@ -1956,9 +1956,15 @@ var
   LOk: Boolean;
   LCase: Integer;
   LWant: string;
+  LOutDir: string;
+  LLayout: TArray<string>;
+  LMissing: string;
+  LPath: string;
 begin
   // Every artifact kind from its own folder (the layout rule): a static
-  // library and a DLL published; a Linux DLL beside the executable
+  // library and a DLL published; a Linux DLL beside the executable.
+  // PLAN-OUTPUT: zig installs straight into the output folder (<out>\bin,
+  // <out>\lib), never into a zig-out folder
   LErrors := TErrors.Create();
   try
     LErrors.SetMaxErrors(10);
@@ -1967,10 +1973,22 @@ begin
     begin
       LErrors.Clear();
       LWant := '';
+      LOutDir := TPath.Combine(LBase, Format('kind%d', [LCase]));
+
+      // A folder an earlier run (or the old layout) left would hide a
+      // zig-out the build itself created: every case starts empty
+      try
+        if TDirectory.Exists(LOutDir) then
+          TDirectory.Delete(LOutDir, True);
+      except
+        on E: Exception do
+          Check(False, 'zb13_layout: case %d: cannot empty %s: %s', [LCase, LOutDir, E.Message]);
+      end;
+
       LZig := TPCZigBuild.Create();
       try
         LZig.SetErrors(LErrors);
-        LZig.SetOutputPath(TPath.Combine(LBase, Format('kind%d', [LCase])));
+        LZig.SetOutputPath(LOutDir);
         LZig.SetProjectName('zb13k');
         LZig.AddSourceFile(TPath.Combine(LBase, 'gen.cpp'));
         case LCase of
@@ -1979,18 +1997,22 @@ begin
               LZig.SetBuildMode(bmLib);
               LZig.AddPublishArtifact(TPath.Combine(LBase, 'pubk1'));
               LWant := TPath.Combine(LBase, 'pubk1\zb13k.lib');
+              LLayout := ['lib\zb13k.lib'];
             end;
           2:
             begin
               LZig.SetBuildMode(bmDll);
               LZig.AddPublishArtifact(TPath.Combine(LBase, 'pubk2'));
               LWant := TPath.Combine(LBase, 'pubk2\zb13k.dll');
+              // the DLL beside a program, its import library with the libraries
+              LLayout := ['bin\zb13k.dll', 'lib\zb13k.lib'];
             end;
           3:
             begin
               LZig.SetBuildMode(bmDll);
               LZig.SetTarget('x86_64-linux-gnu');
-              LWant := TPath.Combine(LBase, 'kind3\zig-out\bin\libzb13k.so');
+              LWant := TPath.Combine(LBase, 'kind3\bin\libzb13k.so');
+              LLayout := ['bin\libzb13k.so'];
             end;
         end;
         LOk := LZig.Process(False);
@@ -2000,6 +2022,16 @@ begin
       LErrors.PrintErrors();
       Check(LOk and (LErrors.Count() = 0) and FileExists(LWant),
         'zb13_layout: case %d: %s (%d items)', [LCase, LWant, LErrors.Count()]);
+
+      // The artifact sits in the layout folder under the output folder itself
+      LMissing := '';
+      for LPath in LLayout do
+        if not FileExists(TPath.Combine(LOutDir, LPath)) then
+          LMissing := LMissing + ' ' + LPath;
+      Check(LMissing = '', 'zb13_layout: case %d: in the output folder (missing:%s)',
+        [LCase, LMissing]);
+      Check(not TDirectory.Exists(TPath.Combine(LOutDir, 'zig-out')),
+        'zb13_layout: case %d: no zig-out folder', [LCase]);
     end;
   finally
     LErrors.Free();
@@ -2060,10 +2092,10 @@ begin
   LExpected := LExpected + 'END';
 
   // UTF-8 without a BOM (GetBytes writes no preamble). The program runs in
-  // its own folder, so its output file lands in zig-out\bin; an old one is
+  // its own folder, so its output file lands in bin; an old one is
   // removed first, so a stale file can never pass
   LDir := DoProbePath('zb25');
-  LOutFile := TPath.Combine(LDir, 'zig-out\bin\zb25_out.txt');
+  LOutFile := TPath.Combine(LDir, 'bin\zb25_out.txt');
   try
     TDirectory.CreateDirectory(LDir);
     TFile.WriteAllBytes(TPath.Combine(LDir, 'parity.cpp'), TEncoding.UTF8.GetBytes(LCpp));

@@ -520,8 +520,8 @@ begin
         LOk := LZig.Process(False);
         LThis.ModuleName := LMain;
         LThis.Kind := LKind;
-        LThis.BinDir := TPath.Combine(TPath.Combine(TPath.Combine(LTargetRoot, LMain), 'zig-out'), 'bin');
-        LThis.LibDir := TPath.Combine(TPath.Combine(TPath.Combine(LTargetRoot, LMain), 'zig-out'), 'lib');
+        LThis.BinDir := TPath.Combine(TPath.Combine(LTargetRoot, LMain), 'bin');
+        LThis.LibDir := TPath.Combine(TPath.Combine(LTargetRoot, LMain), 'lib');
         LThis.FileName := LZig.GetOutputFilename();
         Check(LOk and (LErrors.Count() = 0), Format('%s: %s builds for %s without a report (%s)',
           [ACase, LMain, LTarget, DoReports(LErrors)]));

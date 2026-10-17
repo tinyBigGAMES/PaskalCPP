@@ -620,7 +620,7 @@ var
 begin
   // Without an output path there is no build root: ClearCache, ClearOutput
   // and Run report ZB0001 and touch nothing. The current directory holds a
-  // .zig-cache and a zig-out\bin\<exe> that must be left alone (R44: the two
+  // .zig-cache and a bin\<exe> that must be left alone (R44: the two
   // folders were deleted, and Run looked for the exe there)
   LDir := DoScratch('nooutput');
   Check(LDir <> '', 'no output path: scratch dir prepared');
@@ -628,7 +628,7 @@ begin
     Exit;
 
   LCache := TPath.Combine(LDir, '.zig-cache');
-  LOutBin := TPath.Combine(LDir, 'zig-out\bin');
+  LOutBin := TPath.Combine(LDir, 'bin');
   try
     TDirectory.CreateDirectory(LCache);
     TDirectory.CreateDirectory(LOutBin);
@@ -1120,7 +1120,7 @@ begin
       (DoCountCode(LErrors, PC_ERR_ZIGBUILD_COLLISION) = 1),
       'copy dll: two DLLs of one name are one ZB0025 and stop Process (%d items)',
       [LErrors.Count()]);
-    Check(not FileExists(TPath.Combine(LDir, 'out2\zig-out\bin\x.dll')),
+    Check(not FileExists(TPath.Combine(LDir, 'out2\bin\x.dll')),
       'copy dll: neither DLL was copied');
   finally
     LErrors.Free();
@@ -1168,12 +1168,12 @@ begin
       if LMode = bmLib then
       begin
         LWant := '.dest_dir = .{ .override = .lib },';
-        LWantDir := TPath.Combine(TPath.Combine(LDir, 'zig-out'), 'lib');
+        LWantDir := TPath.Combine(LDir, 'lib');
       end
       else
       begin
         LWant := '.dest_dir = .{ .override = .bin },';
-        LWantDir := TPath.Combine(TPath.Combine(LDir, 'zig-out'), 'bin');
+        LWantDir := TPath.Combine(LDir, 'bin');
       end;
       Check(LText.Contains(LWant) and (not LText.Contains('b.installArtifact(')),
         'layout emit: mode %d installs with "%s"', [Ord(LMode), LWant]);
@@ -1220,11 +1220,11 @@ var
   LBin: string;
   LTarget: string;
 begin
-  // ADir\zig-out\bin\AFileName: a copy of fixture AFixture, or the text 'x'
+  // ADir\bin\AFileName: a copy of fixture AFixture, or the text 'x'
   // (not a program) when AFixture is empty. False when it cannot be written.
   Result := False;
   try
-    LBin := TUtils.ResolvePath(ADir + '\zig-out\bin');
+    LBin := TUtils.ResolvePath(ADir + '\bin');
     if not TUtils.EnsureDirectory(LBin) then
       Exit;
     LTarget := TUtils.JoinResolvedPath(LBin, AFileName);
@@ -1376,7 +1376,7 @@ begin
   // A project name that puts the executable at PC_ZBP_LAUNCH_LENGTH
   // characters, plain spelling
   LName := StringOfChar('n', PC_ZBP_LAUNCH_LENGTH -
-    Length(TUtils.StripLongPathPrefix(LDir)) - Length('\zig-out\bin\.exe'));
+    Length(TUtils.StripLongPathPrefix(LDir)) - Length('\bin\.exe'));
   Check(DoPlaceArtifact(LDir, 'zbp_run.exe', 'argv.exe') and
     DoPlaceArtifact(LDir, 'zbp_run', 'argv.elf') and
     DoPlaceArtifact(LDir, LName + '.exe', 'argv.exe'),

@@ -156,7 +156,7 @@ begin
     Result := LCompiler.Prepare(DoFixturePath(ACase), LOut) and
       LCompiler.Build(False);
     if Result then
-      AArtifact := TPath.Combine(TPath.Combine(TPath.Combine(LOut, 'zig-out'), 'bin'),
+      AArtifact := TPath.Combine(TPath.Combine(LOut, 'bin'),
         LCompiler.GetOutputFilename())
     else
       AReason := DoReports(LCompiler.GetErrors());
@@ -384,7 +384,7 @@ begin
   Result := TPCCompiler.Create();
   Result.SetOptimizeLevel(olDebug);
   if Result.Prepare(DoFixturePath(ACase), LOut) and Result.Build(False) then
-    AArtifact := TPath.Combine(TPath.Combine(TPath.Combine(LOut, 'zig-out'), 'bin'),
+    AArtifact := TPath.Combine(TPath.Combine(LOut, 'bin'),
       Result.GetOutputFilename())
   else
     AReason := DoReports(Result.GetErrors());

@@ -197,16 +197,11 @@ const
   // can write its .dia files there (DoDiagFilePrepare)
   PC_DIAG_FILE_PROBE = '.pcpp-write-probe';
 
-  { PC_ZIG_INSTALL_DIR }
-  // zig's install folder under the build root (zig's own name, kept): the
-  // artifact lands in its bin or lib folder (DoArtifactSubdir)
-  PC_ZIG_INSTALL_DIR = 'zig-out';
-
   { PC_ZIG_COPYDLL_RECORD }
   // The record of the files the copy-DLL step copied beside the artifact, one
-  // file name per line, in the build root (beside zig-out, never in it: it is
-  // not shipped). A later build removes a recorded copy no copy-DLL names any
-  // more (DoDeployCopyDLLs)
+  // file name per line, in the build root (beside bin\ and lib\, never in
+  // them: it is not shipped). A later build removes a recorded copy no
+  // copy-DLL names any more (DoDeployCopyDLLs)
   PC_ZIG_COPYDLL_RECORD = 'pcpp-copydll.txt';
 
   { PC_ZIG_FORM_TARGET_PRE }
@@ -473,6 +468,9 @@ type
     // ClearOutput): False, with an error, when there is no output path or
     // the directory is still there afterwards
     function DoClearBuildDir(const AName: string): Boolean;
+    // Deletes the file AName under the build root (ClearOutput: the copy-DLL
+    // record), the same rules as DoClearBuildDir
+    function DoClearBuildFile(const AName: string): Boolean;
 
     // build.toml (toolchain path): resolve a raw value (empty = default),
     // save it, report a warning now or when SetErrors wires the sink
@@ -633,7 +631,7 @@ type
     function GetLibPrefix(): string;
     function GetOutputFilename(): string;
     // Where the built artifact lands under the output path (the layout rule,
-    // DoArtifactSubdir: zig-out\bin for an exe / dll, zig-out\lib for a lib)
+    // DoArtifactSubdir: bin for an exe / dll, lib for a lib)
     // and its full path, in ResolvePath's spelling
     function GetArtifactDir(): string;
     function GetArtifactPath(): string;
@@ -1898,12 +1896,13 @@ end;
 
 // Artifact layout
 //
-// THE layout rule (R14): zig installs the artifact under <root>\zig-out, in
-// 'lib' for a static library and in 'bin' for an executable and a dynamic
-// library (dynamic libraries beside the executable on every target, so a
-// program finds its DLLs by one rule; static libraries are link-time input).
-// build.zig's install step, the copy-DLL folder, the stamped and published
-// artifact and Run all derive from it.
+// THE layout rule (R14, PLAN-OUTPUT): zig installs the artifact straight
+// under the build root (zig build -p <root>, Process), in 'lib' for a static
+// library and in 'bin' for an executable and a dynamic library (dynamic
+// libraries beside the executable on every target, so a program finds its
+// DLLs by one rule; static libraries are link-time input). build.zig's
+// install step, the copy-DLL folder, the stamped and published artifact and
+// Run all derive from it.
 
 function TPCZigBuild.DoArtifactSubdir(const ABuildMode: TPCBuildMode): string;
 begin
@@ -1915,8 +1914,7 @@ end;
 
 function TPCZigBuild.DoArtifactDir(const ABuildMode: TPCBuildMode): string;
 begin
-  Result := TUtils.JoinResolvedPath(FOutputPath, PC_ZIG_INSTALL_DIR + '\' +
-    DoArtifactSubdir(ABuildMode));
+  Result := TUtils.JoinResolvedPath(FOutputPath, DoArtifactSubdir(ABuildMode));
 end;
 
 function TPCZigBuild.DoArtifactPath(): string;
@@ -2997,6 +2995,7 @@ end;
 function TPCZigBuild.Process(const AAutoRun: Boolean): Boolean;
 var
   LZigExe: string;
+  LZigArgs: string;
   LOutputFile: string;
   LArch: string;
   LOS: string;
@@ -3047,6 +3046,12 @@ begin
   if not DoDiagFilePrepare() then
     Exit;
 
+  // -p: zig installs straight into the build root (<root>\bin, <root>\lib:
+  // the layout rule, DoArtifactSubdir), never into its default zig-out. The
+  // path is text for zig: its plain spelling, quoted when it must be
+  LZigArgs := 'build --color off --summary none -p ' +
+    TUtils.QuoteCommandArg(TUtils.StripLongPathPrefix(FOutputPath));
+
   Status(RSZigBuildBuilding, [FProjectName]);
   FBuildOutput.Init(FOutputPath);
   try
@@ -3057,7 +3062,7 @@ begin
       TUtils.CaptureConsoleOutput(
         '',
         PChar(LZigExe),
-        'build --color off --summary none',
+        PChar(LZigArgs),
         FOutputPath,
         FLastExitCode,
         nil,
@@ -3073,7 +3078,7 @@ begin
       TUtils.CaptureConsoleOutput(
         '',
         PChar(LZigExe),
-        'build --color off --summary none',
+        PChar(LZigArgs),
         FOutputPath,
         FLastExitCode,
         nil,
@@ -3262,14 +3267,66 @@ begin
       [LPath, LReason]);
 end;
 
+function TPCZigBuild.DoClearBuildFile(const AName: string): Boolean;
+var
+  LPath: string;
+  LReason: string;
+begin
+  Result := False;
+
+  // Without an output path there is no build root (as DoClearBuildDir)
+  if FOutputPath = '' then
+  begin
+    if Assigned(FErrors) then
+      FErrors.Add(esError, PC_ERR_ZIGBUILD_NOOUTPUTPATH, RSZigBuildNoOutputPath);
+    Exit;
+  end;
+  LPath := TUtils.JoinResolvedPath(FOutputPath, AName);
+
+  // The result is whether the file is gone (a locked file stays)
+  LReason := RSZigBuildClearStillPresent;
+  try
+    if TFile.Exists(LPath) then
+      TFile.Delete(LPath);
+    Result := not TFile.Exists(LPath);
+  except
+    on E: Exception do
+      LReason := E.Message;
+  end;
+
+  if (not Result) and Assigned(FErrors) then
+    FErrors.Add(esError, PC_ERR_ZIGBUILD_CLEARFAILED, RSZigBuildClearFailed,
+      [LPath, LReason]);
+end;
+
 function TPCZigBuild.ClearCache(): Boolean;
 begin
   Result := DoClearBuildDir('.zig-cache');
 end;
 
 function TPCZigBuild.ClearOutput(): Boolean;
+var
+  LBinCleared: Boolean;
+  LLibCleared: Boolean;
+  LCacheCleared: Boolean;
+  LRecordCleared: Boolean;
 begin
-  Result := DoClearBuildDir(PC_ZIG_INSTALL_DIR);
+  // Everything zig and this driver write into the build root: the artifact
+  // folders (the layout rule), the project's own zig cache and the copy-DLL
+  // record, which describes bin's contents. Each is cleared even when an
+  // earlier one fails (each failure reports itself). The Compiler clears
+  // what it writes (generated) before it calls this.
+  // No output path: one report (ZB0001), nothing deleted
+  if FOutputPath = '' then
+  begin
+    Result := DoClearBuildDir(DoArtifactSubdir(bmExe));
+    Exit;
+  end;
+  LBinCleared := DoClearBuildDir(DoArtifactSubdir(bmExe));
+  LLibCleared := DoClearBuildDir(DoArtifactSubdir(bmLib));
+  LCacheCleared := ClearCache();
+  LRecordCleared := DoClearBuildFile(PC_ZIG_COPYDLL_RECORD);
+  Result := LBinCleared and LLibCleared and LCacheCleared and LRecordCleared;
 end;
 
 // Post-build resources
