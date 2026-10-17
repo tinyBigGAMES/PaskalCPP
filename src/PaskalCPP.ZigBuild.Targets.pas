@@ -82,6 +82,7 @@ const
   ARCH_SHEB         = 'sheb';
   ARCH_SPARC        = 'sparc';
   ARCH_SPARC64      = 'sparc64';
+  ARCH_SPORK8       = 'spork8';
   ARCH_SPIRV32      = 'spirv32';
   ARCH_SPIRV64      = 'spirv64';
   ARCH_THUMB        = 'thumb';
@@ -125,6 +126,8 @@ const
   OS_UEFI         = 'uefi';
   OS_3DS          = '3ds';
   OS_WIIU         = 'wiiu';
+  OS_SWITCH       = 'switch';
+  OS_GBA          = 'gba';
   OS_PSX          = 'psx';
   OS_PS3          = 'ps3';
   OS_PS4          = 'ps4';
@@ -142,6 +145,7 @@ const
   OS_OPENGL       = 'opengl';
   OS_VULKAN       = 'vulkan';
   OS_TIOS         = 'tios';
+  OS_ASHETOS      = 'ashetos';
 
   { ABIs }
   ABI_NONE        = 'none';
@@ -177,7 +181,7 @@ const
 
   { PC_ZIG_ARCHS }
   // Every architecture name above, for the exact checks below
-  PC_ZIG_ARCHS: array[0..59] of string = (
+  PC_ZIG_ARCHS: array[0..60] of string = (
     ARCH_AARCH64,
     ARCH_AARCH64_BE,
     ARCH_ALPHA,
@@ -225,6 +229,7 @@ const
     ARCH_SHEB,
     ARCH_SPARC,
     ARCH_SPARC64,
+    ARCH_SPORK8,
     ARCH_SPIRV32,
     ARCH_SPIRV64,
     ARCH_THUMB,
@@ -242,7 +247,7 @@ const
 
   { PC_ZIG_OSES }
   // Every operating system name above, for the exact checks below
-  PC_ZIG_OSES: array[0..44] of string = (
+  PC_ZIG_OSES: array[0..47] of string = (
     OS_FREESTANDING,
     OS_OTHER,
     OS_CONTIKI,
@@ -271,6 +276,8 @@ const
     OS_UEFI,
     OS_3DS,
     OS_WIIU,
+    OS_SWITCH,
+    OS_GBA,
     OS_PSX,
     OS_PS3,
     OS_PS4,
@@ -287,7 +294,8 @@ const
     OS_OPENCL,
     OS_OPENGL,
     OS_VULKAN,
-    OS_TIOS
+    OS_TIOS,
+    OS_ASHETOS
   );
 
   { PC_ZIG_ABIS }
