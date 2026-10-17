@@ -150,8 +150,11 @@ const
   PC_ZIG_MISSING_LIB_PREFIX = 'unable to find ';
 
   { PC_ZIG_MISSING_LIB_KIND }
-  // What follows the kind word (dynamic, static) in that error
-  PC_ZIG_MISSING_LIB_KIND = ' system library ''';
+  // What follows the kind word (dynamic, static) in that error, before the quoted name.
+  // zig 0.16 quotes the name with ', zig 0.17.0 with " (probed 2026-10-17:
+  // 'unable to find dynamic system library "x" using strategy paths_first. searched
+  // paths: none'): either is taken, closed by the same character.
+  PC_ZIG_MISSING_LIB_KIND = ' system library ';
 
 type
 
@@ -403,10 +406,12 @@ var
   LKindEnd: Integer;
   LStart: Integer;
   LEnd: Integer;
+  LQuote: Char;
 begin
   // The library zig's "unable to find <kind> system library '<name>' ..."
   // error names; '' for any other message. The kind is one word (dynamic,
-  // static) between the prefix and PC_ZIG_MISSING_LIB_KIND
+  // static) between the prefix and PC_ZIG_MISSING_LIB_KIND; the name is quoted
+  // with ' (zig 0.16) or " (zig 0.17.0)
   Result := '';
   if not AMessage.StartsWith(PC_ZIG_MISSING_LIB_PREFIX) then
     Exit;
@@ -417,9 +422,15 @@ begin
     LKindEnd - Length(PC_ZIG_MISSING_LIB_PREFIX)).Contains(' ') then
     Exit;
 
-  // The name runs to the closing quote
+  // The name opens with a quote and runs to the same quote character
   LStart := LKindEnd + Length(PC_ZIG_MISSING_LIB_KIND);
-  LEnd := AMessage.IndexOf('''', LStart);
+  if LStart >= AMessage.Length then
+    Exit;
+  LQuote := AMessage.Chars[LStart];
+  if (LQuote <> '''') and (LQuote <> '"') then
+    Exit;
+  LStart := LStart + 1;
+  LEnd := AMessage.IndexOf(LQuote, LStart);
   if LEnd <= LStart then
     Exit;
   Result := AMessage.Substring(LStart, LEnd - LStart);

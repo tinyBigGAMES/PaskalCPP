@@ -913,13 +913,18 @@ begin
       'error: unable to find something zig needed',
       'error: unable to find dynamic system library ''lib_z'' using strategy ''paths_first''. searched paths: none',
       'error: unable to find a dynamic system library ''lib_x''',
-      '.\a.cpp:2:1: error: unable to find dynamic system library ''lib_x'' using strategy ''paths_first''. searched paths: none']);
+      '.\a.cpp:2:1: error: unable to find dynamic system library ''lib_x'' using strategy ''paths_first''. searched paths: none',
+      // zig 0.17.0 quotes the name with " (and the strategy not at all); a name opened with
+      // one quote and closed with the other is no name
+      'error: unable to find dynamic system library "lib_y" using strategy paths_first. searched paths: none',
+      'error: unable to find dynamic system library "lib_x'' using strategy paths_first']);
 
-    Check((LFilter.CaptureCount() = 6) and (LFilter.GetCapture(0).LibraryName = 'lib_x') and
+    Check((LFilter.CaptureCount() = 8) and (LFilter.GetCapture(0).LibraryName = 'lib_x') and
       (LFilter.GetCapture(1).LibraryName = 'lib_y') and (LFilter.GetCapture(2).LibraryName = '') and
       (LFilter.GetCapture(3).LibraryName = 'lib_z') and (LFilter.GetCapture(4).LibraryName = '') and
-      (LFilter.GetCapture(5).LibraryName = ''),
-      'commit_missing_lib: names lib_x lib_y - lib_z - - (%d captures)', [LFilter.CaptureCount()]);
+      (LFilter.GetCapture(5).LibraryName = '') and (LFilter.GetCapture(6).LibraryName = 'lib_y') and
+      (LFilter.GetCapture(7).LibraryName = ''),
+      'commit_missing_lib: names lib_x lib_y - lib_z - - lib_y - (%d captures)', [LFilter.CaptureCount()]);
 
     LCommit.SetErrors(LErrors);
     LCommit.Commit(LFilter, nil, PC_BOT_ROOT, nil,
@@ -955,6 +960,8 @@ begin
       E ZB0016 :0:0 unable to find dynamic system library 'lib_z' using strategy 'paths_first'. searched paths: none
       E ZB0016 :0:0 unable to find a dynamic system library 'lib_x'
       E ZB0016 C:/bo/a.cpp:2:1 unable to find dynamic system library 'lib_x' using strategy 'paths_first'. searched paths: none
+      E ZB0016 Y.pcpp:5:9 unable to find dynamic system library "lib_y" using strategy paths_first. searched paths: none
+      E ZB0016 :0:0 unable to find dynamic system library "lib_x' using strategy paths_first
       ''';
     Check(LGot = LWant, 'commit_missing_lib: located' + sLineBreak + '%s', [LGot]);
 

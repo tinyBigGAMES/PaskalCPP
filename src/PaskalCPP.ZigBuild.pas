@@ -245,6 +245,23 @@ const
   { PC_ZIG_FORM_LINKLIB_SUF }
   PC_ZIG_FORM_LINKLIB_SUF  = ', .{});';
 
+  { PC_ZIG_FORM_LINKFILE_PRE }
+  // A Linux target's link library found in a library path, handed over as the file itself:
+  // zig 0.17.0 turns a found -l<name> into ld.lld -l:<absolute path>, which LLD searches
+  // inside the -L folders and never finds on a Windows host. The trailing marker keeps the
+  // library's name, so LoadBuildFile reads the same state back.
+  PC_ZIG_FORM_LINKFILE_PRE = 'root_module.addObjectFile(.{ .cwd_relative = ';
+
+  { PC_ZIG_FORM_LINKFILE_MID }
+  PC_ZIG_FORM_LINKFILE_MID = ' }); // pcpp linklibrary ';
+
+  { PC_ZIG_LINK_FILE_EXTS }
+  // A Linux link library's file names, in the linker's order: shared before static
+  PC_ZIG_LINK_FILE_EXTS: array[0..1] of string = (
+    '.so',
+    '.a'
+  );
+
   { PC_ZIG_FORM_ROOT_PRE }
   PC_ZIG_FORM_ROOT_PRE     = '.root = .{ .cwd_relative = ';
 
@@ -439,6 +456,7 @@ type
     function DoLoadHeaderLine(const ALine: string): Boolean;
     function DoLoadArtifactLine(const ALine: string): Boolean;
     function DoLoadModuleLine(const ALine: string): Boolean;
+    function DoLoadLinkFileLine(const ARest: string): Boolean;
     function DoLoadSourceLine(const ALine: string; var ATURoot: string): Boolean;
     function GetSourceLanguage(const ASourceFile: string): TPCSourceLanguage;
     procedure DoZigHeader(const ABuilder: TStringBuilder);
@@ -493,6 +511,8 @@ type
     // (reported), so nothing is published
     function ApplyPostBuildResources(const AArtifactPath: string): Boolean;
     function DoIsWindowsTarget(): Boolean;
+    function DoIsLinuxTarget(): Boolean;
+    function DoFindLinkFile(const ALibrary: string; out APath: string): Boolean;
     procedure DoApplyManifest(const AExePath: string);
     function DoApplyIcon(const AExePath: string): Boolean;
     function DoApplyVersionInfo(const AArtifactPath: string): Boolean;
@@ -2396,6 +2416,8 @@ var
   LCppFiles: TStringList;
   LAsmFiles: TStringList;
   LLLFiles: TStringList;
+  LLinkFile: string;
+  LLinux: Boolean;
 begin
   // Include and library paths, absolute (R30: a path on another drive than
   // the build root has no relative form)
@@ -2418,10 +2440,22 @@ begin
         '.root_module.addRPathSpecial("$ORIGIN");');
   end;
 
-  // Link libraries
+  // Link libraries. On a Linux target one found in a library path is handed over as its
+  // file (PC_ZIG_FORM_LINKFILE_PRE: zig 0.17.0's -l:<path> fails on a Windows host); the
+  // binary still records the library's soname. A name found in no library path (zig's
+  // own glibc libraries, or one that is missing) stays a system library, so a missing
+  // one is still zig's "unable to find" error, reported at its @linklibrary.
+  LLinux := DoIsLinuxTarget();
   for LI := 0 to FLinkLibraries.Count - 1 do
-    ABuilder.AppendLine('    ' + AArtifactVar + '.' + PC_ZIG_FORM_LINKLIB_PRE +
-      ZigStringLiteral(FLinkLibraries[LI]) + PC_ZIG_FORM_LINKLIB_SUF);
+  begin
+    if LLinux and DoFindLinkFile(FLinkLibraries[LI], LLinkFile) then
+      ABuilder.AppendLine('    ' + AArtifactVar + '.' + PC_ZIG_FORM_LINKFILE_PRE +
+        ZigStringLiteral(DoZigPath(LLinkFile)) + PC_ZIG_FORM_LINKFILE_MID +
+        ZigStringLiteral(FLinkLibraries[LI]))
+    else
+      ABuilder.AppendLine('    ' + AArtifactVar + '.' + PC_ZIG_FORM_LINKLIB_PRE +
+        ZigStringLiteral(FLinkLibraries[LI]) + PC_ZIG_FORM_LINKLIB_SUF);
+  end;
 
   // Source files, partitioned by language. Each group has its own flag list,
   // so C libraries, C++23 sources, assembly and LLVM IR can live in one
@@ -2858,8 +2892,35 @@ begin
   else if DoFormPayload(LRest, PC_ZIG_FORM_LINKLIB_PRE, PC_ZIG_FORM_LINKLIB_SUF, LPayload) and
     ZigStringValue(LPayload, LText) then
     AddLinkLibrary(LText)
-  else
+  // A Linux link library handed over as its file: the name it stands for is the state
+  // (GenerateBuildZig finds the file again), the path only has to be a valid literal
+  else if not DoLoadLinkFileLine(LRest) then
     Result := False;
+end;
+
+function TPCZigBuild.DoLoadLinkFileLine(const ARest: string): Boolean;
+var
+  LPos: Integer;
+  LPath: string;
+  LName: string;
+begin
+  // 'root_module.addObjectFile(.{ .cwd_relative = "<path>" }); // pcpp linklibrary "<name>"'
+  // The marker is searched from the end: a path literal cannot hold it, the name follows it.
+  Result := False;
+  if not ARest.StartsWith(PC_ZIG_FORM_LINKFILE_PRE) then
+    Exit;
+  LPos := ARest.LastIndexOf(PC_ZIG_FORM_LINKFILE_MID);
+  if LPos < Length(PC_ZIG_FORM_LINKFILE_PRE) then
+    Exit;
+  if not ZigStringValue(ARest.Substring(Length(PC_ZIG_FORM_LINKFILE_PRE),
+    LPos - Length(PC_ZIG_FORM_LINKFILE_PRE)), LPath) then
+    Exit;
+  if not ZigStringValue(ARest.Substring(LPos + Length(PC_ZIG_FORM_LINKFILE_MID)), LName) then
+    Exit;
+  if LName = '' then
+    Exit;
+  AddLinkLibrary(LName);
+  Result := True;
 end;
 
 function TPCZigBuild.DoLoadSourceLine(const ALine: string; var ATURoot: string): Boolean;
@@ -3486,6 +3547,43 @@ begin
   if not DoSplitTarget(FTarget, LArch, LOS, LAbi) then
     DoSplitTarget(PC_DEFAULT_TARGET, LArch, LOS, LAbi);
   Result := SameText(LOS, OS_WINDOWS);
+end;
+
+function TPCZigBuild.DoIsLinuxTarget(): Boolean;
+var
+  LArch: string;
+  LOS: string;
+  LAbi: string;
+begin
+  // Same resolution as DoIsWindowsTarget: an unparseable target is the default
+  if not DoSplitTarget(FTarget, LArch, LOS, LAbi) then
+    DoSplitTarget(PC_DEFAULT_TARGET, LArch, LOS, LAbi);
+  Result := SameText(LOS, OS_LINUX);
+end;
+
+function TPCZigBuild.DoFindLinkFile(const ALibrary: string; out APath: string): Boolean;
+var
+  LI: Integer;
+  LExt: Integer;
+  LCandidate: string;
+begin
+  // The linker's own search for -l<name>: each library path in order, a shared library
+  // before a static one in the same folder (zig's paths_first). FLibraryPaths are stored
+  // resolved, so JoinResolvedPath joins without touching the file system; FileExists
+  // reports by result and never raises.
+  Result := False;
+  APath := '';
+  for LI := 0 to FLibraryPaths.Count - 1 do
+    for LExt := Low(PC_ZIG_LINK_FILE_EXTS) to High(PC_ZIG_LINK_FILE_EXTS) do
+    begin
+      LCandidate := TUtils.JoinResolvedPath(FLibraryPaths[LI],
+        'lib' + ALibrary + PC_ZIG_LINK_FILE_EXTS[LExt]);
+      if FileExists(LCandidate) then
+      begin
+        APath := LCandidate;
+        Exit(True);
+      end;
+    end;
 end;
 
 procedure TPCZigBuild.DoApplyManifest(const AExePath: string);

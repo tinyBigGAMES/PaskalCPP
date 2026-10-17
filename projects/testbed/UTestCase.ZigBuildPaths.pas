@@ -726,8 +726,12 @@ begin
   Check(LDir <> '', 'round trip: scratch dir prepared');
   if LDir = '' then
     Exit;
+  // Case 5's library: a Linux link library found in a library path (written into this
+  // test's own scratch folder; its bytes never reach a linker)
+  TDirectory.CreateDirectory(TPath.Combine(LDir, 'lib5'));
+  TFile.WriteAllText(TPath.Combine(LDir, 'lib5\libzbf.so'), 'not a library');
 
-  for LCase := 1 to 4 do
+  for LCase := 1 to 5 do
   begin
     LKind := LCase;
     LOk := DoRoundTrip(LDir,
@@ -767,11 +771,28 @@ begin
               AZig.SetTarget('aarch64-macos');
               AZig.SetOptimizeLevel(olReleaseSmall);
             end;
+          5:
+            begin
+              // A Linux exe: zbf is found in lib5 (handed over as its file), m in no
+              // library path (stays a system library: zig's own glibc)
+              AZig.SetTarget(ARCH_X86_64, OS_LINUX, ABI_GNU);
+              AZig.AddLibraryPath(TPath.Combine(LDir, 'lib5'));
+              AZig.AddLinkLibrary('zbf');
+              AZig.AddLinkLibrary('m');
+            end;
         end;
       end, LFirst, LSecond, LItems);
     Check(LOk and (LItems = 0), 'round trip: case %d loads back byte for byte (%d items)' +
       sLineBreak + '--- written' + sLineBreak + '%s' + sLineBreak + '--- after a load' +
       sLineBreak + '%s', [LCase, LItems, LFirst, LSecond]);
+    if LCase = 5 then
+    begin
+      Check(LFirst.Contains('.root_module.addObjectFile(.{ .cwd_relative = "') and
+        LFirst.Contains('/lib5/libzbf.so" }); // pcpp linklibrary "zbf"'),
+        'round trip: case 5 hands the found Linux library over as its file');
+      Check(LFirst.Contains('.root_module.linkSystemLibrary("m", .{});'),
+        'round trip: case 5 keeps a library found in no path a system library');
+    end;
   end;
 end;
 
