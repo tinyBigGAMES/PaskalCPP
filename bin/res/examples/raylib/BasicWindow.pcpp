@@ -14,7 +14,8 @@
   at https://mozilla.org/MPL/2.0/.
 -------------------------------------------------------------------------------
   BasicWindow.pcpp - raylib example: opens an 800 x 450 window and draws
-  a line of text until the window is closed.
+  a line of text, with the raylib version in the bottom-left corner, until
+  the window is closed.
 ==============================================================================*/
 
 module exe BasicWindow;
@@ -35,6 +36,9 @@ begin
     ClearBackground(RAYWHITE);
     DrawText("Congrats! You created your first window!", 190, 200, 20,
       LIGHTGRAY);
+    // RAYLIB_VERSION comes from raylib.h: the version this program was built with
+    DrawText(TextFormat("raylib %s", RAYLIB_VERSION), 10, CScreenHeight - 30, 20,
+      GRAY);
     EndDrawing();
   end;
 

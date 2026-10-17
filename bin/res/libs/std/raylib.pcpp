@@ -33,7 +33,7 @@ module unit raylib;
   @linklibrary "gdi32";
   @linklibrary "winmm";
 @elseif TARGET_X86_64_LINUX_GNU
-  @addlibrarypath "$P:res/libs/vendor/linux64";
+  @addlibrarypath "$P:res/libs/vendor/linux64/lib";
   @addlibrarypath "$P:res/libs/vendor/raylib/lib/x86_64-linux-gnu";
   @linklibrary "GL";
   @linklibrary "X11";
