@@ -21,7 +21,7 @@
 
   How to check, from repo\bin:
     pcpp res\tests\exe_stamps.pcpp
-  CHECK: Explorer shows output\zig-out\bin\exe_stamps.exe with the PaskalCPP icon;
+  CHECK: Explorer shows output\bin\exe_stamps.exe with the PaskalCPP icon;
   its Properties > Details tab shows version 1.2.3.0, product "PaskalCPP
   Compliance", description "exe_stamps test program".
 *******************************************************************************/

@@ -22,7 +22,7 @@
     pcpp res\tests\mod_kinds_dll.pcpp
     pcpp res\tests\mod_kinds_dll.pcpp -t x86_64-linux-gnu
   The build succeeds and reports nothing.
-  CHECK: output\zig-out\bin holds mod_kinds_dll.dll (windows) or
+  CHECK: output\bin holds mod_kinds_dll.dll (windows) or
   libmod_kinds_dll.so (linux)
 
   Break it: mod_kinds_err_body.pcpp (a begin body where there must be none).

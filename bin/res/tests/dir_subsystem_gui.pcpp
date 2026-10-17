@@ -27,7 +27,7 @@
     pcpp res\tests\dir_subsystem_gui.pcpp -r
   CHECK: no console window opens; a message box titled "dir_subsystem_gui"
   says "subsystem: gui"; closing it ends the program
-  CHECK: started from Explorer (output\zig-out\bin\dir_subsystem_gui.exe),
+  CHECK: started from Explorer (output\bin\dir_subsystem_gui.exe),
   the same, and still no console window
 *******************************************************************************/
 

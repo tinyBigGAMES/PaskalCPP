@@ -40,7 +40,7 @@
   EXITCODE: 0
   Two [Heap] lines: the program's and the debug dll's own (a dll has its own
   heap and its own report, at its shutdown).
-  CHECK: output\zig-out\bin holds dir_copydll_dll.dll beside dir_copydll.exe
+  CHECK: output\bin holds dir_copydll_dll.dll beside dir_copydll.exe
   (libdir_copydll_dll.so beside dir_copydll on Linux).
 
   Break it: run each file below the same way, without -r; each reports
@@ -52,10 +52,10 @@
 
 module exe dir_copydll;
 @ifdef TARGET_X86_64_LINUX_GNU
-@copydll "$P:output/dir_copydll_dll_linux/zig-out/bin/libdir_copydll_dll.so";
+@copydll "$P:output/dir_copydll_dll_linux/bin/libdir_copydll_dll.so";
 @linklibrary "dl";
 @else
-@copydll "$P:output/dir_copydll_dll/zig-out/bin/dir_copydll_dll.dll";
+@copydll "$P:output/dir_copydll_dll/bin/dir_copydll_dll.dll";
 @endif
 
 #include <string>

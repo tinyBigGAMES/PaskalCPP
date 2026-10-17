@@ -22,7 +22,7 @@
     pcpp res\tests\mod_kinds_lib.pcpp
     pcpp res\tests\mod_kinds_lib.pcpp -t x86_64-linux-gnu
   The build succeeds and reports nothing.
-  CHECK: output\zig-out\lib holds mod_kinds_lib.lib (windows) or
+  CHECK: output\lib holds mod_kinds_lib.lib (windows) or
   libmod_kinds_lib.a (linux)
 
   Break it: mod_kinds_err_body.pcpp (a begin body in a lib).
