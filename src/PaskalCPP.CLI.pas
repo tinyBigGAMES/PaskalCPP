@@ -286,6 +286,9 @@ begin
   TConsole.PrintLn(COLOR_BOLD + RSPcCliHelpUsageHeader);
   TConsole.PrintLn('  ' + LExeName + ' ' + COLOR_CYAN + RSPcCliHelpSourceArg +
     COLOR_RESET + ' ' + RSPcCliHelpOptionsArg);
+  // The clean form takes no source: its own usage line
+  TConsole.PrintLn('  ' + LExeName + ' --clean ' + COLOR_CYAN + '[<folder>]' +
+    COLOR_RESET + ' [--dry-run]');
   TConsole.PrintLn('');
   TConsole.PrintLn(COLOR_BOLD + RSPcCliHelpRequiredHeader);
   TConsole.PrintLn('  ' + COLOR_CYAN + RSPcCliHelpSourceArg + COLOR_RESET +
@@ -795,6 +798,8 @@ var
   LTarget: string;
   LFiles: Int64;
   LBytes: Int64;
+  LInput: THandle;
+  LMode: DWORD;
 begin
   // pcpp --clean [<folder>] [--dry-run]: the compiler proves the folder is a
   // pcpp output folder (CheckCleanFolder reads only), the targets are
@@ -833,9 +838,13 @@ begin
     Exit;
   end;
 
-  // A person answers: a stdin that is not a console (a pipe, a file) is
-  // refused, never read as an answer
-  if GetFileType(GetStdHandle(STD_INPUT_HANDLE)) <> FILE_TYPE_CHAR then
+  // A person answers: a stdin that is not a console (a pipe, a file, NUL or
+  // another character device) is refused, never read as an answer.
+  // GetConsoleMode succeeds only on a console input handle; the file type
+  // alone does not tell NUL from a console (both are FILE_TYPE_CHAR)
+  LInput := GetStdHandle(STD_INPUT_HANDLE);
+  if (LInput = 0) or (LInput = INVALID_HANDLE_VALUE) or
+    not GetConsoleMode(LInput, LMode) then
   begin
     TConsole.PrintLn(COLOR_RED + RSPcCliCleanNotConsole);
     Exit;

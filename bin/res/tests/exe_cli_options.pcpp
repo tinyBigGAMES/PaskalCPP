@@ -26,6 +26,7 @@
 
     USAGE:
       pcpp <source> [OPTIONS]
+      pcpp --clean [<folder>] [--dry-run]
 
     REQUIRED:
       <source>                  Main module (.pcpp)
@@ -44,6 +45,8 @@
       -- <args>                    Everything after -- is passed, as written, to the program -r or -d runs
       --lsp                        Run the language server on stdin/stdout (takes no other argument)
       --dap                        Run the debug adapter (DAP) on stdin/stdout (takes no other argument)
+      --clean         [<folder>]   Clear a pcpp output folder (default: the current folder), after checks and a y/N question
+      --dry-run                    With --clean: check and list what would be deleted, delete nothing
       -h, --help                   Display this help message
 
     EXAMPLES:
@@ -53,6 +56,7 @@
       pcpp hello -d
       pcpp hello --target x86_64-linux-gnu --output build
       pcpp editor hello.pcpp
+      pcpp --clean output --dry-run
   EXITCODE: 0
   <VERSION> is the compiler's version (the banner's one changing text); the
   tester runs pcpp.exe itself (cmCli), once: the CLI is the same for every
