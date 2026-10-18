@@ -1,0 +1,111 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  FallingBoxes.pcpp - Box2D example: three boxes fall onto the ground and
+  come to rest. Every second of simulated time it prints each box's
+  position and angle, then whether each box has gone to sleep. No window:
+  Box2D is deterministic, so the output is the same on every target.
+==============================================================================*/
+
+module exe FallingBoxes;
+
+import
+  box2d;
+
+const
+  CBoxCount: int32 = 3;
+  CSteps: int32 = 300;
+  CPrintEvery: int32 = 60;
+  CSubSteps: int32 = 4;
+  CTimeStep: float32 = float32(1.0 / 60.0);
+
+var
+  LVersion: b2Version;
+  LWorldDef: b2WorldDef;
+  LWorld: b2WorldId;
+  LGroundDef: b2BodyDef;
+  LGround: b2BodyId;
+  LGroundBox: b2Polygon;
+  LGroundShape: b2ShapeDef;
+  LBodyDef: b2BodyDef;
+  LBox: b2Polygon;
+  LShapeDef: b2ShapeDef;
+  LBodies: array[0..CBoxCount - 1] of b2BodyId;
+  LI: int32;
+  LStep: int32;
+  LPos: b2Vec2;
+  LAngle: float32;
+
+begin
+  LVersion := b2GetVersion();
+  println("Box2D {}.{}.{}", LVersion.major, LVersion.minor, LVersion.revision);
+
+  // The world: earth gravity, pointing down
+  LWorldDef := b2DefaultWorldDef();
+  LWorldDef.gravity.x := 0.0;
+  LWorldDef.gravity.y := -10.0;
+  LWorld := b2CreateWorld(address of LWorldDef);
+
+  // The ground: a static box 20 m wide whose top edge is at y = 0
+  LGroundDef := b2DefaultBodyDef();
+  LGroundDef.position.x := 0.0;
+  LGroundDef.position.y := -1.0;
+  LGround := b2CreateBody(LWorld, address of LGroundDef);
+  LGroundBox := b2MakeBox(10.0, 1.0);
+  LGroundShape := b2DefaultShapeDef();
+  b2CreatePolygonShape(LGround, address of LGroundShape, address of LGroundBox);
+
+  // Three 1 m boxes, dropped from different heights a little apart, so they
+  // land on top of each other and tip over
+  LBox := b2MakeBox(0.5, 0.5);
+  for LI := 0 to CBoxCount - 1 do
+    LBodyDef := b2DefaultBodyDef();
+    LBodyDef.type := b2_dynamicBody;
+    LBodyDef.position.x := 0.4 * (LI - 1);
+    LBodyDef.position.y := 4.0 + 2.0 * LI;
+    LBodies[LI] := b2CreateBody(LWorld, address of LBodyDef);
+    LShapeDef := b2DefaultShapeDef();
+    LShapeDef.density := 1.0;
+    LShapeDef.material.friction := 0.6;
+    b2CreatePolygonShape(LBodies[LI], address of LShapeDef, address of LBox);
+  end;
+
+  // Step 60 times a second for 5 seconds; print once a second
+  for LStep := 0 to CSteps do
+    if LStep > 0 then
+      b2World_Step(LWorld, CTimeStep, CSubSteps);
+    end;
+    if LStep mod CPrintEvery = 0 then
+      println("t = {:.1f} s", float32(LStep) * CTimeStep);
+      for LI := 0 to CBoxCount - 1 do
+        LPos := b2Body_GetPosition(LBodies[LI]);
+        LAngle := b2Rot_GetAngle(b2Body_GetRotation(LBodies[LI]));
+        println("  box {}: x {:7.3f}  y {:7.3f}  angle {:7.3f}", LI, LPos.x, LPos.y,
+          LAngle);
+      end;
+    end;
+  end;
+
+  // Bodies at rest go to sleep: Box2D stops simulating them
+  for LI := 0 to CBoxCount - 1 do
+    if b2Body_IsAwake(LBodies[LI]) then
+      println("box {} is still moving", LI);
+    else
+      println("box {} is asleep", LI);
+    end;
+  end;
+
+  b2DestroyWorld(LWorld);
+end.

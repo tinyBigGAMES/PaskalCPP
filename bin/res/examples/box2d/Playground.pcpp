@@ -1,0 +1,407 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  Playground.pcpp - Box2D + raylib example: a pyramid of boxes on a platform,
+  simulated by Box2D and drawn by raylib.
+    left click   drop a box at the mouse
+    right click  drop a ball at the mouse
+    space        an explosion at the mouse
+    R            build the pyramid again
+  Bodies Box2D has put to sleep (at rest, no longer simulated) are drawn
+  faded. A body that falls off the platform's edge and out of view is
+  removed from the world, so it can be played for as long as you like.
+==============================================================================*/
+
+module exe Playground;
+
+import
+  raylib,
+  box2d,
+  SysUtils;
+
+const
+  CScreenWidth: int32 = 1280;
+  CScreenHeight: int32 = 720;
+  // 1 m of the world is 30 pixels; the ground's top edge is 60 pixels above
+  // the bottom of the window
+  CPixelsPerMeter: float64 = 30.0;
+  CGroundOffset: float64 = 60.0;
+  // The platform is 70% of the window wide: things pushed past its edges fall
+  CPlatformShare: float64 = 0.7;
+  // A body this far (m) below the window's bottom edge is out of view: removed
+  CFallMargin: float64 = 1.5;
+  CPyramidRows: int32 = 12;
+  // A safety net only: fallen bodies are removed, so it takes a deliberate
+  // pile on the platform to reach it
+  CMaxPieces: int64 = 1000;
+  CFullShow: float64 = 2.0;
+  CTimeStep: float64 = 1.0 / 60.0;
+  CSubSteps: int32 = 4;
+  CBlastRadius: float64 = 7.0;
+  CBlastShow: float64 = 0.35;
+
+type
+  // One body and how to draw it: a box by its half extents, a ball by its
+  // radius (HalfWidth)
+  TPiece = record
+    Body: b2BodyId;
+    HalfWidth: float64;
+    HalfHeight: float64;
+    IsBall: bool;
+    IsStatic: bool;
+    Tint: Color;
+  end;
+
+var
+  GWorld: b2WorldId;
+  GPieces: array of TPiece;
+  GBlastAt: Vector2;
+  GBlastLeft: float64;
+  GFallen: int64;
+  GFullLeft: float64;
+
+// A Box2D vector from its two parts
+routine V2(const AX: float64; const AY: float64): b2Vec2;
+var
+  LResult: b2Vec2;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  return LResult;
+end;
+
+// A raylib color from its red, green and blue parts (0 .. 255)
+routine Rgb(const AR: int32; const AG: int32; const AB: int32): Color;
+var
+  LResult: Color;
+begin
+  LResult.r := AR;
+  LResult.g := AG;
+  LResult.b := AB;
+  LResult.a := 255;
+  return LResult;
+end;
+
+// World meters to window pixels. Box2D's y points up, the window's down; the
+// world's x = 0 is the middle of the window
+routine ToScreen(const APoint: b2Vec2): Vector2;
+var
+  LResult: Vector2;
+begin
+  LResult.x := float64(GetScreenWidth()) * 0.5 + APoint.x * CPixelsPerMeter;
+  LResult.y := float64(GetScreenHeight()) - CGroundOffset - APoint.y * CPixelsPerMeter;
+  return LResult;
+end;
+
+// Window pixels back to world meters (where the mouse points)
+routine ToWorld(const APoint: Vector2): b2Vec2;
+begin
+  return V2((APoint.x - float64(GetScreenWidth()) * 0.5) / CPixelsPerMeter,
+    (float64(GetScreenHeight()) - CGroundOffset - APoint.y) / CPixelsPerMeter);
+end;
+
+// Adds a box body: a static one (the platform) never moves
+routine AddBox(const ACenter: b2Vec2; const AHalfWidth: float64;
+  const AHalfHeight: float64; const AIsStatic: bool; const ATint: Color);
+var
+  LBodyDef: b2BodyDef;
+  LShapeDef: b2ShapeDef;
+  LBox: b2Polygon;
+  LPiece: TPiece;
+begin
+  // Full: the HUD says so for a moment instead of the click doing nothing
+  if len(GPieces) >= CMaxPieces then
+    GFullLeft := CFullShow;
+    return;
+  end;
+  LBodyDef := b2DefaultBodyDef();
+  if not AIsStatic then
+    LBodyDef.type := b2_dynamicBody;
+  end;
+  LBodyDef.position := ACenter;
+  LPiece.Body := b2CreateBody(GWorld, address of LBodyDef);
+  LBox := b2MakeBox(AHalfWidth, AHalfHeight);
+  LShapeDef := b2DefaultShapeDef();
+  LShapeDef.density := 1.0;
+  LShapeDef.material.friction := 0.6;
+  b2CreatePolygonShape(LPiece.Body, address of LShapeDef, address of LBox);
+  LPiece.HalfWidth := AHalfWidth;
+  LPiece.HalfHeight := AHalfHeight;
+  LPiece.IsBall := false;
+  LPiece.IsStatic := AIsStatic;
+  LPiece.Tint := ATint;
+  setlength(GPieces, len(GPieces) + 1);
+  GPieces[len(GPieces) - 1] := LPiece;
+end;
+
+// Adds a ball: a little bouncy, so it rolls and hops off the boxes
+routine AddBall(const ACenter: b2Vec2; const ARadius: float64; const ATint: Color);
+var
+  LBodyDef: b2BodyDef;
+  LShapeDef: b2ShapeDef;
+  LCircle: b2Circle;
+  LPiece: TPiece;
+begin
+  if len(GPieces) >= CMaxPieces then
+    GFullLeft := CFullShow;
+    return;
+  end;
+  LBodyDef := b2DefaultBodyDef();
+  LBodyDef.type := b2_dynamicBody;
+  LBodyDef.position := ACenter;
+  LPiece.Body := b2CreateBody(GWorld, address of LBodyDef);
+  LCircle.center := V2(0.0, 0.0);
+  LCircle.radius := ARadius;
+  LShapeDef := b2DefaultShapeDef();
+  LShapeDef.density := 2.0;
+  LShapeDef.material.friction := 0.4;
+  LShapeDef.material.restitution := 0.35;
+  b2CreateCircleShape(LPiece.Body, address of LShapeDef, address of LCircle);
+  LPiece.HalfWidth := ARadius;
+  LPiece.HalfHeight := ARadius;
+  LPiece.IsBall := true;
+  LPiece.IsStatic := false;
+  LPiece.Tint := ATint;
+  setlength(GPieces, len(GPieces) + 1);
+  GPieces[len(GPieces) - 1] := LPiece;
+end;
+
+// A fresh world: the platform, the pyramid on it
+routine BuildWorld();
+var
+  LWorldDef: b2WorldDef;
+  LHalfPlatform: float64;
+  LRow: int32;
+  LColumn: int32;
+  LCount: int32;
+  LX: float64;
+  LY: float64;
+begin
+  LWorldDef := b2DefaultWorldDef();
+  LWorldDef.gravity := V2(0.0, -10.0);
+  GWorld := b2CreateWorld(address of LWorldDef);
+  setlength(GPieces, 0);
+  GFallen := 0;
+
+  // The platform's top edge is the world's y = 0; open space at both sides
+  LHalfPlatform := float64(CScreenWidth) * CPlatformShare * 0.5 / CPixelsPerMeter;
+  AddBox(V2(0.0, -1.0), LHalfPlatform, 1.0, true, Rgb(52, 58, 76));
+
+  // Row 0 has CPyramidRows boxes, each row above one fewer, centered; each
+  // row gets its own hue
+  for LRow := 0 to CPyramidRows - 1 do
+    LCount := CPyramidRows - LRow;
+    for LColumn := 0 to LCount - 1 do
+      LX := (float64(LColumn) - float64(LCount - 1) * 0.5) * 1.02;
+      LY := 0.5 + float64(LRow) * 1.0;
+      AddBox(V2(LX, LY), 0.48, 0.48, false,
+        ColorFromHSV(float64(LRow) * 28.0, 0.55, 0.95));
+    end;
+  end;
+end;
+
+// Drops a box of a random size and color at the mouse
+routine DropBox();
+var
+  LHalf: float64;
+begin
+  // Half extent 0.4 .. 1.4 m: boxes 0.8 .. 2.8 m across
+  LHalf := float64(GetRandomValue(40, 140)) / 100.0;
+  AddBox(ToWorld(GetMousePosition()), LHalf, LHalf, false,
+    ColorFromHSV(float64(GetRandomValue(0, 359)), 0.6, 0.95));
+end;
+
+// Drops a ball of a random size and color at the mouse
+routine DropBall();
+var
+  LRadius: float64;
+begin
+  // Radius 0.4 .. 1.3 m
+  LRadius := float64(GetRandomValue(40, 130)) / 100.0;
+  AddBall(ToWorld(GetMousePosition()), LRadius,
+    ColorFromHSV(float64(GetRandomValue(0, 359)), 0.45, 1.0));
+end;
+
+// Pushes every body near the mouse away from it
+routine Explode();
+var
+  LBlast: b2ExplosionDef;
+begin
+  LBlast := b2DefaultExplosionDef();
+  LBlast.position := ToWorld(GetMousePosition());
+  LBlast.radius := CBlastRadius;
+  LBlast.falloff := 2.0;
+  LBlast.impulsePerLength := 15.0;
+  b2World_Explode(GWorld, address of LBlast);
+  GBlastAt := GetMousePosition();
+  GBlastLeft := CBlastShow;
+end;
+
+// Removes every body that fell off the platform and out of view: destroyed in
+// Box2D and dropped from the list, which closes up (kept bodies keep their
+// order, so they draw as before)
+routine RemoveFallen();
+var
+  LDepth: float64;
+  LI: int64;
+  LKeep: int64;
+  LPos: b2Vec2;
+begin
+  // The window's bottom edge is CGroundOffset pixels below the world's y = 0
+  LDepth := -CGroundOffset / CPixelsPerMeter - CFallMargin;
+  LKeep := 0;
+  for LI := 0 to len(GPieces) - 1 do
+    LPos := b2Body_GetPosition(GPieces[LI].Body);
+    if not GPieces[LI].IsStatic and (LPos.y < LDepth) then
+      b2DestroyBody(GPieces[LI].Body);
+      GFallen := GFallen + 1;
+    else
+      GPieces[LKeep] := GPieces[LI];
+      LKeep := LKeep + 1;
+    end;
+  end;
+  setlength(GPieces, LKeep);
+end;
+
+// Draws one body where Box2D has it now: the fill rotated with the body, then
+// its outline through the corners (a ball: a spoke shows it rolling)
+routine DrawPiece(const APiece: TPiece);
+var
+  LCenter: Vector2;
+  LAngle: float64;
+  LFill: Color;
+  LEdge: Color;
+  LRect: Rectangle;
+  LOrigin: Vector2;
+  LC0: Vector2;
+  LC1: Vector2;
+  LC2: Vector2;
+  LC3: Vector2;
+  LHW: float64;
+  LHH: float64;
+begin
+  LCenter := ToScreen(b2Body_GetPosition(APiece.Body));
+  LAngle := b2Rot_GetAngle(b2Body_GetRotation(APiece.Body));
+  LFill := APiece.Tint;
+  // At rest and asleep: faded, so Box2D's sleeping is visible
+  if not APiece.IsStatic and not b2Body_IsAwake(APiece.Body) then
+    LFill := Fade(LFill, 0.55);
+  end;
+  LEdge := ColorBrightness(APiece.Tint, -0.45);
+  LHW := APiece.HalfWidth;
+  LHH := APiece.HalfHeight;
+
+  if APiece.IsBall then
+    DrawCircleV(LCenter, LHW * CPixelsPerMeter, LFill);
+    DrawCircleLinesV(LCenter, LHW * CPixelsPerMeter, LEdge);
+    DrawLineEx(LCenter, ToScreen(b2Body_GetWorldPoint(APiece.Body, V2(LHW, 0.0))),
+      2.0, LEdge);
+    return;
+  end;
+
+  // raylib turns clockwise in degrees, Box2D counter-clockwise in radians
+  LRect.x := LCenter.x;
+  LRect.y := LCenter.y;
+  LRect.width := LHW * 2.0 * CPixelsPerMeter;
+  LRect.height := LHH * 2.0 * CPixelsPerMeter;
+  LOrigin.x := LHW * CPixelsPerMeter;
+  LOrigin.y := LHH * CPixelsPerMeter;
+  DrawRectanglePro(LRect, LOrigin, -LAngle * RAD2DEG, LFill);
+
+  LC0 := ToScreen(b2Body_GetWorldPoint(APiece.Body, V2(-LHW, -LHH)));
+  LC1 := ToScreen(b2Body_GetWorldPoint(APiece.Body, V2(LHW, -LHH)));
+  LC2 := ToScreen(b2Body_GetWorldPoint(APiece.Body, V2(LHW, LHH)));
+  LC3 := ToScreen(b2Body_GetWorldPoint(APiece.Body, V2(-LHW, LHH)));
+  DrawLineEx(LC0, LC1, 2.0, LEdge);
+  DrawLineEx(LC1, LC2, 2.0, LEdge);
+  DrawLineEx(LC2, LC3, 2.0, LEdge);
+  DrawLineEx(LC3, LC0, 2.0, LEdge);
+end;
+
+// The text in the top-left corner: what is in the world, and the controls
+routine DrawHud();
+var
+  LText: string;
+begin
+  DrawText("Box2D + raylib", 20, 16, 30, RAYWHITE);
+  LText := FormatStr("{} bodies, {} awake, {} fallen off", len(GPieces),
+    b2World_GetAwakeBodyCount(GWorld), GFallen);
+  DrawText(LText.c_str(), 20, 52, 20, Rgb(200, 205, 220));
+  DrawText("left click: box   right click: ball   space: explode   R: reset", 20, 78,
+    20, Rgb(140, 148, 170));
+  if GFullLeft > 0.0 then
+    LText := FormatStr("The world is full: {} bodies. Push some off the edge.",
+      CMaxPieces);
+    DrawText(LText.c_str(), 20, 104, 20, Rgb(255, 170, 90));
+  end;
+  DrawFPS(GetScreenWidth() - 100, 16);
+end;
+
+var
+  LI: int64;
+  LRing: float64;
+
+begin
+  // HighDPI: the window is scaled to the monitor's DPI (and follows it to
+  // another monitor); raylib keeps drawing and the mouse in logical pixels,
+  // so everything below works in the 1280 x 720 it asks for
+  SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_HIGHDPI);
+  InitWindow(CScreenWidth, CScreenHeight, "PaskalCPP - Box2D Playground");
+  SetTargetFPS(60);
+  BuildWorld();
+
+  while not WindowShouldClose() do
+    if IsMouseButtonPressed(MOUSE_BUTTON_LEFT) then
+      DropBox();
+    end;
+    if IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) then
+      DropBall();
+    end;
+    if IsKeyPressed(KEY_SPACE) then
+      Explode();
+    end;
+    if IsKeyPressed(KEY_R) then
+      b2DestroyWorld(GWorld);
+      BuildWorld();
+    end;
+
+    // One fixed step per frame: the window runs at 60 frames a second
+    b2World_Step(GWorld, CTimeStep, CSubSteps);
+    RemoveFallen();
+    if GFullLeft > 0.0 then
+      GFullLeft := GFullLeft - float64(GetFrameTime());
+    end;
+
+    BeginDrawing();
+    DrawRectangleGradientV(0, 0, GetScreenWidth(), GetScreenHeight(), Rgb(24, 28, 40),
+      Rgb(60, 70, 96));
+    for LI := 0 to len(GPieces) - 1 do
+      DrawPiece(GPieces[LI]);
+    end;
+
+    // The explosion: a ring that grows to the blast radius and fades out
+    if GBlastLeft > 0.0 then
+      LRing := (1.0 - GBlastLeft / CBlastShow) * CBlastRadius * CPixelsPerMeter;
+      DrawCircleLinesV(GBlastAt, LRing, Fade(RAYWHITE, GBlastLeft / CBlastShow));
+      GBlastLeft := GBlastLeft - float64(GetFrameTime());
+    end;
+
+    DrawHud();
+    EndDrawing();
+  end;
+
+  b2DestroyWorld(GWorld);
+  CloseWindow();
+end.
