@@ -24,28 +24,6 @@ module exe Window;
 import
   glfw;
 
-// OpenGL 1.0's two calls this example draws with, fetched through GLFW once a
-// context is current: no GL header and no GL library is needed on any target.
-typedef void (*TGLClearColorFn)(float, float, float, float);
-typedef void (*TGLClearFn)(unsigned int);
-
-static TGLClearColorFn GGLClearColor = nullptr;
-static TGLClearFn GGLClear = nullptr;
-
-static bool LoadGL()
-{
-  GGLClearColor = reinterpret_cast<TGLClearColorFn>(glfwGetProcAddress("glClearColor"));
-  GGLClear = reinterpret_cast<TGLClearFn>(glfwGetProcAddress("glClear"));
-  return (GGLClearColor != nullptr) && (GGLClear != nullptr);
-}
-
-// GL_COLOR_BUFFER_BIT
-static void ClearScreen(float ARed, float AGreen, float ABlue)
-{
-  GGLClearColor(ARed, AGreen, ABlue, 1.0f);
-  GGLClear(0x00004000u);
-}
-
 const
   CWidth: int32  = 800;
   CHeight: int32 = 450;
@@ -67,6 +45,8 @@ var
   LWindow: ptr to GLFWwindow;
   LWidth: int32;
   LHeight: int32;
+  LFbWidth: int32;
+  LFbHeight: int32;
   LScaleX: float32;
   LScaleY: float32;
   LMouseX: float64;
@@ -89,30 +69,33 @@ begin
   end;
   glfwMakeContextCurrent(LWindow);
   glfwSwapInterval(1);
-  if not LoadGL() then
-    glfwTerminate();
-    raise("OpenGL has no glClearColor / glClear");
-  end;
   glfwSetKeyCallback(LWindow, KeyPressed);
 
   println("GLFW {}: move the mouse, press keys, Escape closes",
     glfwGetVersionString());
+  // glGetString gives the text as const GLubyte*: printed as a C string
+  println("OpenGL {}", ptr to const char(glGetString(GL_VERSION)));
   glfwGetWindowContentScale(LWindow, address of LScaleX, address of LScaleY);
   println("monitor content scale {} x {}", LScaleX, LScaleY);
 
   while glfwWindowShouldClose(LWindow) = GLFW_FALSE do
-    // The window's size in cursor coordinates, asked each frame: the scale
-    // or the user may have changed it
+    // The window's size in cursor coordinates and the framebuffer's in
+    // pixels, asked each frame: the scale or the user may have changed them
     glfwGetWindowSize(LWindow, address of LWidth, address of LHeight);
+    glfwGetFramebufferSize(LWindow, address of LFbWidth, address of LFbHeight);
     glfwGetCursorPos(LWindow, address of LMouseX, address of LMouseY);
     LShade := 0.5;
     if glfwGetMouseButton(LWindow, GLFW_MOUSE_BUTTON_LEFT) = GLFW_PRESS then
       LShade := 1.0;
     end;
+
+    glViewport(0, 0, LFbWidth, LFbHeight);
     if (LWidth > 0) and (LHeight > 0) then
-      ClearScreen(float32(LMouseX / LWidth) * LShade,
-        float32(LMouseY / LHeight) * LShade, 0.25 * LShade);
+      glClearColor(float32(LMouseX / LWidth) * LShade,
+        float32(LMouseY / LHeight) * LShade, 0.25 * LShade, 1.0);
     end;
+    glClear(GL_COLOR_BUFFER_BIT);
+
     glfwSwapBuffers(LWindow);
     glfwPollEvents();
   end;

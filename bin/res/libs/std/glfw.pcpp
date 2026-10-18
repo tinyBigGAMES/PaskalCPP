@@ -28,14 +28,18 @@ module unit glfw;
 
 @addincludepath "$P:res/libs/vendor/glfw/include";
 
-// GLFW's own link list (its glfw3.pc). It loads the window system and the
-// OpenGL library itself at run time (opengl32.dll; libX11.so.6, libGL.so.1),
-// so nothing here links them.
+// GLFW's own link list (its glfw3.pc), plus OpenGL itself: glfw3.h includes
+// GL/gl.h, so a program calls GL directly on every target. Windows has the
+// header from mingw; Linux takes it, and libGL.so, from vendor/linux64.
 @ifdef TARGET_X86_64_WINDOWS_GNU
   @addlibrarypath "$P:res/libs/vendor/glfw/lib/x86_64-windows-gnu";
+  @linklibrary "opengl32";
   @linklibrary "gdi32";
 @elseif TARGET_X86_64_LINUX_GNU
+  @addincludepath "$P:res/libs/vendor/linux64/include";
+  @addlibrarypath "$P:res/libs/vendor/linux64/lib";
   @addlibrarypath "$P:res/libs/vendor/glfw/lib/x86_64-linux-gnu";
+  @linklibrary "GL";
   @linklibrary "m";
   @linklibrary "pthread";
   @linklibrary "dl";
@@ -49,10 +53,6 @@ module unit glfw;
 // The header goes to this unit's header, so every importer sees GLFW's API
 cpp header;
 
-// No OpenGL header from glfw3.h on any target (zig ships no GL/gl.h for
-// Linux): a program fetches its GL functions with glfwGetProcAddress or
-// includes its own loader.
-#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
 end.
