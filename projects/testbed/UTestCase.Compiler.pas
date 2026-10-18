@@ -741,6 +741,14 @@ begin
     (AError.Range.StartLine = UInt64(ALine)) and (AError.Range.StartColumn = UInt64(AColumn));
 end;
 
+function DoNamesMissingLib(const AMessage: string; const ALibrary: string): Boolean;
+begin
+  // zig's "unable to find <kind> system library <name>" quotes the name with ' (zig 0.16) or
+  // " (zig 0.17.0); the report names ALibrary in either spelling
+  Result := AMessage.Contains('system library ''' + ALibrary + '''') or
+    AMessage.Contains('system library "' + ALibrary + '"');
+end;
+
 procedure TPCCompilerTests.DoTestMissingLib();
 var
   LCompiler: TPCCompiler;
@@ -778,10 +786,10 @@ begin
       for LError in LCompiler.GetErrors().GetItems() do
       begin
         if DoIsAt(LError, LMain, LLineA, LColA) and
-          LError.Message.Contains('system library ''pcpp_mlib_a''') then
+          DoNamesMissingLib(LError.Message, 'pcpp_mlib_a') then
           LHitA := True
         else if DoIsAt(LError, LUnit, LLineB, LColB) and
-          LError.Message.Contains('system library ''pcpp_mlib_b''') then
+          DoNamesMissingLib(LError.Message, 'pcpp_mlib_b') then
           LHitB := True
         else
           LElsewhere := LElsewhere + ' | ' + LError.Code + ' ' + LError.Message;
