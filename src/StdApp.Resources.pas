@@ -216,14 +216,16 @@ resourcestring
   RSZigBuildCopyCollision = '%s and %s would both be copied to %s: neither is copied';
   { RSZigBuildSourceMissing }
   RSZigBuildSourceMissing = 'File to copy not found: %s';
-  { RSZigBuildStaleCopyRemoving }
-  RSZigBuildStaleCopyRemoving = 'Removing %s: an earlier build copied it, no copy-DLL names it any more';
-  { RSZigBuildStaleCopyRemove }
-  RSZigBuildStaleCopyRemove = 'Could not remove %s (an earlier build copied it, no copy-DLL names it any more): %s';
-  { RSZigBuildCopyRecordRead }
-  RSZigBuildCopyRecordRead = 'Could not read the record of earlier copies %s: copies it names are not removed: %s';
-  { RSZigBuildCopyRecordWrite }
-  RSZigBuildCopyRecordWrite = 'Could not write the record of copies %s: a later build cannot remove them: %s';
+  { RSZigBuildStaleRemoving }
+  RSZigBuildStaleRemoving = 'Removing %s: an earlier build put it there, this build does not produce it';
+  { RSZigBuildStaleRemove }
+  RSZigBuildStaleRemove = 'Could not remove %s (an earlier build put it there, this build does not produce it): %s';
+  { RSZigBuildInstalledRecordRead }
+  RSZigBuildInstalledRecordRead = 'Could not read the record of earlier build files %s: files it names are not removed: %s';
+  { RSZigBuildInstalledRecordWrite }
+  RSZigBuildInstalledRecordWrite = 'Could not write the record of build files %s: a later build cannot remove them: %s';
+  { RSZigBuildLegacyRecordRemove }
+  RSZigBuildLegacyRecordRemove = 'Could not remove the old record %s (replaced by %s): %s';
   { RSZigBuildBadTarget }
   RSZigBuildBadTarget = 'Unknown target "%s": a target is <arch>-<os>[-<abi>] in zig''s names, e.g. x86_64-windows-gnu';
   { RSZigBuildUnknownLine }

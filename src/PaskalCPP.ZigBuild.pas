@@ -115,11 +115,12 @@ const
   // A build.zig line LoadBuildFile does not know (not one GenerateBuildZig
   // writes, or a payload it cannot read): reported with its number, skipped
   PC_ERR_ZIGBUILD_WRNBUILDLINE     = 'ZB0023';
-  { PC_ERR_ZIGBUILD_WRNSTALECOPY }
-  // A copy an earlier build made beside the artifact, that no copy-DLL names
-  // any more, could not be removed, or the record of those copies could not
-  // be read or written (DoDeployCopyDLLs): the build goes on
-  PC_ERR_ZIGBUILD_WRNSTALECOPY     = 'ZB0034';
+  { PC_ERR_ZIGBUILD_WRNSTALEFILE }
+  // A file an earlier build put beside the artifact, that this build does not
+  // produce, could not be removed, or the record of those files could not be
+  // read or written (DoRemoveStaleInstalled, DoWriteInstalledRecord): the
+  // build goes on
+  PC_ERR_ZIGBUILD_WRNSTALEFILE     = 'ZB0034';
 
   { PC_ZIG_PROGRESS_MS }
   // While zig prints nothing (a build for a new target / optimize level
@@ -197,12 +198,20 @@ const
   // can write its .dia files there (DoDiagFilePrepare)
   PC_DIAG_FILE_PROBE = '.pcpp-write-probe';
 
-  { PC_ZIG_COPYDLL_RECORD }
-  // The record of the files the copy-DLL step copied beside the artifact, one
-  // file name per line, in the build root (beside bin\ and lib\, never in
-  // them: it is not shipped). A later build removes a recorded copy no
-  // copy-DLL names any more (DoDeployCopyDLLs)
-  PC_ZIG_COPYDLL_RECORD = 'pcpp-copydll.txt';
+  { PC_ZIG_INSTALLED_RECORD }
+  // The record of every file a build put under bin\ and lib\: the artifact,
+  // its .pdb, a DLL's import library and the copy-DLLs. One '<folder>/<file
+  // name>' per line (folder = bin or lib, DoArtifactSubdir), in the build root
+  // (beside bin\ and lib\, never in them: it is not shipped). A later build
+  // removes a recorded file it does not produce (DoRemoveStaleInstalled);
+  // nothing the record does not name is ever deleted
+  PC_ZIG_INSTALLED_RECORD = 'pcpp-installed.txt';
+
+  { PC_ZIG_LEGACY_COPY_RECORD }
+  // The record before PC_ZIG_INSTALLED_RECORD (0.1.0): the copy-DLLs only,
+  // one bare file name per line, all in bin\. Read once when no new record
+  // exists, removed once the new one is written
+  PC_ZIG_LEGACY_COPY_RECORD = 'pcpp-copydll.txt';
 
   { PC_ZIG_FORM_TARGET_PRE }
   // build.zig line forms (trimmed): GenerateBuildZig writes them and
@@ -363,6 +372,10 @@ type
     // publish requests (after the stamps): records resolved at registration
     FCopyDLLs: TList<TPCPublishItem>;
     FPublishItems: TList<TPCPublishItem>;
+    // The record of the files under bin\ and lib\ that are ours, for one
+    // Process call: what DoRemoveStaleInstalled kept, then the copy-DLLs, then
+    // this build's own files once it succeeded (PC_ZIG_INSTALLED_RECORD)
+    FInstalled: TList<string>;
 
     FOutput: TCallback<TCaptureConsoleCallback>;
     FRunOutput: TCallback<TCaptureConsoleCallback>;
@@ -427,10 +440,15 @@ type
       const AArtifactPath: string; const ADefaultDir: string;
       const AFailCode: string; const AFailText: string;
       const AStatus: string): Boolean;
-    function DoCopyRecordPath(): string;
-    procedure DoReadCopyRecord(out ANames: TArray<string>);
-    procedure DoWriteCopyRecord(const ANames: TArray<string>);
+    // The record of installed files (see the implementation section of that name)
+    function DoRecordPath(const AFileName: string): string;
+    function DoRecordedPath(const AName: string): string;
+    procedure DoReadInstalledRecord(out ANames: TArray<string>);
+    procedure DoWriteInstalledRecord();
+    function DoOwnInstalledNames(): TArray<string>;
+    procedure DoRemoveStaleInstalled();
     function DoDeployCopyDLLs(): Boolean;
+    procedure DoRecordOwnInstalled();
 
     // Artifact layout (see the implementation section of that name)
     function DoArtifactSubdir(const ABuildMode: TPCBuildMode): string;
@@ -646,15 +664,16 @@ type
     function Process(const AAutoRun: Boolean = True): Boolean;
     function Run(): Boolean;
     function ClearCache(): Boolean;
-    // bin\, lib\, the project's .zig-cache\, pcpp-diag\ and the copy-DLL
-    // record; never the output folder itself, build.zig or anything else
+    // bin\, lib\, the project's .zig-cache\, pcpp-diag\ and the records of
+    // installed files (pcpp-installed.txt, the legacy pcpp-copydll.txt);
+    // never the output folder itself, build.zig or anything else
     function ClearOutput(): Boolean;
     // A folder of a caller's own under the build root (the Compiler's
     // generated\): the same delete as ClearOutput's folders, one report per
     // failure
     function ClearBuildDir(const AName: string): Boolean;
     // The names ClearOutput deletes under the build root, in its order (the
-    // folders, then the copy-DLL record): what a caller lists before asking
+    // folders, then the installed-files records): what a caller lists before asking
     function GetClearNames(): TArray<string>;
 
     // Getters
@@ -963,6 +982,7 @@ begin
   FUndefines := TStringList.Create();
   FCopyDLLs := TList<TPCPublishItem>.Create();
   FPublishItems := TList<TPCPublishItem>.Create();
+  FInstalled := TList<string>.Create();
   FLastExitCode := 0;
   FRawOutput := False;
   FRunArguments := '';
@@ -1021,6 +1041,7 @@ begin
 
   FreeAndNil(FBuildCommit);
   FreeAndNil(FBuildOutput);
+  FreeAndNil(FInstalled);
   FreeAndNil(FPublishItems);
   FreeAndNil(FCopyDLLs);
   FreeAndNil(FUndefines);
@@ -1788,32 +1809,65 @@ begin
   Result := False;
 end;
 
-function TPCZigBuild.DoCopyRecordPath(): string;
+// The record of installed files
+//
+// Every file a build puts under bin\ and lib\ - the artifact, its .pdb, a
+// DLL's import library, the copy-DLLs - is recorded in PC_ZIG_INSTALLED_RECORD,
+// one '<folder>/<file name>' per line. Before the next build, a recorded file
+// that build does not produce is removed (a .pdb a debug build left beside a
+// fast build's artifact, a renamed project's old artifact, a copy-DLL no
+// longer requested). Nothing the record does not name is ever deleted.
+
+function TPCZigBuild.DoRecordPath(const AFileName: string): string;
 begin
-  Result := TUtils.JoinResolvedPath(FOutputPath, PC_ZIG_COPYDLL_RECORD);
+  Result := TUtils.JoinResolvedPath(FOutputPath, AFileName);
 end;
 
-procedure TPCZigBuild.DoReadCopyRecord(out ANames: TArray<string>);
+function TPCZigBuild.DoRecordedPath(const AName: string): string;
+var
+  LSlash: Integer;
+begin
+  // A recorded name is '<folder>/<file name>', checked when it was read
+  // (DoReadInstalledRecord) or built from the layout rule
+  LSlash := AName.IndexOf('/');
+  Result := TUtils.JoinResolvedPath(
+    TUtils.JoinResolvedPath(FOutputPath, AName.Substring(0, LSlash)),
+    AName.Substring(LSlash + 1));
+end;
+
+procedure TPCZigBuild.DoReadInstalledRecord(out ANames: TArray<string>);
 var
   LPath: string;
+  LLegacy: Boolean;
   LLines: TArray<string>;
   LList: TList<string>;
   LLine: string;
   LName: string;
+  LFolder: string;
+  LFile: string;
+  LSlash: Integer;
 begin
-  // No record = no earlier copies. A record that is there but cannot be
-  // read is ZB0034 and holds no names: nothing is removed on its word
+  // No record = no earlier files of ours. A record that is there but cannot
+  // be read is ZB0034 and holds no names: nothing is removed on its word.
+  // With no record, the legacy one (copy-DLLs only, bare names in bin\) is
+  // read in its place, once: the next write replaces it
   ANames := nil;
-  LPath := DoCopyRecordPath();
+  LPath := DoRecordPath(PC_ZIG_INSTALLED_RECORD);
+  LLegacy := False;
   if not FileExists(LPath) then
-    Exit;
+  begin
+    LPath := DoRecordPath(PC_ZIG_LEGACY_COPY_RECORD);
+    LLegacy := True;
+    if not FileExists(LPath) then
+      Exit;
+  end;
   try
     LLines := TFile.ReadAllLines(LPath, TEncoding.UTF8);
   except
     on E: Exception do
     begin
       if Assigned(FErrors) then
-        FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNSTALECOPY, RSZigBuildCopyRecordRead,
+        FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNSTALEFILE, RSZigBuildInstalledRecordRead,
           [TUtils.StripLongPathPrefix(LPath), E.Message]);
       Exit;
     end;
@@ -1823,11 +1877,22 @@ begin
   try
     for LLine in LLines do
     begin
-      // A bare file name only: anything else (a folder, '.', '..', a path)
-      // is no copy this step made, and is never deleted on the record's word
       LName := LLine.Trim();
-      if (LName = '') or (LName = '.') or (LName = '..') or
-        (TPath.GetFileName(LName) <> LName) then
+      if LLegacy then
+        LName := DoArtifactSubdir(bmDll) + '/' + LName;
+
+      // '<folder>/<file name>' only, the folder bin or lib and the name a
+      // bare file name: anything else (a path, '.', '..', another folder) is
+      // no file of ours, and is never deleted on the record's word
+      LSlash := LName.IndexOf('/');
+      if LSlash < 0 then
+        Continue;
+      LFolder := LName.Substring(0, LSlash);
+      LFile := LName.Substring(LSlash + 1);
+      if (LFolder <> DoArtifactSubdir(bmExe)) and (LFolder <> DoArtifactSubdir(bmLib)) then
+        Continue;
+      if (LFile = '') or (LFile = '.') or (LFile = '..') or
+        (TPath.GetFileName(LFile) <> LFile) then
         Continue;
       if not DoHasName(LList, LName) then
         LList.Add(LName);
@@ -1838,104 +1903,173 @@ begin
   end;
 end;
 
-procedure TPCZigBuild.DoWriteCopyRecord(const ANames: TArray<string>);
+procedure TPCZigBuild.DoWriteInstalledRecord();
 var
   LPath: string;
+  LLegacy: string;
 begin
-  // UTF-8 without a BOM, LF; no copies = no record
-  LPath := DoCopyRecordPath();
+  // UTF-8 without a BOM, LF; nothing of ours = no record
+  LPath := DoRecordPath(PC_ZIG_INSTALLED_RECORD);
   try
-    if Length(ANames) = 0 then
+    if FInstalled.Count = 0 then
     begin
       if FileExists(LPath) then
         TFile.Delete(LPath);
     end
     else
-      TFile.WriteAllBytes(LPath, TEncoding.UTF8.GetBytes(string.Join(#10, ANames) + #10));
+      TFile.WriteAllBytes(LPath,
+        TEncoding.UTF8.GetBytes(string.Join(#10, FInstalled.ToArray()) + #10));
   except
     on E: Exception do
     begin
       if Assigned(FErrors) then
-        FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNSTALECOPY, RSZigBuildCopyRecordWrite,
+        FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNSTALEFILE, RSZigBuildInstalledRecordWrite,
           [TUtils.StripLongPathPrefix(LPath), E.Message]);
+      Exit;
     end;
   end;
+
+  // The legacy record is pcpp's own file: once the new record stands, it
+  // goes (it was read in place of the new one, never again)
+  LLegacy := DoRecordPath(PC_ZIG_LEGACY_COPY_RECORD);
+  if FileExists(LLegacy) then
+  begin
+    try
+      TFile.Delete(LLegacy);
+    except
+      on E: Exception do
+      begin
+        if Assigned(FErrors) then
+          FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNSTALEFILE, RSZigBuildLegacyRecordRemove,
+            [TUtils.StripLongPathPrefix(LLegacy), PC_ZIG_INSTALLED_RECORD, E.Message]);
+      end;
+    end;
+  end;
+end;
+
+function TPCZigBuild.DoOwnInstalledNames(): TArray<string>;
+var
+  LFolder: string;
+begin
+  // What this build installs, by the build.zig GenerateBuildZig writes
+  // (probed per kind, target and level: scripts\rn\a5_probe.log): the
+  // artifact in its folder (the layout rule); on a Windows target an
+  // executable's or a DLL's .pdb beside it, at debug only (PC_ZIG_FORM_STRIP
+  // strips every other level), and a DLL's import library in lib\. A static
+  // library brings neither; a Linux target only the artifact
+  LFolder := DoArtifactSubdir(FBuildMode);
+  Result := [LFolder + '/' + GetOutputFilename()];
+  if not DoIsWindowsTarget() then
+    Exit;
+  if (FBuildMode <> bmLib) and (FOptimizeLevel = olDebug) then
+    Result := Result + [LFolder + '/' + FProjectName + '.pdb'];
+  if FBuildMode = bmDll then
+    Result := Result + [DoArtifactSubdir(bmLib) + '/' + FProjectName + GetLibExtension()];
+end;
+
+procedure TPCZigBuild.DoRemoveStaleInstalled();
+var
+  LOld: TArray<string>;
+  LWanted: TList<string>;
+  LItem: TPCPublishItem;
+  LName: string;
+  LPath: string;
+begin
+  // Before the build: a recorded file this build does not produce (not one
+  // of its own files, not a copy-DLL it deploys) is removed. One it does
+  // produce stays recorded while it is there; a removal that fails stays
+  // recorded too: the next build tries again
+  FInstalled.Clear();
+  DoReadInstalledRecord(LOld);
+
+  LWanted := TList<string>.Create();
+  try
+    LWanted.AddRange(DoOwnInstalledNames());
+    // Every copy-DLL's name, also one whose source sits in that folder: that
+    // file is no copy, and is never removed
+    for LItem in FCopyDLLs do
+      LWanted.Add(DoArtifactSubdir(bmDll) + '/' + TPath.GetFileName(LItem.SourcePath));
+
+    for LName in LOld do
+    begin
+      LPath := DoRecordedPath(LName);
+      if DoHasName(LWanted, LName) then
+      begin
+        if FileExists(LPath) and (not DoHasName(FInstalled, LName)) then
+          FInstalled.Add(LName);
+        Continue;
+      end;
+      if not FileExists(LPath) then
+        Continue;
+      try
+        Status(RSZigBuildStaleRemoving, [LName]);
+        TFile.Delete(LPath);
+      except
+        on E: Exception do
+        begin
+          if Assigned(FErrors) then
+            FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNSTALEFILE, RSZigBuildStaleRemove,
+              [TUtils.StripLongPathPrefix(LPath), E.Message]);
+          if not DoHasName(FInstalled, LName) then
+            FInstalled.Add(LName);
+        end;
+      end;
+    end;
+  finally
+    LWanted.Free();
+  end;
+end;
+
+procedure TPCZigBuild.DoRecordOwnInstalled();
+var
+  LName: string;
+begin
+  // After a successful build: this build's own files, where zig put them
+  // (a predicted file zig did not write is not recorded)
+  for LName in DoOwnInstalledNames() do
+  begin
+    if (not DoHasName(FInstalled, LName)) and FileExists(DoRecordedPath(LName)) then
+      FInstalled.Add(LName);
+  end;
+  DoWriteInstalledRecord();
 end;
 
 function TPCZigBuild.DoDeployCopyDLLs(): Boolean;
 var
   LDestDir: string;
-  LOld: TArray<string>;
-  LWanted: TList<string>;
-  LOwned: TList<string>;
   LItem: TPCPublishItem;
   LName: string;
-  LPath: string;
 begin
   // Copy DLLs: the DLLs the program loads, deployed beside the artifact
   // (where a built DLL lands, DoArtifactDir) BEFORE the build. The linker
   // does not need them (it reads library paths); a deployment that cannot be
   // completed - a DLL missing, two DLLs of one name, a copy that fails -
   // stops here, and the build is not run (R16).
-  // First, a copy an earlier build made that no copy-DLL names any more is
-  // removed (F10): a program must not keep running here on a library it no
-  // longer ships. Only the names the record holds, never the artifact; a file
-  // whose source already sits in that folder is no copy and is never recorded
+  // A copy an earlier build made that no copy-DLL names any more is already
+  // gone (DoRemoveStaleInstalled, F10): a program must not keep running here
+  // on a library it no longer ships
   LDestDir := DoArtifactDir(bmDll);
-  DoReadCopyRecord(LOld);
 
-  LWanted := TList<string>.Create();
-  LOwned := TList<string>.Create();
-  try
-    for LItem in FCopyDLLs do
-    begin
-      if not TUtils.SamePath(TPath.GetDirectoryName(LItem.SourcePath), LDestDir) then
-        LWanted.Add(TPath.GetFileName(LItem.SourcePath));
-    end;
+  // This build's copies, every request checked first (R16)
+  Result := True;
+  if FCopyDLLs.Count > 0 then
+    Result := DoCheckCopies(FCopyDLLs, '', LDestDir) and
+      DoRunCopies(FCopyDLLs, '', LDestDir, PC_ERR_ZIGBUILD_COPYFAILED,
+      RSZigBuildCopyFailed, RSZigBuildCopying);
 
-    for LName in LOld do
-    begin
-      // Copied again below: it stays
-      if DoHasName(LWanted, LName) then
-        Continue;
-      LPath := TUtils.JoinResolvedPath(LDestDir, LName);
-      if TUtils.SamePath(LPath, DoArtifactPath()) or (not FileExists(LPath)) then
-        Continue;
-      try
-        Status(RSZigBuildStaleCopyRemoving, [LName]);
-        TFile.Delete(LPath);
-      except
-        on E: Exception do
-        begin
-          // Still ours: the next build tries again
-          if Assigned(FErrors) then
-            FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNSTALECOPY, RSZigBuildStaleCopyRemove,
-              [TUtils.StripLongPathPrefix(LPath), E.Message]);
-          LOwned.Add(LName);
-        end;
-      end;
-    end;
-
-    // This build's copies, every request checked first (R16)
-    Result := True;
-    if FCopyDLLs.Count > 0 then
-      Result := DoCheckCopies(FCopyDLLs, '', LDestDir) and
-        DoRunCopies(FCopyDLLs, '', LDestDir, PC_ERR_ZIGBUILD_COPYFAILED,
-        RSZigBuildCopyFailed, RSZigBuildCopying);
-
-    // The record: the copies of ours in the folder now, whatever the copy
-    // step's outcome (an unreadable record is replaced: it was reported)
-    for LName in LWanted do
-    begin
-      if (not DoHasName(LOwned, LName)) and
-        FileExists(TUtils.JoinResolvedPath(LDestDir, LName)) then
-        LOwned.Add(LName);
-    end;
-    DoWriteCopyRecord(LOwned.ToArray());
-  finally
-    LOwned.Free();
-    LWanted.Free();
+  // The record: the copies of ours in the folder now, whatever the copy
+  // step's outcome (an unreadable record is replaced: it was reported). A
+  // file whose source already sits in that folder is no copy and is never
+  // recorded
+  for LItem in FCopyDLLs do
+  begin
+    if TUtils.SamePath(TPath.GetDirectoryName(LItem.SourcePath), LDestDir) then
+      Continue;
+    LName := DoArtifactSubdir(bmDll) + '/' + TPath.GetFileName(LItem.SourcePath);
+    if (not DoHasName(FInstalled, LName)) and FileExists(DoRecordedPath(LName)) then
+      FInstalled.Add(LName);
   end;
+  DoWriteInstalledRecord();
 end;
 
 // Artifact layout
@@ -3118,9 +3252,12 @@ begin
   TUtils.SetEnv('ZIG_GLOBAL_CACHE_DIR', TUtils.StripLongPathPrefix(
     TUtils.JoinResolvedPath(GetZigPath(), PC_ZIG_GLOBAL_CACHE_DIR)));
 
-  // Copy DLLs (DoDeployCopyDLLs): always run, also with none requested, since
-  // a copy an earlier build made may be stale; a deployment that cannot be
+  // Files an earlier build put beside the artifact that this build does not
+  // produce go first (DoRemoveStaleInstalled); then the copy-DLLs
+  // (DoDeployCopyDLLs): both always run, also with none requested, since
+  // what an earlier build left may be stale; a deployment that cannot be
   // completed stops here, and the build is not run (R16)
+  DoRemoveStaleInstalled();
   if not DoDeployCopyDLLs() then
     Exit;
 
@@ -3193,6 +3330,9 @@ begin
   end;
 
   Status(RSZigBuildSucceeded);
+
+  // This build's own files join the record, so the next build knows them
+  DoRecordOwnInstalled();
 
   // The built artifact, where the layout rule puts it (DoArtifactPath), in
   // ResolvePath's spelling: stamps and publish reach it at any
@@ -3458,10 +3598,12 @@ var
   LCacheCleared: Boolean;
   LDiagCleared: Boolean;
   LRecordCleared: Boolean;
+  LLegacyCleared: Boolean;
 begin
   // Everything zig and this driver write into the build root: the artifact
-  // folders (the layout rule), the project's own zig cache and the copy-DLL
-  // record, which describes bin's contents. Each is cleared even when an
+  // folders (the layout rule), the project's own zig cache and the record of
+  // installed files (and the legacy copy-DLL record), which describes the
+  // artifact folders' contents. Each is cleared even when an
   // earlier one fails (each failure reports itself). The Compiler clears
   // what it writes (generated) before it calls this.
   // No output path: one report (ZB0001), nothing deleted
@@ -3476,9 +3618,10 @@ begin
   // clang's .dia files: every build checks the folder and deletes the old
   // ones before zig runs, so nothing depends on them surviving a clear
   LDiagCleared := DoClearBuildDir(PC_DIAG_FILE_DIR);
-  LRecordCleared := DoClearBuildFile(PC_ZIG_COPYDLL_RECORD);
+  LRecordCleared := DoClearBuildFile(PC_ZIG_INSTALLED_RECORD);
+  LLegacyCleared := DoClearBuildFile(PC_ZIG_LEGACY_COPY_RECORD);
   Result := LBinCleared and LLibCleared and LCacheCleared and LDiagCleared and
-    LRecordCleared;
+    LRecordCleared and LLegacyCleared;
 end;
 
 function TPCZigBuild.ClearBuildDir(const AName: string): Boolean;
@@ -3491,7 +3634,7 @@ begin
   // ClearOutput's own names, in its order: one list, so what is shown is
   // what is deleted
   Result := [DoArtifactSubdir(bmExe), DoArtifactSubdir(bmLib), '.zig-cache',
-    PC_DIAG_FILE_DIR, PC_ZIG_COPYDLL_RECORD];
+    PC_DIAG_FILE_DIR, PC_ZIG_INSTALLED_RECORD, PC_ZIG_LEGACY_COPY_RECORD];
 end;
 
 // Post-build resources

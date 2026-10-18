@@ -1813,9 +1813,9 @@ begin
 end;
 
 { DoZb13StaleBuild }
-// One build of zb13 into out.stale, with the stand-in DLL as a copy-DLL or none
+// One build of a project into out.stale, with the stand-in DLL as a copy-DLL or none
 function DoZb13StaleBuild(const ABase: string; const AErrors: TErrors;
-  const AWithCopy: Boolean): Boolean;
+  const AWithCopy: Boolean; const AProject: string = 'zb13'): Boolean;
 var
   LZig: TPCZigBuild;
 begin
@@ -1823,7 +1823,7 @@ begin
   try
     LZig.SetErrors(AErrors);
     LZig.SetOutputPath(TPath.Combine(ABase, 'out.stale'));
-    LZig.SetProjectName('zb13');
+    LZig.SetProjectName(AProject);
     LZig.AddSourceFile(TPath.Combine(ABase, 'gen.cpp'));
     if AWithCopy then
       LZig.AddCopyDLL(TPath.Combine(ABase, 'stub.dll'));
@@ -1834,40 +1834,72 @@ begin
   AErrors.PrintErrors();
 end;
 
+{ DoZb13RecordHas }
+// The record of installed files holds exactly this line (trimmed)
+function DoZb13RecordHas(const ARecord: string; const AName: string): Boolean;
+var
+  LLines: TArray<string>;
+  LLine: string;
+begin
+  Result := False;
+  if not FileExists(ARecord) then
+    Exit;
+  try
+    LLines := TFile.ReadAllLines(ARecord, TEncoding.UTF8);
+  except
+    on Exception do
+      Exit;
+  end;
+  for LLine in LLines do
+  begin
+    if LLine.Trim() = AName then
+      Exit(True);
+  end;
+end;
+
 procedure TPCZigBuildTests.DoTestZb13StaleCopy();
 var
   LBase: string;
   LBin: string;
   LRecord: string;
+  LLegacy: string;
   LMine: string;
   LOutside: string;
   LErrors: TErrors;
   LOk: Boolean;
 begin
-  // F10: a copy an earlier build made, that no copy-DLL names any more, is
-  // removed by the next build; a file the person put beside the program, the
-  // artifact, and a path the record names outside the folder are never touched
+  // F10 + PLAN-RELEASE-NAMES atom 5: every file a build puts beside the
+  // artifact is recorded (pcpp-installed.txt: the artifact, its .pdb, the
+  // copy-DLLs); a recorded file the next build does not produce is removed (a
+  // copy-DLL no longer named, a renamed project's artifact and .pdb). A file
+  // the person put beside the program, the artifact, and a record line naming
+  // a path outside bin\ / lib\ are never touched. An old pcpp-copydll.txt is
+  // read once in place of the record, then replaced
   LErrors := TErrors.Create();
   try
     LErrors.SetMaxErrors(10);
     Check(DoZb13Prepare(LErrors, LBase), 'zb13: fixture written');
     LBin := TPath.Combine(LBase, 'out.stale\bin');
-    LRecord := TPath.Combine(LBase, 'out.stale\pcpp-copydll.txt');
+    LRecord := TPath.Combine(LBase, 'out.stale\pcpp-installed.txt');
+    LLegacy := TPath.Combine(LBase, 'out.stale\pcpp-copydll.txt');
     LMine := TPath.Combine(LBin, 'mine.txt');
     LOutside := TPath.Combine(LBase, 'out.stale\outside.txt');
 
-    // 1. With the copy-DLL: copied and recorded
+    // 1. With the copy-DLL: copied, and it and the build's own files recorded
     LOk := DoZb13StaleBuild(LBase, LErrors, True);
-    Check(LOk and (LErrors.Count() = 0) and FileExists(TPath.Combine(LBin, 'stub.dll')) and
-      FileExists(LRecord), 'zb13_stale_copy: round 1 copies stub.dll and records it (%d items)',
-      [LErrors.Count()]);
+    Check(LOk and (LErrors.Count() = 0) and FileExists(TPath.Combine(LBin, 'stub.dll')),
+      'zb13_stale_copy: round 1 copies stub.dll (%d items)', [LErrors.Count()]);
+    Check(DoZb13RecordHas(LRecord, 'bin/stub.dll') and DoZb13RecordHas(LRecord, 'bin/zb13.exe') and
+      DoZb13RecordHas(LRecord, 'bin/zb13.pdb'),
+      'zb13_stale_copy: round 1 records stub.dll, zb13.exe and zb13.pdb');
 
-    // The person's file beside the program, and a record line naming a path
-    // outside the folder (only a bare name is a copy of ours)
+    // The person's file beside the program, and record lines naming a path
+    // outside bin\ / lib\ (only '<bin|lib>/<bare name>' is a file of ours)
     try
       TFile.WriteAllText(LMine, 'mine', TEncoding.ASCII);
       TFile.WriteAllText(LOutside, 'outside', TEncoding.ASCII);
-      TFile.AppendAllText(LRecord, '..\outside.txt' + #10, TEncoding.ASCII);
+      TFile.AppendAllText(LRecord, 'bin/../outside.txt' + #10 + '..\outside.txt' + #10 +
+        'outside.txt' + #10, TEncoding.ASCII);
     except
       on E: Exception do
         Check(False, 'zb13_stale_copy: setup (%s)', [E.Message]);
@@ -1882,14 +1914,45 @@ begin
       'zb13_stale_copy: round 2 removed the stale stub.dll');
     Check(FileExists(LMine) and FileExists(LOutside) and FileExists(TPath.Combine(LBin, 'zb13.exe')),
       'zb13_stale_copy: round 2 kept the person''s files and the artifact');
-    Check(not FileExists(LRecord), 'zb13_stale_copy: round 2 left no record (no copies)');
+    Check(DoZb13RecordHas(LRecord, 'bin/zb13.exe') and (not DoZb13RecordHas(LRecord, 'bin/stub.dll')) and
+      (not DoZb13RecordHas(LRecord, 'bin/../outside.txt')),
+      'zb13_stale_copy: round 2 records the artifact, not the removed copy or the outside line');
 
     // 3. The copy-DLL again: copied and recorded again
     LErrors.Clear();
     LOk := DoZb13StaleBuild(LBase, LErrors, True);
     Check(LOk and (LErrors.Count() = 0) and FileExists(TPath.Combine(LBin, 'stub.dll')) and
-      FileExists(LRecord), 'zb13_stale_copy: round 3 copies and records stub.dll again (%d items)',
-      [LErrors.Count()]);
+      DoZb13RecordHas(LRecord, 'bin/stub.dll'),
+      'zb13_stale_copy: round 3 copies and records stub.dll again (%d items)', [LErrors.Count()]);
+
+    // 4. The project renamed: the old artifact and its .pdb go, the copy stays
+    LErrors.Clear();
+    LOk := DoZb13StaleBuild(LBase, LErrors, True, 'zb13r');
+    Check(LOk and (LErrors.Count() = 0) and FileExists(TPath.Combine(LBin, 'zb13r.exe')),
+      'zb13_stale_copy: round 4 builds the renamed project (%d items)', [LErrors.Count()]);
+    Check((not FileExists(TPath.Combine(LBin, 'zb13.exe'))) and
+      (not FileExists(TPath.Combine(LBin, 'zb13.pdb'))),
+      'zb13_stale_copy: round 4 removed the old project''s zb13.exe and zb13.pdb');
+    Check(FileExists(LMine) and FileExists(TPath.Combine(LBin, 'stub.dll')) and
+      DoZb13RecordHas(LRecord, 'bin/zb13r.exe') and (not DoZb13RecordHas(LRecord, 'bin/zb13.exe')),
+      'zb13_stale_copy: round 4 kept the person''s file and the copy, records zb13r.exe only');
+
+    // 5. An old pcpp-copydll.txt (0.1.0: bare copy-DLL names) and no new
+    // record: read once, its stale copy removed, then replaced by the record
+    try
+      TFile.Delete(LRecord);
+      TFile.WriteAllText(LLegacy, 'stub.dll' + #10, TEncoding.ASCII);
+    except
+      on E: Exception do
+        Check(False, 'zb13_stale_copy: legacy setup (%s)', [E.Message]);
+    end;
+    LErrors.Clear();
+    LOk := DoZb13StaleBuild(LBase, LErrors, False, 'zb13r');
+    Check(LOk and (LErrors.Count() = 0) and (not FileExists(TPath.Combine(LBin, 'stub.dll'))),
+      'zb13_stale_copy: round 5 removed the copy the old record names (%d items)', [LErrors.Count()]);
+    Check((not FileExists(LLegacy)) and DoZb13RecordHas(LRecord, 'bin/zb13r.exe') and
+      FileExists(LMine),
+      'zb13_stale_copy: round 5 replaced the old record, kept the person''s file');
   finally
     LErrors.Free();
   end;
