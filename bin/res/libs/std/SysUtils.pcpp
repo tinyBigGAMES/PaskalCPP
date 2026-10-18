@@ -25,11 +25,12 @@
 
 module unit SysUtils;
 
-// The implementation is C++ in the unit's own source file, in one block: its
-// #include lines (<windows.h> and its macros) never reach a program that
-// imports SysUtils. The PaskalCPP routines below are the interface; nothing in
-// this block is visible to an importer.
-cppstart source
+// The implementation is plain mixed C++ placed in the unit's own source file
+// (cpp source;): its #include lines (<windows.h> and its macros) never reach
+// a program that imports SysUtils. The PaskalCPP routines below are the
+// interface; none of this C++ is visible to an importer.
+cpp source;
+
 #include <string>
 #ifdef _WIN32
 #include <windows.h>
@@ -309,7 +310,6 @@ std::string PathExeDir()
 }
 
 } // namespace
-cppend;
 
 /// Resolves a path to one full, normalized path.
 ///
