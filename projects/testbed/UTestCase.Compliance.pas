@@ -1042,6 +1042,7 @@ begin
 
   // std_: the std library units (res\libs\std), one file per unit
   DoAdd('std_sysutils', 'std', cmRun, [], [], [], '');
+  DoAdd('std_sysutils_format', 'std', cmRun, [], [], [], '');
 
   // hello: the first end-to-end program (an exe built at @optimize small)
   DoAdd('hello', 'exe', cmRun, [], [], [], '');

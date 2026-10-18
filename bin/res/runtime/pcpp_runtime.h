@@ -608,6 +608,114 @@ inline std::string quote_as_char(const std::string& debug) {
 } // namespace detail
 
 /*******************************************************************************
+ * Format arguments by C++ type (PLAN-VENDOR 1d: SysUtils.FormatStr, a C++
+ * variadic template). print / println decide each argument's form from the
+ * AST (TPCTypeExpr.PrintFormOfArg, the emitter writes it); a C++ routine sees
+ * only C++ types, so format_arg gives the same text by the C++ type each
+ * PaskalCPP type is emitted as: a wchar (and a wchar bitfield read as
+ * char16_t) and a wstring as UTF-8, a ptr to char / wchar as its text (nil
+ * prints nil), a typed or routine pointer as its address, an array whose
+ * elements need a form element by element (print_map with the Print*
+ * elements, nested arrays too), anything else itself. format_arg_t<T> is the
+ * type it returns: a std::format_string over those types checks the call
+ ******************************************************************************/
+
+namespace detail {
+
+// Whether a type is an array print / println format element by element: it
+// has begin / end (a static or dynamic array, a string)
+template <class V>
+concept format_range = requires(const V& range) { std::begin(range); std::end(range); };
+
+// Whether an element (of an array) needs its own print form
+template <class E>
+consteval bool format_element_mapped() {
+    using V = std::remove_cv_t<E>;
+    if constexpr (std::is_same_v<V, wchar_t> || std::is_same_v<V, char16_t> ||
+                  std::is_same_v<V, std::wstring>) {
+        return true;
+    } else if constexpr (std::is_pointer_v<V>) {
+        // char / wchar pointers print as text, the others as their address;
+        // an untyped pointer prints as itself
+        return !std::is_void_v<std::remove_cv_t<std::remove_pointer_t<V>>>;
+    } else if constexpr (format_range<V>) {
+        return format_element_mapped<
+            std::remove_cvref_t<decltype(*std::begin(std::declval<const V&>()))>>();
+    } else {
+        return false;
+    }
+}
+
+// Whether a pointer type points to (const) C
+template <class P, class C>
+inline constexpr bool points_to =
+    std::is_pointer_v<P> && std::is_same_v<std::remove_cv_t<std::remove_pointer_t<P>>, C>;
+
+// One element of an array in its print form (print / println's element rule)
+template <class E>
+auto format_element(const E& element) {
+    using V = std::remove_cv_t<E>;
+    if constexpr (std::is_same_v<V, wchar_t>) {
+        return PrintWChar{element};
+    } else if constexpr (std::is_same_v<V, char16_t>) {
+        return PrintWChar{static_cast<wchar_t>(element)};
+    } else if constexpr (std::is_same_v<V, std::wstring>) {
+        return utf8(element);
+    } else if constexpr (points_to<V, char>) {
+        return PrintCStr{element};
+    } else if constexpr (points_to<V, wchar_t>) {
+        return PrintWCStr{element};
+    } else if constexpr (std::is_pointer_v<V> && std::is_function_v<std::remove_pointer_t<V>>) {
+        return reinterpret_cast<const void*>(element);
+    } else if constexpr (std::is_pointer_v<V> && format_element_mapped<V>()) {
+        return static_cast<const void*>(element);
+    } else if constexpr (format_range<V> && format_element_mapped<V>()) {
+        // A nested array whose elements need a form
+        return print_map(element, [](const auto& inner) { return format_element(inner); });
+    } else {
+        return element;
+    }
+}
+
+} // namespace detail
+
+// One format argument in its print form; a value that needs none is returned
+// as the caller's reference (no copy)
+template <class T>
+decltype(auto) format_arg(const T& value) {
+    using V = std::remove_cv_t<T>;
+    if constexpr (std::is_same_v<V, wchar_t>) {
+        return utf8(value);
+    } else if constexpr (std::is_same_v<V, char16_t>) {
+        return utf8(static_cast<wchar_t>(value));
+    } else if constexpr (std::is_same_v<V, std::wstring>) {
+        return utf8(value);
+    } else if constexpr (std::is_array_v<V> &&
+                         std::is_same_v<std::remove_cv_t<std::remove_extent_t<V>>, wchar_t>) {
+        // A wide string literal (L"..."): its text up to the terminator
+        return utf8(std::wstring(value));
+    } else if constexpr (detail::points_to<V, char>) {
+        return CStr(value);
+    } else if constexpr (detail::points_to<V, wchar_t>) {
+        return WCStr(value);
+    } else if constexpr (std::is_pointer_v<V> && std::is_function_v<std::remove_pointer_t<V>>) {
+        return reinterpret_cast<const void*>(value);
+    } else if constexpr (std::is_pointer_v<V> && detail::format_element_mapped<V>()) {
+        return static_cast<const void*>(value);
+    } else if constexpr (!std::is_array_v<V> && detail::format_range<V> &&
+                         detail::format_element_mapped<V>()) {
+        // An array (static or dynamic) whose elements need a form
+        return print_map(value, [](const auto& element) { return detail::format_element(element); });
+    } else {
+        return (value);
+    }
+}
+
+// The type format_arg gives a T: what a std::format_string is checked against
+template <class T>
+using format_arg_t = decltype(::pcpp::format_arg(std::declval<const T&>()));
+
+/*******************************************************************************
  * Static arrays (PLAN-RECORDS A8b, F-A8a): Array<T, N> is a PaskalCPP static
  * array of N elements. Plain data (one public C array, no constructors, no
  * initializers), so a packed record packs it as written (PLAN-RECORDS M9).

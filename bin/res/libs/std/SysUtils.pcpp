@@ -19,7 +19,8 @@
   SysUtils.pcpp - the SysUtils unit: `import SysUtils;` turns any spelling of
   a path into one full, normalized path (ResolvePath), with the same prefixes
   the compiler's own directives take ($P: $D: $S:), and tells where the
-  running program lives (ExeDir). A name is read bare when no other imported
+  running program lives (ExeDir), and formats values into a string as println
+  prints them (FormatStr). A name is read bare when no other imported
   unit exports it (ResolvePath), or qualified (SysUtils.ResolvePath).
 ==============================================================================*/
 
@@ -393,5 +394,25 @@ exported routine ExeDir(): string;
 begin
   return PathExeDir();
 end;
+
+// FormatStr(AFormat, ...) formats its arguments into a string, as println
+// prints them: `{}` specifiers (std::format's), each argument in println's
+// form (a wchar or wstring as UTF-8, a ptr to char as its text, nil as nil,
+// a typed pointer as its address, an array element by element:
+// ::pcpp::format_arg). The format string is checked against the arguments
+// when the program is built. A C++ variadic template (PLAN-VENDOR 1d), so it
+// is in the unit's header (cpp header;): its body is built where it is
+// called. Example:
+//   LText := FormatStr("{} of {} done", LDone, LTotal);
+cpp header;
+
+#include <format>
+#include <string>
+
+template <class... TArgs>
+std::string FormatStr(std::format_string<::pcpp::format_arg_t<TArgs>...> AFormat,
+                      const TArgs&... AArgs) {
+    return std::format<::pcpp::format_arg_t<TArgs>...>(AFormat, ::pcpp::format_arg(AArgs)...);
+}
 
 end.
