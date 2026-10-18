@@ -65,6 +65,13 @@ contextBridge.exposeInMainWorld('host', {
   // Issue reporter: open it (code '' = none), or a PROBLEMS row's own menu
   reportIssue: (ACode) => ipcRenderer.send('report:open', ACode),
   problemMenu: (ACode) => ipcRenderer.send('problem:menu', ACode),
+  // The TERMINAL tab's copy / paste: the main process owns the clipboard
+  clipboardWrite: (AText) => ipcRenderer.send('clipboard:write', AText),
+  clipboardRead: () => ipcRenderer.invoke('clipboard:read'),
+  terminalMenu: (AHasSelection) => ipcRenderer.send('terminal:menu', AHasSelection),
+  onTerminalCommand: (ACallback) => {
+    ipcRenderer.on('terminal:command', (AEvent, ACommand) => ACallback(ACommand));
+  },
   // Layout + toolbar choices: { layout, build } once at boot, then each change
   getUiState: () => ipcRenderer.invoke('ui:get'),
   setLayout: (ALayout) => ipcRenderer.send('layout:set', ALayout),

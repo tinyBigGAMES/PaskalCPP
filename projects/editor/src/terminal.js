@@ -24,7 +24,10 @@
   terminal would. Keys typed here and the tab's size go back through the
   callbacks init takes (debug.js sends them to the adapter as
   pcppTerminalInput / pcppTerminalResize). The tab fits itself whenever its
-  box changes: shown, the panel's sash, the window.
+  box changes: shown, the panel's sash, the window. Its text is copied and
+  pasted as in VS Code's terminal (Ctrl+C with a selection, Ctrl+Shift+C,
+  Ctrl+V, Ctrl+Shift+V, the right-click menu), through the main process's
+  clipboard.
 */
 'use strict';
 
@@ -75,6 +78,91 @@ var PcTerminal = (function () {
     }
   }
 
+  // Copy / paste, as VS Code's terminal: Ctrl+C copies when text is selected
+  // (none selected: the program gets it, ^C), Ctrl+Shift+C always copies,
+  // Ctrl+V and Ctrl+Shift+V paste into the program's input, a right-click
+  // opens Copy / Paste. The clipboard is the main process's (window.host).
+
+  // The selection to the clipboard; True when there was one
+  function copySelection() {
+    if ((gTerm === null) || !gTerm.hasSelection()) {
+      return false;
+    }
+    window.host.clipboardWrite(gTerm.getSelection());
+    gTerm.clearSelection();
+    return true;
+  }
+
+  // The clipboard's text typed into the program, as xterm pastes it
+  // (bracketed when the program asked for it)
+  function pasteClipboard() {
+    window.host.clipboardRead().then(function (AText) {
+      if ((gTerm !== null) && (typeof AText === 'string') && (AText !== '')) {
+        gTerm.paste(AText);
+      }
+    }).catch(function () {});
+  }
+
+  // Ctrl (no Alt / Meta) with the letter AKey, either case
+  function isCtrlKey(AEvent, AKey) {
+    return AEvent.ctrlKey && !AEvent.altKey && !AEvent.metaKey &&
+      (typeof AEvent.key === 'string') && (AEvent.key.toLowerCase() === AKey);
+  }
+
+  // A key combination this tab took on its keydown: its later events
+  // (keypress, keyup) stay away from xterm too
+  var gTakenKey = '';
+
+  // xterm's key hook: False = xterm leaves the event alone. A taken keydown
+  // is also preventDefault-ed, so the menu's own Ctrl+C / Ctrl+V never fire
+  // on top of it.
+  function onKeyEvent(AEvent) {
+    var LKey = '';
+    if (isCtrlKey(AEvent, 'c')) {
+      LKey = 'c';
+    } else if (isCtrlKey(AEvent, 'v')) {
+      LKey = 'v';
+    }
+    if (LKey === '') {
+      return true;
+    }
+    if (AEvent.type !== 'keydown') {
+      var LTaken = (gTakenKey === LKey);
+      if (AEvent.type === 'keyup') {
+        gTakenKey = '';
+      }
+      return !LTaken;
+    }
+    if (LKey === 'c') {
+      // Plain Ctrl+C with nothing selected is the program's ^C
+      if (!AEvent.shiftKey && !gTerm.hasSelection()) {
+        gTakenKey = '';
+        return true;
+      }
+      copySelection();
+    } else {
+      pasteClipboard();
+    }
+    gTakenKey = LKey;
+    AEvent.preventDefault();
+    return false;
+  }
+
+  function onContextMenu(AEvent) {
+    AEvent.preventDefault();
+    window.host.terminalMenu((gTerm !== null) && gTerm.hasSelection());
+  }
+
+  // A pick from the right-click menu (main.js terminal:menu)
+  function onMenuCommand(ACommand) {
+    if (ACommand === 'copy') {
+      copySelection();
+    } else if (ACommand === 'paste') {
+      pasteClipboard();
+    }
+    focus();
+  }
+
   // ADeps: onInput(text): keys typed here, as the terminal spells them
   // (Enter = '\r'); onResize(cols, rows): the tab's size changed
   function init(ADeps) {
@@ -103,6 +191,9 @@ var PcTerminal = (function () {
     gTerm.unicode.activeVersion = '11';
     gTerm.open(gHost);
     gTerm.onData(onData);
+    gTerm.attachCustomKeyEventHandler(onKeyEvent);
+    gHost.addEventListener('contextmenu', onContextMenu);
+    window.host.onTerminalCommand(onMenuCommand);
     // One observer for every change of the tab's box
     new ResizeObserver(function () {
       fit();

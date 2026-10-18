@@ -23,7 +23,7 @@
 */
 'use strict';
 
-const { app, BrowserWindow, Menu, dialog, ipcMain, screen, shell } = require('electron');
+const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, screen, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -1092,6 +1092,32 @@ ipcMain.on('problem:menu', (AEvent, ACode) => {
   const LCode = typeof ACode === 'string' ? ACode : '';
   Menu.buildFromTemplate([
     { label: 'Report This Error...', click: () => openIssueReporter(LCode) }
+  ]).popup({ window: gWindow });
+});
+
+// The TERMINAL tab's copy / paste (renderer src/terminal.js): the clipboard
+// is the main process's, so the renderer needs no clipboard permission
+ipcMain.on('clipboard:write', (AEvent, AText) => {
+  if (typeof AText === 'string') {
+    clipboard.writeText(AText);
+  }
+});
+ipcMain.handle('clipboard:read', () => clipboard.readText());
+
+// A right-click in the TERMINAL tab: Copy (only with text selected) and
+// Paste; the pick goes back to the renderer, which owns the terminal
+ipcMain.on('terminal:menu', (AEvent, AHasSelection) => {
+  if (!gWindow || gWindow.isDestroyed()) {
+    return;
+  }
+  const LSend = (ACommand) => {
+    if (gWindow && !gWindow.isDestroyed()) {
+      gWindow.webContents.send('terminal:command', ACommand);
+    }
+  };
+  Menu.buildFromTemplate([
+    { label: 'Copy', enabled: AHasSelection === true, click: () => LSend('copy') },
+    { label: 'Paste', click: () => LSend('paste') }
   ]).popup({ window: gWindow });
 });
 
