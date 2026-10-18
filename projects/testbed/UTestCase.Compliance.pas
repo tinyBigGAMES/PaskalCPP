@@ -1043,6 +1043,9 @@ begin
   // std_: the std library units (res\libs\std), one file per unit
   DoAdd('std_sysutils', 'std', cmRun, [], [], [], '');
 
+  // hello: the first end-to-end program (an exe built at @optimize small)
+  DoAdd('hello', 'exe', cmRun, [], [], [], '');
+
   for LI := 0 to FEntries.Count - 1 do
     DoRegister(LI);
 end;
