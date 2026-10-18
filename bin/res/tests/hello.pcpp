@@ -20,7 +20,7 @@
 
 module exe hello;
 
-@optimize release_small;
+@optimize small;
 
 begin
   println("Hello, {}! 🚀🔥✨", "PaskalCPP");

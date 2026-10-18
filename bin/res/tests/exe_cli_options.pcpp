@@ -35,7 +35,7 @@
       -r, --run                    Run after building (executables only)
       -o, --output    <path>       Set output directory (wins over @outputpath; default: output)
       -t, --target    <triple>     Set target triple: x86_64-windows-gnu (default), x86_64-linux-gnu
-      -opt, --optimize <level>     Set optimize level: debug, release_safe, release_fast, release_small
+      -opt, --optimize <level>     Set optimize level: debug, safe, fast, small
       --defaults                   -opt / -t only apply where the source has no @optimize / @target (the editor passes this)
       --progress                   Draw the build progress in place even when output is piped (the editor passes this)
       --terminal      <pipe>       With -r: the program's terminal is the named pipe an editor listens on
@@ -52,7 +52,7 @@
     EXAMPLES:
       pcpp hello
       pcpp hello -r
-      pcpp hello -r -opt release_fast
+      pcpp hello -r -opt fast
       pcpp hello -d
       pcpp hello --target x86_64-linux-gnu --output build
       pcpp editor hello.pcpp

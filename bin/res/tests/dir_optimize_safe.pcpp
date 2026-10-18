@@ -13,24 +13,23 @@
   was not distributed with this file, You can obtain one
   at https://mozilla.org/MPL/2.0/.
 -------------------------------------------------------------------------------
-  dir_optimize_release_fast.pcpp - Directive compliance: @optimize release_fast
+  dir_optimize_safe.pcpp - Directive compliance: @optimize safe
   (a level of dir_optimize.pcpp)
 
-  The release_fast level: optimized for speed, asserts off (NDEBUG), no heap
-  report.
+  The safe level: optimized, asserts kept (no NDEBUG), no heap report.
 
   How to check, from repo\bin:
-    pcpp res\tests\dir_optimize_release_fast.pcpp -r
-    pcpp res\tests\dir_optimize_release_fast.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+    pcpp res\tests\dir_optimize_safe.pcpp -r
+    pcpp res\tests\dir_optimize_safe.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
   EXPECT:
-    clang sees: __OPTIMIZE__ NDEBUG
+    clang sees: __OPTIMIZE__
   EXITCODE: 0
   Both targets print the same.
-  CHECK: output\build.zig holds "std.builtin.OptimizeMode = .ReleaseFast"
+  CHECK: output\build.zig holds "std.lang.Optimize = .safe"
 *******************************************************************************/
 
-module exe dir_optimize_release_fast;
-@optimize release_fast;
+module exe dir_optimize_safe;
+@optimize safe;
 
 // The macros clang defines at this level, in a fixed order
 static const char* dir_optimize_flags()

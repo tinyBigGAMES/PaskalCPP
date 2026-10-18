@@ -213,14 +213,14 @@ const
   PC_ZIG_FORM_TARGET_SUF   = ' });';
 
   { PC_ZIG_FORM_OPTIMIZE_PRE }
-  // zig 0.17's own type and names (std.lang.Optimize: debug safe fast tiny);
+  // zig 0.17's own type and names (std.lang.Optimize: debug safe fast small);
   // std.builtin.OptimizeMode and .ReleaseFast are its deprecated aliases
   PC_ZIG_FORM_OPTIMIZE_PRE = 'const optimize: std.lang.Optimize = ';
 
   { PC_ZIG_FORM_STRIP }
   // Debug info only in a debug build (user 2026-10-18): every release level is
   // stripped, so no .pdb (Windows) or DWARF (Linux) is written; the debugger
-  // works on debug builds. Without this line zig strips only tiny
+  // works on debug builds. Without this line zig strips only small
   PC_ZIG_FORM_STRIP        = '.strip = optimize != .debug,';
 
   { PC_ZIG_FORM_EXE }
@@ -296,7 +296,7 @@ type
     olDebug,
     olSafe,
     olFast,
-    olTiny
+    olSmall
   );
 
   { TPCSubsystemType }
@@ -2177,8 +2177,8 @@ begin
       Result := 'safe';
     olFast:
       Result := 'fast';
-    olTiny:
-      Result := 'tiny';
+    olSmall:
+      Result := 'small';
   else
     Result := 'Unknown';
   end;
@@ -2209,8 +2209,8 @@ begin
       Result := '.safe';
     olFast:
       Result := '.fast';
-    olTiny:
-      Result := '.tiny';
+    olSmall:
+      Result := '.small';
   else
     Result := '.debug';
   end;

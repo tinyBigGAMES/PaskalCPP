@@ -770,7 +770,7 @@ begin
             begin
               AZig.SetBuildMode(bmDll);
               AZig.SetTarget('aarch64-macos');
-              AZig.SetOptimizeLevel(olTiny);
+              AZig.SetOptimizeLevel(olSmall);
             end;
           5:
             begin
@@ -795,7 +795,7 @@ begin
       3:
         LOptLine := 'const optimize: std.lang.Optimize = .fast;';
     else
-      LOptLine := 'const optimize: std.lang.Optimize = .tiny;';
+      LOptLine := 'const optimize: std.lang.Optimize = .small;';
     end;
     Check(LFirst.Contains(LOptLine), 'round trip: case %d writes %s', [LCase, LOptLine]);
     if LCase = 5 then

@@ -14,11 +14,11 @@
   at https://mozilla.org/MPL/2.0/.
 -------------------------------------------------------------------------------
   exe_release_guards_safe.pcpp - Build-kind compliance: a guard catches a nil
-  access in a release_safe build
+  access in a safe build
 
-  The program of exe_release_guards.pcpp built with @optimize release_safe:
-  a write and a read through a nil pointer the optimizer can see, directly
-  and through a routine, are still real accesses, so each guard catches
+  The program of exe_release_guards.pcpp built with @optimize safe: a write
+  and a read through a nil pointer the optimizer can see, directly and
+  through a routine, are still real accesses, so each guard catches
   exception 3 and the program goes on.
 
   How to check, from repo\bin:
@@ -33,7 +33,7 @@
 *******************************************************************************/
 
 module exe exe_release_guards_safe;
-@optimize release_safe;
+@optimize safe;
 
 routine Write(AP: ptr to int32);
 begin

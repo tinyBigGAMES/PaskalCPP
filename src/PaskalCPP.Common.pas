@@ -1443,7 +1443,7 @@ const
     (Directive: bdOptimize;     ValueText: 'debug'),
     (Directive: bdOptimize;     ValueText: 'safe'),
     (Directive: bdOptimize;     ValueText: 'fast'),
-    (Directive: bdOptimize;     ValueText: 'tiny'),
+    (Directive: bdOptimize;     ValueText: 'small'),
     (Directive: bdSubsystem;    ValueText: 'console'),
     (Directive: bdSubsystem;    ValueText: 'gui'),
     (Directive: bdAddVerInfo;   ValueText: 'on'),
@@ -1459,7 +1459,7 @@ const
   PC_RETIRED_VALUES: array[0..2] of TPCRetiredValue = (
     (Directive: bdOptimize; RetiredText: 'release_safe';  CurrentText: 'safe'),
     (Directive: bdOptimize; RetiredText: 'release_fast';  CurrentText: 'fast'),
-    (Directive: bdOptimize; RetiredText: 'release_small'; CurrentText: 'tiny')
+    (Directive: bdOptimize; RetiredText: 'release_small'; CurrentText: 'small')
   );
 
   { PC_MESSAGE_SEVERITIES }

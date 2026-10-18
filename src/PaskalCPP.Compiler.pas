@@ -145,7 +145,7 @@ const
     'debug',
     'safe',
     'fast',
-    'tiny'
+    'small'
   );
 
   { PC_CMP_SUBSYSTEM_TEXT }

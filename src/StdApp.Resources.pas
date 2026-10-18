@@ -1502,7 +1502,7 @@ resourcestring
   RSPcCliHelpTarget = 'Set target triple: x86_64-windows-gnu (default), x86_64-linux-gnu';
 
   { RSPcCliHelpOptimize }
-  RSPcCliHelpOptimize = 'Set optimize level: debug, safe, fast, tiny';
+  RSPcCliHelpOptimize = 'Set optimize level: debug, safe, fast, small';
 
   { RSPcCliHelpHelp }
   RSPcCliHelpHelp = 'Display this help message';
@@ -1520,7 +1520,7 @@ resourcestring
   RSPcCliNeedsTarget = 'Error: %s requires a target argument (x86_64-windows-gnu, x86_64-linux-gnu)';
 
   { RSPcCliNeedsOptimize }
-  RSPcCliNeedsOptimize = 'Error: %s requires an optimize level argument (debug, safe, fast, tiny)';
+  RSPcCliNeedsOptimize = 'Error: %s requires an optimize level argument (debug, safe, fast, small)';
 
   { RSPcCliUnknownFlag }
   RSPcCliUnknownFlag = 'Error: Unknown flag: %s';

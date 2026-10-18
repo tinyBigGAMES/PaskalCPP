@@ -245,14 +245,14 @@ begin
   // 2. hello says nothing: the defaults are what is built
   LCompiler := TPCCompiler.Create();
   try
-    LCompiler.SetKeyDefault(PC_CMP_KEY_OPTIMIZE, 'tiny');
+    LCompiler.SetKeyDefault(PC_CMP_KEY_OPTIMIZE, 'small');
     LCompiler.SetKeyDefault(PC_CMP_KEY_TARGET, 'x86_64-linux-gnu');
     LOk := LCompiler.Prepare(DoSource('hello'), DoOutput('hello'));
     Check(LOk, 'defaults: hello prepared (' + DoReports(LCompiler.GetErrors()) + ')');
     if LOk then
     begin
-      Check(LCompiler.GetOptimizeLevel() = olTiny,
-        'defaults: no @optimize, the default tiny is built');
+      Check(LCompiler.GetOptimizeLevel() = olSmall,
+        'defaults: no @optimize, the default small is built');
       Check(LCompiler.GenerateBuildZig().Contains(PC_UTC_LINUX_OS),
         'defaults: no @target, the default x86_64-linux-gnu is built');
     end;
@@ -385,8 +385,8 @@ begin
     Check(DoCodes(LCompiler.GetErrors()) = PC_ERR_CMP_001,
       'retired: a default is CMP0001 (' + DoReports(LCompiler.GetErrors()) + ')');
     Check(DoReports(LCompiler.GetErrors()).Contains(
-      '''release_small'' is no longer a value of option optimize: write ''tiny'''),
-      'retired: a default names tiny (' + DoReports(LCompiler.GetErrors()) + ')');
+      '''release_small'' is no longer a value of option optimize: write ''small'''),
+      'retired: a default names small (' + DoReports(LCompiler.GetErrors()) + ')');
   finally
     LCompiler.Free();
   end;

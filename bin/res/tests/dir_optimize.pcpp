@@ -15,14 +15,13 @@
 -------------------------------------------------------------------------------
   dir_optimize.pcpp - Directive compliance: @optimize
 
-  @optimize <level>; sets the build's optimize level, one of debug,
-  release_safe, release_fast, release_small, exact case (BNF.md sec 2; the
-  default is debug). Each level is its own file, because a module gives
-  @optimize once: this one is release_small, the three below are the others.
-  Each file prints the macros clang sees, which tell the levels apart (probed
-  on both targets): debug defines PCPP_DEBUG (the runtime's heap report),
-  release_safe __OPTIMIZE__, release_fast __OPTIMIZE__ and NDEBUG,
-  release_small __OPTIMIZE__, __OPTIMIZE_SIZE__ and NDEBUG.
+  @optimize <level>; sets the build's optimize level, one of debug, safe,
+  fast, small, exact case (BNF.md sec 2; the default is debug). Each level is
+  its own file, because a module gives @optimize once: this one is small, the
+  three below are the others. Each file prints the macros clang sees, which
+  tell the levels apart (probed on both targets): debug defines PCPP_DEBUG
+  (the runtime's heap report), safe __OPTIMIZE__, fast __OPTIMIZE__ and
+  NDEBUG, small __OPTIMIZE__, __OPTIMIZE_SIZE__ and NDEBUG.
 
   How to check, from repo\bin:
     pcpp res\tests\dir_optimize.pcpp -r
@@ -31,24 +30,25 @@
     clang sees: __OPTIMIZE__ __OPTIMIZE_SIZE__ NDEBUG
   EXITCODE: 0
   Both targets print the same; a release build prints no [Heap] line.
-  CHECK: output\build.zig holds "std.builtin.OptimizeMode = .ReleaseSmall"
+  CHECK: output\build.zig holds "std.lang.Optimize = .small"
 
   The other levels: run each file below the same way; each header says what
   it prints:
     dir_optimize_debug.pcpp          @optimize debug
-    dir_optimize_release_safe.pcpp   @optimize release_safe
-    dir_optimize_release_fast.pcpp   @optimize release_fast
+    dir_optimize_safe.pcpp           @optimize safe
+    dir_optimize_fast.pcpp           @optimize fast
 
   Break it: run each file below the same way; each reports exactly what the
   // ERROR / WARN / HINT comment on its marked line says, and nothing else:
     dir_optimize_err_value.pcpp      a level that does not exist
     dir_optimize_err_case.pcpp       a level in the wrong case (Debug)
+    dir_optimize_err_retired.pcpp    a retired spelling (release_fast)
   The prologue rules (once, main module only, a word not a string) are
   dir_prologue.pcpp's break steps.
 *******************************************************************************/
 
 module exe dir_optimize;
-@optimize release_small;
+@optimize small;
 
 // The macros clang defines at this level, in a fixed order
 static const char* dir_optimize_flags()

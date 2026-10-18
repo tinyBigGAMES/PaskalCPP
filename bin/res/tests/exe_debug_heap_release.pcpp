@@ -15,7 +15,7 @@
 -------------------------------------------------------------------------------
   exe_debug_heap_release.pcpp - Build-kind compliance: no heap report in a release build
 
-  The same program as exe_debug_heap.pcpp built with @optimize release_fast:
+  The same program as exe_debug_heap.pcpp built with @optimize fast:
   the heap is not counted and nothing is reported at shutdown.
 
   How to check, from repo\bin:
@@ -28,7 +28,7 @@
 *******************************************************************************/
 
 module exe exe_debug_heap_release;
-@optimize release_fast;
+@optimize fast;
 
 var
   LKept: ptr;

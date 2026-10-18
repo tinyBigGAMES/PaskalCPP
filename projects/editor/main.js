@@ -1104,11 +1104,11 @@ const PC_BIN_DIR = path.resolve(process.resourcesPath, '..', '..', '..');
 const PC_COMPILER = path.join(PC_BIN_DIR, 'pcpp.exe');
 // pcpp -opt <level> (PC_DIRECTIVE_VALUES optimize) and -t <triple> (the
 // official targets, DESIGN.md sec 7); the first of each is the default
-const PC_BUILD_MODES = ['debug', 'safe', 'fast', 'tiny'];
+const PC_BUILD_MODES = ['debug', 'safe', 'fast', 'small'];
 // A toolbar level saved before the 2026-10-18 rename (PC_RETIRED_VALUES in
 // PaskalCPP.Common): mapped once when state.json is read, saved in the new
 // name by the next saveState; pcpp itself never takes an old name
-const PC_RETIRED_BUILD_MODES = { release_safe: 'safe', release_fast: 'fast', release_small: 'tiny' };
+const PC_RETIRED_BUILD_MODES = { release_safe: 'safe', release_fast: 'fast', release_small: 'small' };
 const PC_BUILD_TARGETS = ['x86_64-windows-gnu', 'x86_64-linux-gnu'];
 // Any CSI escape (colours, cursor moves, clear line, DEC private modes) -
 // OUTPUT is plain text

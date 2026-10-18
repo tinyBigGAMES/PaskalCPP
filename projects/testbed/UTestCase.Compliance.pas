@@ -168,10 +168,11 @@ begin
   DoAdd('dir_prologue_err_breakpoint', 'dir', cmCheck, [], [], [], '');
   DoAdd('dir_optimize', 'dir', cmRun, [], [], [], '');
   DoAdd('dir_optimize_debug', 'dir', cmRun, [], [], [], '');
-  DoAdd('dir_optimize_release_safe', 'dir', cmRun, [], [], [], '');
-  DoAdd('dir_optimize_release_fast', 'dir', cmRun, [], [], [], '');
+  DoAdd('dir_optimize_safe', 'dir', cmRun, [], [], [], '');
+  DoAdd('dir_optimize_fast', 'dir', cmRun, [], [], [], '');
   DoAdd('dir_optimize_err_value', 'dir', cmCheck, [], [], [], '');
   DoAdd('dir_optimize_err_case', 'dir', cmCheck, [], [], [], '');
+  DoAdd('dir_optimize_err_retired', 'dir', cmCheck, [], [], [], '');
   DoAdd('dir_subsystem', 'dir', cmRun, [], [], [], '');
   // A person checks the window; the tester builds it (user 2026-10-11)
   DoAdd('dir_subsystem_gui', 'dir', cmBuild, [], [PC_CMPL_TARGET_WINDOWS], [], '');

@@ -23,7 +23,7 @@
 *******************************************************************************/
 
 module exe dir_optimize_err_value;
-@optimize fast; // ERROR SM0100@11: 'fast' is not a value of @optimize
+@optimize quick; // ERROR SM0100@11: 'quick' is not a value of @optimize
 
 begin
 end.
