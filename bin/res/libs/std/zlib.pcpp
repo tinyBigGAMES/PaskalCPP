@@ -1,0 +1,47 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  zlib.pcpp - the zlib unit: `import zlib;` uses zlib (deflate / inflate,
+  compress / uncompress, gzip files) from PaskalCPP. A self-describing
+  vendor module: it owns every include path, library path and link
+  library it needs, per official target.
+==============================================================================*/
+
+module unit zlib;
+
+// Self-describing vendor module: it owns every path it needs.
+
+@addincludepath "$P:res/libs/vendor/zlib/include";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/zlib/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/zlib/lib/x86_64-linux-gnu";
+@else
+  @message error "zlib_import: unsupported target";
+@endif
+
+@linklibrary "z";
+
+// zlib's CMake gives its users _LARGEFILE64_SOURCE=1 on both targets
+// (ZLIB-static.cmake INTERFACE_COMPILE_DEFINITIONS): the 64-bit gz* names.
+@cppdefine "_LARGEFILE64_SOURCE" "1";
+
+#include "zlib.h"
+
+end.

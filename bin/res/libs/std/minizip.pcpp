@@ -1,0 +1,53 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  minizip.pcpp - the minizip unit: `import minizip;` reads and writes .zip
+  archives from PaskalCPP (zip.h: zipOpen64 / zipOpenNewFileInZip3_64 ...,
+  unzip.h: unzOpen64 / unzOpenCurrentFilePassword ...), with the
+  traditional PKWARE password encryption. Built on zlib, which it imports.
+  A self-describing vendor module: it owns every include path, library
+  path and link library it needs, per official target.
+==============================================================================*/
+
+module unit minizip;
+
+// Self-describing vendor module: it owns every path it needs.
+
+@addincludepath "$P:res/libs/vendor/minizip/include";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/minizip/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/minizip/lib/x86_64-linux-gnu";
+@else
+  @message error "minizip_import: unsupported target";
+@endif
+
+@linklibrary "minizip";
+
+// minizip's CMake gives its users _LARGEFILE64_SOURCE=1 on both targets and
+// no USE_FILE32API (minizip-static.cmake INTERFACE_COMPILE_DEFINITIONS).
+@cppdefine "_LARGEFILE64_SOURCE" "1";
+
+// zip.h and unzip.h include zlib.h: zlib's include path, library and define
+import zlib;
+
+#include "zip.h"
+#include "unzip.h"
+
+end.

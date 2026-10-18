@@ -1,0 +1,75 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  Compress.pcpp - zlib example: compresses a block of text with compress2,
+  uncompresses it again with uncompress, and checks that the bytes and the
+  crc32 checksums of both match.
+==============================================================================*/
+
+module exe Compress;
+
+import
+  zlib;
+
+var
+  LText: string;
+  LI: int32;
+  LPacked: array of uint8;
+  LBack: array of uint8;
+  LTextLen: uLong;
+  LPackedLen: uLongf;
+  LBackLen: uLongf;
+  LResult: int32;
+  LTextCrc: uLong;
+  LBackCrc: uLong;
+
+begin
+  println("zlib {}", zlibVersion());
+
+  // Repeated text compresses well
+  for LI := 1 to 20 do
+    LText := LText + "PaskalCPP mixes freely with C and C++. ";
+  end;
+  LTextLen := len(LText);
+
+  // compressBound gives the largest size compress2 can produce for this input
+  LPackedLen := compressBound(LTextLen);
+  setlength(LPacked, LPackedLen);
+  LResult := compress2(address of LPacked[0], address of LPackedLen,
+    ptr to const uint8(LText.c_str()), LTextLen, Z_BEST_COMPRESSION);
+  // A zlib error ends the program, its code as the exception code
+  if LResult <> Z_OK then
+    raisecode(LResult, "compress2 failed");
+  end;
+  println("compressed {} bytes to {}", LTextLen, LPackedLen);
+
+  // uncompress needs the original size: zlib's raw format does not store it
+  LBackLen := LTextLen;
+  setlength(LBack, LBackLen);
+  LResult := uncompress(address of LBack[0], address of LBackLen,
+    address of LPacked[0], LPackedLen);
+  if LResult <> Z_OK then
+    raisecode(LResult, "uncompress failed");
+  end;
+  println("uncompressed {} bytes to {}", LPackedLen, LBackLen);
+
+  LTextCrc := crc32(0, ptr to const uint8(LText.c_str()), LTextLen);
+  LBackCrc := crc32(0, address of LBack[0], LBackLen);
+  if (LBackLen = LTextLen) and (LTextCrc = LBackCrc) then
+    println("round trip ok, crc32 {:08x}", LTextCrc);
+  else
+    raise("round trip FAILED: the bytes differ");
+  end;
+end.
