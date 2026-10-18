@@ -143,9 +143,9 @@ const
   // The @optimize / optimize spelling of each level (PC_DIRECTIVE_VALUES)
   PC_CMP_OPTIMIZE_TEXT: array[TPCOptimizeLevel] of string = (
     'debug',
-    'release_safe',
-    'release_fast',
-    'release_small'
+    'safe',
+    'fast',
+    'tiny'
   );
 
   { PC_CMP_SUBSYSTEM_TEXT }
@@ -1417,6 +1417,7 @@ var
   LKeys: TArray<string>;
   LKey: string;
   LValue: string;
+  LCurrent: string;
   LLevel: TPCOptimizeLevel;
   LSubsystem: TPCSubsystemType;
 begin
@@ -1435,6 +1436,12 @@ begin
     begin
       if FindOptimizeLevel(LValue, LLevel) then
         FZigBuild.SetOptimizeLevel(LLevel)
+      else if TPCVocabulary.FindRetiredValue(bdOptimize, LValue, LCurrent) then
+      begin
+        // A retired spelling (PC_RETIRED_VALUES) names the one that replaced it
+        FErrors.Add(esError, PC_ERR_CMP_001, RSCmpBadOptionRetired, [LValue, LKey, LCurrent]);
+        Result := False;
+      end
       else
       begin
         FErrors.Add(esError, PC_ERR_CMP_001, RSCmpBadOption,

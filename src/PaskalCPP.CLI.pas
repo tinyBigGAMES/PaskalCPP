@@ -331,7 +331,7 @@ begin
   TConsole.PrintLn(COLOR_BOLD + RSPcCliHelpExamplesHeader);
   TConsole.PrintLn('  ' + COLOR_CYAN + LExeName + ' hello');
   TConsole.PrintLn('  ' + COLOR_CYAN + LExeName + ' hello -r');
-  TConsole.PrintLn('  ' + COLOR_CYAN + LExeName + ' hello -r -opt release_fast');
+  TConsole.PrintLn('  ' + COLOR_CYAN + LExeName + ' hello -r -opt fast');
   TConsole.PrintLn('  ' + COLOR_CYAN + LExeName + ' hello -d');
   TConsole.PrintLn('  ' + COLOR_CYAN + LExeName + ' hello --target x86_64-linux-gnu --output build');
   TConsole.PrintLn('  ' + COLOR_CYAN + LExeName + ' editor hello.pcpp');

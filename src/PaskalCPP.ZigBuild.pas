@@ -213,13 +213,14 @@ const
   PC_ZIG_FORM_TARGET_SUF   = ' });';
 
   { PC_ZIG_FORM_OPTIMIZE_PRE }
-  PC_ZIG_FORM_OPTIMIZE_PRE = 'const optimize: std.builtin.OptimizeMode = ';
+  // zig 0.17's own type and names (std.lang.Optimize: debug safe fast tiny);
+  // std.builtin.OptimizeMode and .ReleaseFast are its deprecated aliases
+  PC_ZIG_FORM_OPTIMIZE_PRE = 'const optimize: std.lang.Optimize = ';
 
   { PC_ZIG_FORM_STRIP }
   // Debug info only in a debug build (user 2026-10-18): every release level is
   // stripped, so no .pdb (Windows) or DWARF (Linux) is written; the debugger
-  // works on debug builds. zig 0.17's mode names (debug safe fast tiny);
-  // without this line zig strips only ReleaseSmall
+  // works on debug builds. Without this line zig strips only tiny
   PC_ZIG_FORM_STRIP        = '.strip = optimize != .debug,';
 
   { PC_ZIG_FORM_EXE }
@@ -293,9 +294,9 @@ type
   { TPCOptimizeLevel }
   TPCOptimizeLevel = (
     olDebug,
-    olReleaseSafe,
-    olReleaseFast,
-    olReleaseSmall
+    olSafe,
+    olFast,
+    olTiny
   );
 
   { TPCSubsystemType }
@@ -2171,13 +2172,13 @@ function TPCZigBuild.GetOptimizeLevelDisplayName(): string;
 begin
   case FOptimizeLevel of
     olDebug:
-      Result := 'Debug';
-    olReleaseSafe:
-      Result := 'ReleaseSafe';
-    olReleaseFast:
-      Result := 'ReleaseFast';
-    olReleaseSmall:
-      Result := 'ReleaseSmall';
+      Result := 'debug';
+    olSafe:
+      Result := 'safe';
+    olFast:
+      Result := 'fast';
+    olTiny:
+      Result := 'tiny';
   else
     Result := 'Unknown';
   end;
@@ -2203,15 +2204,15 @@ begin
   // One name per level both ways: build.zig's optimize line and its loader
   case ALevel of
     olDebug:
-      Result := '.Debug';
-    olReleaseSafe:
-      Result := '.ReleaseSafe';
-    olReleaseFast:
-      Result := '.ReleaseFast';
-    olReleaseSmall:
-      Result := '.ReleaseSmall';
+      Result := '.debug';
+    olSafe:
+      Result := '.safe';
+    olFast:
+      Result := '.fast';
+    olTiny:
+      Result := '.tiny';
   else
-    Result := '.Debug';
+    Result := '.debug';
   end;
 end;
 
@@ -2251,7 +2252,7 @@ begin
       // A store or load through nil stays a real access at every optimize
       // level, so a guard catches it as exception 3. Without it clang treats a
       // nil it can prove as undefined and deletes the access or makes it a
-      // trap at release_safe / release_fast: the guard never ran and the
+      // trap at safe / fast: the guard never ran and the
       // program died (PLAN-RELEASE R2, TODO 13 (a))
       LFlags.Add('"-fno-delete-null-pointer-checks"');
       // Suppress warning about ((a == b)) in if statements

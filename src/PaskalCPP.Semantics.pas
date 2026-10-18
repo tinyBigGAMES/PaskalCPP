@@ -9828,6 +9828,7 @@ end;
 function TPCSemantics.DoCheckChoice(const ADirective: TPCDirective): Boolean;
 var
   LArg: TPCDirectiveArg;
+  LCurrent: string;
 begin
   // An identifier directive: the parser builds exactly one argument (nil-safe rule)
   if ADirective.Args.Count <> 1 then
@@ -9835,6 +9836,13 @@ begin
   LArg := ADirective.Args[0];
   if TPCVocabulary.IsDirectiveValue(ADirective.DirectiveKind, LArg.ResolvedText) then
     Exit(True);
+  // A retired spelling (PC_RETIRED_VALUES) names the one that replaced it
+  if TPCVocabulary.FindRetiredValue(ADirective.DirectiveKind, LArg.ResolvedText, LCurrent) then
+  begin
+    DoError(LArg, PC_ERR_SEM_100, RSSemModValueRetired, [LArg.ResolvedText,
+      ADirective.DirectiveName, LCurrent]);
+    Exit(False);
+  end;
   DoError(LArg, PC_ERR_SEM_100, RSSemModValue, [LArg.ResolvedText, ADirective.DirectiveName,
     TPCVocabulary.DirectiveValuesText(ADirective.DirectiveKind)]);
   Result := False;

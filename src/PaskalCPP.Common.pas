@@ -735,6 +735,15 @@ type
     ValueText: string;
   end;
 
+  { TPCRetiredValue }
+  // A directive value spelling no longer accepted, and the spelling that
+  // replaced it (the hint every report of it names)
+  TPCRetiredValue = record
+    Directive: TPCBuildDirective;
+    RetiredText: string;
+    CurrentText: string;
+  end;
+
   { TPCIntSuffixWidth }
   // The C++ integer type a standard suffix names (C++23 [lex.icon]): int, long, long long, size
   TPCIntSuffixWidth = (iwInt, iwLong, iwLongLong, iwSize);
@@ -824,6 +833,10 @@ type
       const AText: string): Boolean; static;
     // ADirective's accepted values in table order, joined by ', ' (for messages)
     class function DirectiveValuesText(const ADirective: TPCBuildDirective): string; static;
+    // AText is a retired spelling of one of ADirective's values (PC_RETIRED_VALUES,
+    // exact case): ACurrentText = the spelling that replaced it; False = none, ''
+    class function FindRetiredValue(const ADirective: TPCBuildDirective;
+      const AText: string; out ACurrentText: string): Boolean; static;
     // The standard integer suffix spelled ASuffix (exact case, PC_INT_SUFFIXES); False = none, ARow = Default
     class function FindIntSuffix(const ASuffix: string; out ARow: TPCIntSuffixRow): Boolean; static;
   end;
@@ -1426,16 +1439,27 @@ const
   // BNF.md sec 2 values, exact case (sem\module.md); the Compiler maps these
   // spellings to ZigBuild
   PC_DIRECTIVE_VALUES: array[0..9] of TPCDirectiveValue = (
+    // zig 0.17's own names (std.lang.Optimize), user 2026-10-18
     (Directive: bdOptimize;     ValueText: 'debug'),
-    (Directive: bdOptimize;     ValueText: 'release_safe'),
-    (Directive: bdOptimize;     ValueText: 'release_fast'),
-    (Directive: bdOptimize;     ValueText: 'release_small'),
+    (Directive: bdOptimize;     ValueText: 'safe'),
+    (Directive: bdOptimize;     ValueText: 'fast'),
+    (Directive: bdOptimize;     ValueText: 'tiny'),
     (Directive: bdSubsystem;    ValueText: 'console'),
     (Directive: bdSubsystem;    ValueText: 'gui'),
     (Directive: bdAddVerInfo;   ValueText: 'on'),
     (Directive: bdAddVerInfo;   ValueText: 'off'),
     (Directive: bdUnitTestMode; ValueText: 'on'),
     (Directive: bdUnitTestMode; ValueText: 'off')
+  );
+
+  { PC_RETIRED_VALUES }
+  // Spellings no longer accepted (a clean break, user 2026-10-18): each is an
+  // error whose hint names CurrentText. Read by SEM's @optimize check and the
+  // Compiler's option keys (pcpp -opt, the editor)
+  PC_RETIRED_VALUES: array[0..2] of TPCRetiredValue = (
+    (Directive: bdOptimize; RetiredText: 'release_safe';  CurrentText: 'safe'),
+    (Directive: bdOptimize; RetiredText: 'release_fast';  CurrentText: 'fast'),
+    (Directive: bdOptimize; RetiredText: 'release_small'; CurrentText: 'tiny')
   );
 
   { PC_MESSAGE_SEVERITIES }
@@ -1839,6 +1863,24 @@ begin
     end;
   end;
   Result := LText;
+end;
+
+class function TPCVocabulary.FindRetiredValue(const ADirective: TPCBuildDirective;
+  const AText: string; out ACurrentText: string): Boolean;
+var
+  LI: Integer;
+begin
+  ACurrentText := '';
+  for LI := Low(PC_RETIRED_VALUES) to High(PC_RETIRED_VALUES) do
+  begin
+    if (PC_RETIRED_VALUES[LI].Directive = ADirective) and
+      (PC_RETIRED_VALUES[LI].RetiredText = AText) then
+    begin
+      ACurrentText := PC_RETIRED_VALUES[LI].CurrentText;
+      Exit(True);
+    end;
+  end;
+  Result := False;
 end;
 
 class function TPCVocabulary.FindIntSuffix(const ASuffix: string; out ARow: TPCIntSuffixRow): Boolean;

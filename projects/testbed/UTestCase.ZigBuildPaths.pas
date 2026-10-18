@@ -719,6 +719,7 @@ var
   LCase: Integer;
   LKind: Integer;
   LOk: Boolean;
+  LOptLine: string;
 begin
   // Every artifact kind, a target per OS family (one without an ABI), every
   // optimize level and every setting kind build.zig carries
@@ -748,7 +749,7 @@ begin
           2:
             begin
               AZig.SetSubsystem(stGUI);
-              AZig.SetOptimizeLevel(olReleaseSafe);
+              AZig.SetOptimizeLevel(olSafe);
               AZig.AddIncludePath(TPath.Combine(LDir, 'inc'));
               AZig.AddLibraryPath(TPath.Combine(LDir, 'lib'));
               AZig.AddLinkLibrary('user32');
@@ -763,13 +764,13 @@ begin
             begin
               AZig.SetBuildMode(bmLib);
               AZig.SetTarget(ARCH_X86_64, OS_LINUX, ABI_GNU);
-              AZig.SetOptimizeLevel(olReleaseFast);
+              AZig.SetOptimizeLevel(olFast);
             end;
           4:
             begin
               AZig.SetBuildMode(bmDll);
               AZig.SetTarget('aarch64-macos');
-              AZig.SetOptimizeLevel(olReleaseSmall);
+              AZig.SetOptimizeLevel(olTiny);
             end;
           5:
             begin
@@ -785,6 +786,18 @@ begin
     Check(LOk and (LItems = 0), 'round trip: case %d loads back byte for byte (%d items)' +
       sLineBreak + '--- written' + sLineBreak + '%s' + sLineBreak + '--- after a load' +
       sLineBreak + '%s', [LCase, LItems, LFirst, LSecond]);
+    // zig 0.17's own optimize type and names (cases 1-4: one level each; 5: the default)
+    case LCase of
+      1, 5:
+        LOptLine := 'const optimize: std.lang.Optimize = .debug;';
+      2:
+        LOptLine := 'const optimize: std.lang.Optimize = .safe;';
+      3:
+        LOptLine := 'const optimize: std.lang.Optimize = .fast;';
+    else
+      LOptLine := 'const optimize: std.lang.Optimize = .tiny;';
+    end;
+    Check(LFirst.Contains(LOptLine), 'round trip: case %d writes %s', [LCase, LOptLine]);
     if LCase = 5 then
     begin
       Check(LFirst.Contains('.root_module.addObjectFile(.{ .cwd_relative = "') and

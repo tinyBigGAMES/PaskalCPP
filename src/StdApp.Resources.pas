@@ -755,6 +755,8 @@ resourcestring
   RSSemCoreArrowQualified = '''%s'' is a module or a type: reach its names with ''.''';
   { RSSemModValue }
   RSSemModValue = '''%s'' is not a value of @%s: %s';
+  { RSSemModValueRetired }
+  RSSemModValueRetired = '''%s'' is no longer a value of @%s: write ''%s''';
   { RSSemModVersion }
   RSSemModVersion = '@%s takes 0..65535, got %s';
   { RSSemModDuplicate }
@@ -1413,6 +1415,8 @@ resourcestring
 
   { RSCmpBadOption }
   RSCmpBadOption = 'bad value ''%s'' for option %s (expected %s)';
+  { RSCmpBadOptionRetired }
+  RSCmpBadOptionRetired = '''%s'' is no longer a value of option %s: write ''%s''';
 
   { RSCmpUnknownOption }
   RSCmpUnknownOption = 'unknown option ''%s''';
@@ -1498,7 +1502,7 @@ resourcestring
   RSPcCliHelpTarget = 'Set target triple: x86_64-windows-gnu (default), x86_64-linux-gnu';
 
   { RSPcCliHelpOptimize }
-  RSPcCliHelpOptimize = 'Set optimize level: debug, release_safe, release_fast, release_small';
+  RSPcCliHelpOptimize = 'Set optimize level: debug, safe, fast, tiny';
 
   { RSPcCliHelpHelp }
   RSPcCliHelpHelp = 'Display this help message';
@@ -1516,7 +1520,7 @@ resourcestring
   RSPcCliNeedsTarget = 'Error: %s requires a target argument (x86_64-windows-gnu, x86_64-linux-gnu)';
 
   { RSPcCliNeedsOptimize }
-  RSPcCliNeedsOptimize = 'Error: %s requires an optimize level argument (debug, release_safe, release_fast, release_small)';
+  RSPcCliNeedsOptimize = 'Error: %s requires an optimize level argument (debug, safe, fast, tiny)';
 
   { RSPcCliUnknownFlag }
   RSPcCliUnknownFlag = 'Error: Unknown flag: %s';

@@ -44,6 +44,7 @@ type
     procedure DoTestDefaults();
     procedure DoTestTargetUnits();
     procedure DoTestBadOverride();
+    procedure DoTestRetired();
     procedure DoTestMissingSource();
     procedure DoTestDebug();
     procedure DoTestDll();
@@ -130,6 +131,7 @@ begin
   RegisterTest('defaults', DoTestDefaults);
   RegisterTest('target_units', DoTestTargetUnits);
   RegisterTest('bad_override', DoTestBadOverride);
+  RegisterTest('retired', DoTestRetired);
   RegisterTest('missing_source', DoTestMissingSource);
   RegisterTest('debug', DoTestDebug);
   RegisterTest('dll', DoTestDll);
@@ -167,11 +169,11 @@ begin
     if not LOk then
       Exit;
 
-    Check(LCompiler.GetOptimizeLevel() = olReleaseFast, 'directives: @optimize release_fast');
+    Check(LCompiler.GetOptimizeLevel() = olFast, 'directives: @optimize fast');
     Check(LCompiler.GetSubsystem() = stGUI, 'directives: @subsystem gui');
     Check(LCompiler.GetBuildMode() = bmExe, 'directives: an exe builds as bmExe');
     Check(LCompiler.GetProjectName() = 'cmp_dir', 'directives: project name = the entry file name');
-    Check(not LCompiler.HasDefine(PC_CMP_DEFINE_DEBUG), 'directives: no PCPP_DEBUG at release_fast');
+    Check(not LCompiler.HasDefine(PC_CMP_DEFINE_DEBUG), 'directives: no PCPP_DEBUG at fast');
     Check(not LCompiler.HasDefine(PC_CMP_DEFINE_DLL), 'directives: no PCPP_BUILD_DLL for an exe');
 
     LZig := LCompiler.GenerateBuildZig();
@@ -199,7 +201,7 @@ begin
     if not LOk then
       Exit;
 
-    Check(LCompiler.GetOptimizeLevel() = olDebug, 'overrides: optimize debug beats @optimize release_fast');
+    Check(LCompiler.GetOptimizeLevel() = olDebug, 'overrides: optimize debug beats @optimize fast');
     Check(LCompiler.GetSubsystem() = stConsole, 'overrides: subsystem console beats @subsystem gui');
     Check(LCompiler.HasDefine(PC_CMP_DEFINE_DEBUG), 'overrides: PCPP_DEBUG follows the final level');
   finally
@@ -223,7 +225,7 @@ begin
   // what the source does not say: a directive wins over them, an override
   // wins over both
 
-  // 1. dir has @optimize release_fast / @subsystem gui: the directives win
+  // 1. dir has @optimize fast / @subsystem gui: the directives win
   LCompiler := TPCCompiler.Create();
   try
     LCompiler.SetKeyDefault(PC_CMP_KEY_OPTIMIZE, 'debug');
@@ -232,8 +234,8 @@ begin
     Check(LOk, 'defaults: dir prepared (' + DoReports(LCompiler.GetErrors()) + ')');
     if LOk then
     begin
-      Check(LCompiler.GetOptimizeLevel() = olReleaseFast,
-        'defaults: @optimize release_fast beats the default debug');
+      Check(LCompiler.GetOptimizeLevel() = olFast,
+        'defaults: @optimize fast beats the default debug');
       Check(LCompiler.GetSubsystem() = stGUI, 'defaults: @subsystem gui beats the default console');
     end;
   finally
@@ -243,14 +245,14 @@ begin
   // 2. hello says nothing: the defaults are what is built
   LCompiler := TPCCompiler.Create();
   try
-    LCompiler.SetKeyDefault(PC_CMP_KEY_OPTIMIZE, 'release_small');
+    LCompiler.SetKeyDefault(PC_CMP_KEY_OPTIMIZE, 'tiny');
     LCompiler.SetKeyDefault(PC_CMP_KEY_TARGET, 'x86_64-linux-gnu');
     LOk := LCompiler.Prepare(DoSource('hello'), DoOutput('hello'));
     Check(LOk, 'defaults: hello prepared (' + DoReports(LCompiler.GetErrors()) + ')');
     if LOk then
     begin
-      Check(LCompiler.GetOptimizeLevel() = olReleaseSmall,
-        'defaults: no @optimize, the default release_small is built');
+      Check(LCompiler.GetOptimizeLevel() = olTiny,
+        'defaults: no @optimize, the default tiny is built');
       Check(LCompiler.GenerateBuildZig().Contains(PC_UTC_LINUX_OS),
         'defaults: no @target, the default x86_64-linux-gnu is built');
     end;
@@ -284,7 +286,7 @@ begin
   // 4. A bad default is CMP0001, as a bad override
   LCompiler := TPCCompiler.Create();
   try
-    LCompiler.SetKeyDefault(PC_CMP_KEY_OPTIMIZE, 'fast');
+    LCompiler.SetKeyDefault(PC_CMP_KEY_OPTIMIZE, 'quick');
     LOk := LCompiler.Prepare(DoSource('hello'), DoOutput('hello'));
     Check((not LOk) and (DoCodes(LCompiler.GetErrors()) = PC_ERR_CMP_001),
       'defaults: a bad default value is CMP0001 (' + DoReports(LCompiler.GetErrors()) + ')');
@@ -334,7 +336,7 @@ var
 begin
   LCompiler := TPCCompiler.Create();
   try
-    LCompiler.SetKeyValue(PC_CMP_KEY_OPTIMIZE, 'fast');
+    LCompiler.SetKeyValue(PC_CMP_KEY_OPTIMIZE, 'quick');
     Check(not LCompiler.Prepare(DoSource('dir'), DoOutput('dir')), 'bad_override: a bad value fails');
     Check(DoCodes(LCompiler.GetErrors()) = PC_ERR_CMP_001,
       'bad_override: reported as CMP0001 (' + DoReports(LCompiler.GetErrors()) + ')');
@@ -348,6 +350,54 @@ begin
     Check(not LCompiler.Prepare(DoSource('dir'), DoOutput('dir')), 'bad_override: an unknown option fails');
     Check(DoCodes(LCompiler.GetErrors()) = PC_ERR_CMP_001,
       'bad_override: unknown option is CMP0001 (' + DoReports(LCompiler.GetErrors()) + ')');
+  finally
+    LCompiler.Free();
+  end;
+end;
+
+procedure TPCCompilerTests.DoTestRetired();
+var
+  LCompiler: TPCCompiler;
+begin
+  // A retired level spelling (PC_RETIRED_VALUES) is an error naming the new
+  // one, on all three paths: an override (-opt), a default (the editor) and
+  // @optimize
+
+  // 1. an override
+  LCompiler := TPCCompiler.Create();
+  try
+    LCompiler.SetKeyValue(PC_CMP_KEY_OPTIMIZE, 'release_fast');
+    Check(not LCompiler.Prepare(DoSource('hello'), DoOutput('hello')), 'retired: an override fails');
+    Check(DoCodes(LCompiler.GetErrors()) = PC_ERR_CMP_001,
+      'retired: an override is CMP0001 (' + DoReports(LCompiler.GetErrors()) + ')');
+    Check(DoReports(LCompiler.GetErrors()).Contains(
+      '''release_fast'' is no longer a value of option optimize: write ''fast'''),
+      'retired: an override names fast (' + DoReports(LCompiler.GetErrors()) + ')');
+  finally
+    LCompiler.Free();
+  end;
+
+  // 2. a default
+  LCompiler := TPCCompiler.Create();
+  try
+    LCompiler.SetKeyDefault(PC_CMP_KEY_OPTIMIZE, 'release_small');
+    Check(not LCompiler.Prepare(DoSource('hello'), DoOutput('hello')), 'retired: a default fails');
+    Check(DoCodes(LCompiler.GetErrors()) = PC_ERR_CMP_001,
+      'retired: a default is CMP0001 (' + DoReports(LCompiler.GetErrors()) + ')');
+    Check(DoReports(LCompiler.GetErrors()).Contains(
+      '''release_small'' is no longer a value of option optimize: write ''tiny'''),
+      'retired: a default names tiny (' + DoReports(LCompiler.GetErrors()) + ')');
+  finally
+    LCompiler.Free();
+  end;
+
+  // 3. @optimize release_fast (cmp_retired.pcpp line 2): SEM's SM0100
+  LCompiler := TPCCompiler.Create();
+  try
+    Check(not LCompiler.Prepare(DoSource('retired'), DoOutput('retired')), 'retired: @optimize fails');
+    Check(DoReports(LCompiler.GetErrors()) =
+      'SM0100 2: ''release_fast'' is no longer a value of @optimize: write ''fast''',
+      'retired: @optimize is one SM0100 naming fast (' + DoReports(LCompiler.GetErrors()) + ')');
   finally
     LCompiler.Free();
   end;
