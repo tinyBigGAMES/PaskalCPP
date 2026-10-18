@@ -1,0 +1,58 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  glfw.pcpp - the GLFW unit: `import glfw;` uses GLFW (windows, OpenGL
+  contexts, input) from PaskalCPP. A self-describing vendor module: it owns
+  every include path, library path and link library it needs, per official
+  target.
+==============================================================================*/
+
+module unit glfw;
+
+// Self-describing vendor module: it owns every path it needs.
+
+@addincludepath "$P:res/libs/vendor/glfw/include";
+
+// GLFW's own link list (its glfw3.pc). It loads the window system and the
+// OpenGL library itself at run time (opengl32.dll; libX11.so.6, libGL.so.1),
+// so nothing here links them.
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/glfw/lib/x86_64-windows-gnu";
+  @linklibrary "gdi32";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/glfw/lib/x86_64-linux-gnu";
+  @linklibrary "m";
+  @linklibrary "pthread";
+  @linklibrary "dl";
+  @linklibrary "rt";
+@else
+  @message error "glfw_import: unsupported target";
+@endif
+
+@linklibrary "glfw3";
+
+// The header goes to this unit's header, so every importer sees GLFW's API
+cpp header;
+
+// No OpenGL header from glfw3.h on any target (zig ships no GL/gl.h for
+// Linux): a program fetches its GL functions with glfwGetProcAddress or
+// includes its own loader.
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+
+end.
