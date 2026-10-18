@@ -48,13 +48,13 @@ const
   // the editor and its package.json)
   PC_MAJOR_VERSION = 0;
   { PC_MINOR_VERSION }
-  PC_MINOR_VERSION = 1;
+  PC_MINOR_VERSION = 2;
   { PC_PATCH_VERSION }
   PC_PATCH_VERSION = 0;
   { PC_VERSION }
   PC_VERSION = (PC_MAJOR_VERSION * 10000) + (PC_MINOR_VERSION * 100) + PC_PATCH_VERSION;
   { PC_VERSION_STR }
-  PC_VERSION_STR = '0.1.0';
+  PC_VERSION_STR = '0.2.0';
 
   { PC_SRC_EXT }
   PC_SRC_EXT = 'pcpp';
