@@ -1357,6 +1357,16 @@ const
   PC_CLANG_OVERRIDE_NOTHING = 'marked ''override'' but does not override any member functions';
   { PC_CLANG_OVERRIDE_NOT_VIRTUAL }
   PC_CLANG_OVERRIDE_NOT_VIRTUAL = 'only virtual member functions can be marked ''override''';
+  { PC_CLANG_FORMAT_STRING }
+  // PLAN-VENDOR 1e: clang's error text when a std::format_string argument
+  // (println's format, a C++ routine's: SysUtils.FormatStr) cannot be checked
+  // against its arguments: the message holds both parts. The Compiler owns it
+  // only at an argument of a PaskalCPP call (TPCAst.CallAt): a string literal
+  // that does not fit = SM0502, any other value = SM0500. Witnessed by the
+  // bundled clang: Compliance intr_print_err_format, std_sysutils_format_err_*
+  PC_CLANG_FORMAT_STRING = 'call to consteval function ''std::basic_format_string<';
+  { PC_CLANG_NOT_CONSTANT }
+  PC_CLANG_NOT_CONSTANT = ' is not a constant expression';
 
   { PC_MAX_OBJECT_SIZE }
   // F47: the largest size in bytes a type has on every supported target. clang

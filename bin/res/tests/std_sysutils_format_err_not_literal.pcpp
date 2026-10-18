@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_sysutils_format_err_not_literal.pcpp - break step of
+  std_sysutils_format.pcpp: a string variable as the format string (SM0500:
+  a format string is checked when the program is built, so it is written as
+  a string literal)
+
+  How to check, from repo\bin:
+    pcpp res\tests\std_sysutils_format_err_not_literal.pcpp
+    pcpp res\tests\std_sysutils_format_err_not_literal.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe std_sysutils_format_err_not_literal;
+
+import
+  SysUtils;
+
+var
+  LFormat: string;
+  LText: string;
+
+begin
+  LFormat := "{}";
+  LText := FormatStr(LFormat, 1); // ERROR SM0500@22
+  println("{}", LText);
+end.

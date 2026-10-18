@@ -214,6 +214,15 @@ type
       const AColumn: UInt64; const AMessage: string; const AEvaluated: string;
       const AFlag: string; out ACode: string; out AText: string; out AOutFilename: string;
       out AOutLine: UInt64; out AOutColumn: UInt64): Boolean;
+    // PLAN-VENDOR 1e: DoFrontendCheck's two format cases. A std::format_string
+    // argument clang could not check (SM0502 / SM0500), and the runtime's
+    // format_arg check at a C++ routine's call (SM0425); True = owned
+    function DoFormatStringCheck(const AFilename: string; const ALine: UInt64;
+      const AColumn: UInt64; out ACode: string; out AText: string; out AOutFilename: string;
+      out AOutLine: UInt64; out AOutColumn: UInt64): Boolean;
+    function DoFormatArgCheck(const AFilename: string; const ALine: UInt64;
+      const AColumn: UInt64; out ACode: string; out AText: string; out AOutFilename: string;
+      out AOutLine: UInt64; out AOutColumn: UInt64): Boolean;
     procedure DoInternalError(const AException: Exception);
     procedure DoFreePhases();
     procedure DoCreatePhases();
@@ -537,6 +546,12 @@ begin
     AOutColumn := LRange.StartColumn;
     Exit(True);
   end;
+  // PLAN-VENDOR 1e: a std::format_string argument clang could not check
+  // against the arguments after it (no warning group: its texts,
+  // PC_CLANG_FORMAT_STRING)
+  if AMessage.Contains(PC_CLANG_FORMAT_STRING) and AMessage.Contains(PC_CLANG_NOT_CONSTANT) then
+    Exit(DoFormatStringCheck(AFilename, ALine, AColumn, ACode, AText, AOutFilename, AOutLine,
+      AOutColumn));
   // PLAN-OBJECT O13b: a rule SEM left to clang's view of an object's
   // polymorphism (a C/C++ base): the expression SEM marked, its code by the
   // rule, SEM's own message (TPCExpr.ResolvedPolyText)
@@ -568,8 +583,11 @@ begin
   // names it (F64)
   if AMessage.EndsWith(PC_FRONTEND_CHECK_PRINT) then
   begin
+    // PLAN-VENDOR 1e: not a print / println argument: the runtime's
+    // format_arg check, asked at a C++ routine's call
     if not FAst.PrintArgAt(AFilename, ALine, AColumn, LArg) then
-      Exit;
+      Exit(DoFormatArgCheck(AFilename, ALine, AColumn, ACode, AText, AOutFilename, AOutLine,
+        AOutColumn));
     if (LArg.ResolvedType <> nil) and (not (LArg.ResolvedType is TPCOpaqueType)) then
       LTypeName := LArg.ResolvedType.TypeText()
     else
@@ -659,6 +677,119 @@ begin
   AOutFilename := LRecord.AlignExpr.Range.Filename;
   AOutLine := LRecord.AlignExpr.Range.StartLine;
   AOutColumn := LRecord.AlignExpr.Range.StartColumn;
+  Result := True;
+end;
+
+function TPCCompiler.DoFormatStringCheck(const AFilename: string; const ALine: UInt64;
+  const AColumn: UInt64; out ACode: string; out AText: string; out AOutFilename: string;
+  out AOutLine: UInt64; out AOutColumn: UInt64): Boolean;
+var
+  LCall: TPCCall;
+  LArgIndex: Integer;
+  LArg: TPCExpr;
+begin
+  // clang's location is the format string argument (println's, a C++
+  // routine's: TPCAst.CallAt). A string literal does not fit the arguments
+  // after it (SM0502); any other value is no text the build can check: a
+  // string value never is a C++ constant, a pointer constant only when its
+  // text fits, so its fix is the literal itself (SM0500). A location in
+  // verbatim C++ (no PaskalCPP call's argument) stays clang's
+  Result := False;
+  ACode := '';
+  AText := '';
+  AOutFilename := AFilename;
+  AOutLine := ALine;
+  AOutColumn := AColumn;
+  if not FAst.CallAt(AFilename, ALine, AColumn, LCall, LArgIndex) then
+    Exit;
+  if LArgIndex < 0 then
+    Exit;
+
+  LArg := LCall.Args[LArgIndex];
+  if (LArg is TPCLiteral) and (TPCLiteral(LArg).LiteralKind = lkString) then
+  begin
+    ACode := PC_ERR_SEM_502;
+    AText := TPCSemantics.FormatMismatchText(LArg.ExprText(), LCall.Args.Count - LArgIndex - 1);
+  end
+  else
+  begin
+    ACode := PC_ERR_SEM_500;
+    AText := TPCSemantics.FormatNotLiteralText(LArg.ExprText());
+  end;
+  AOutFilename := LArg.Range.Filename;
+  AOutLine := LArg.Range.StartLine;
+  AOutColumn := LArg.Range.StartColumn;
+  Result := True;
+end;
+
+function TPCCompiler.DoFormatArgCheck(const AFilename: string; const ALine: UInt64;
+  const AColumn: UInt64; out ACode: string; out AText: string; out AOutFilename: string;
+  out AOutLine: UInt64; out AOutColumn: UInt64): Boolean;
+var
+  LCall: TPCCall;
+  LArgIndex: Integer;
+  LIndex: Integer;
+  LAt: TPCNode;
+  LCppArg: TPCExpr;
+  LCppCount: Integer;
+begin
+  // The runtime's format_arg check failed while a C++ routine's parameter
+  // types were formed (SysUtils.FormatStr): clang names the call only in its
+  // substitution note, not which argument. The AST tells what it can: the
+  // first argument with no print form (a record, object or overlay; SEM's
+  // own text), else the one C/C++ argument (std::formatter is clang's to
+  // know), else the call itself
+  Result := False;
+  ACode := '';
+  AText := '';
+  AOutFilename := AFilename;
+  AOutLine := ALine;
+  AOutColumn := AColumn;
+  if not FAst.CallAt(AFilename, ALine, AColumn, LCall, LArgIndex) then
+    Exit;
+
+  LAt := nil;
+  LCppArg := nil;
+  LCppCount := 0;
+  for LIndex := 0 to LCall.Args.Count - 1 do
+  begin
+    AText := TPCSemantics.UnprintableArgText(LCall.Args[LIndex]);
+    if AText <> '' then
+    begin
+      LAt := LCall.Args[LIndex];
+      Break;
+    end;
+    if TPCTypeExpr.PrintFormOfArg(LCall.Args[LIndex]) = pfCppChecked then
+    begin
+      Inc(LCppCount);
+      LCppArg := LCall.Args[LIndex];
+    end;
+  end;
+
+  if LAt = nil then
+  begin
+    if LCppCount = 1 then
+    begin
+      // Its PaskalCPP spelling, else as written (F64: an opaque type has none)
+      LAt := LCppArg;
+      if (LCppArg.ResolvedType <> nil) and (not (LCppArg.ResolvedType is TPCOpaqueType)) then
+        AText := TPCSemantics.PrintNoFormatterText(LCppArg.ResolvedType.TypeText())
+      else
+        AText := TPCSemantics.PrintNoFormatterText(LCppArg.ExprText());
+    end
+    else
+    begin
+      LAt := LCall;
+      if LCall.Callee <> nil then
+        AText := TPCSemantics.NoFormatterArgsText(LCall.Callee.ExprText())
+      else
+        AText := TPCSemantics.NoFormatterArgsText(LCall.ExprText());
+    end;
+  end;
+  ACode := PC_ERR_SEM_425;
+  AOutFilename := LAt.Range.Filename;
+  AOutLine := LAt.Range.StartLine;
+  AOutColumn := LAt.Range.StartColumn;
   Result := True;
 end;
 

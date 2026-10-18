@@ -420,6 +420,10 @@ const
   PC_ERR_SEM_431 = 'SM0431';   // several declared operators take the operands alike (O11)
   { PC_ERR_SEM_432 }
   PC_ERR_SEM_432 = 'SM0432';   // a method named as a value (O13, F-A5a)
+  { PC_ERR_SEM_500 }
+  PC_ERR_SEM_500 = 'SM0500';   // PRINT: a format string that is not a string literal (clang's check, the Compiler reports; PLAN-VENDOR 1e)
+  { PC_ERR_SEM_502 }
+  PC_ERR_SEM_502 = 'SM0502';   // PRINT: a format string literal does not fit its arguments (clang's check, the Compiler reports; PLAN-VENDOR 1e)
   { PC_ERR_SEM_600 }
   PC_ERR_SEM_600 = 'SM0600';   // for needs a variable: <name> is <kind>
   { PC_ERR_SEM_601 }
@@ -1102,6 +1106,18 @@ type
     // SM0425's message for a print argument of a C/C++ type with no
     // std::formatter: the emitted check's text (E7; SEM cannot judge it)
     class function PrintNoFormatterText(const ATypeText: string): string; static;
+    // PLAN-VENDOR 1e: SM0425's message for an argument with no print form (a
+    // record / object / overlay, an overload set or a method; PrintFormOfArg),
+    // one routine for SEM's print check and the Compiler's report of a C++
+    // routine's argument (the runtime's format_arg check); '' = it has a form
+    class function UnprintableArgText(const AArg: TPCExpr): string; static;
+    // SM0425 at a C++ routine's call when the argument with no std::formatter
+    // cannot be told apart (several C/C++ arguments: PLAN-VENDOR 1e)
+    class function NoFormatterArgsText(const ACalleeText: string): string; static;
+    // SM0502 / SM0500's messages (PLAN-VENDOR 1e: clang's check of a
+    // std::format_string argument, reported by the Compiler)
+    class function FormatMismatchText(const AFormatText: string; const ACount: Integer): string; static;
+    class function FormatNotLiteralText(const AFormatText: string): string; static;
     // SM0332's message (PLAN-OBJECT O13b): a method that overrides a virtual
     // of AOwner without `override`; one text for SEM and the emitted check
     // (a C/C++ parent's virtual, which only clang sees)
@@ -8299,6 +8315,40 @@ begin
   Result := Format(RSSemCallNoFormatter, [ATypeText]);
 end;
 
+class function TPCSemantics.UnprintableArgText(const AArg: TPCExpr): string;
+var
+  LForm: TPCPrintForm;
+begin
+  // The argument's print form decides (TPCTypeExpr.PrintFormOfArg, the one
+  // rule print / println and the emitter read)
+  Result := '';
+  if AArg = nil then
+    Exit;
+  LForm := TPCTypeExpr.PrintFormOfArg(AArg);
+  if (LForm = pfUnprintable) and (AArg.ResolvedType <> nil) then
+    Result := Format(RSSemCallUnprintable, [AArg.ResolvedType.TypeText()])
+  else if LForm = pfNoAddress then
+    Result := Format(RSSemCallNoAddress, [AArg.ExprText()]);
+end;
+
+class function TPCSemantics.NoFormatterArgsText(const ACalleeText: string): string;
+begin
+  // SM0425 at the call: one of its C/C++ arguments has no std::formatter
+  Result := Format(RSSemCallNoFormatterArgs, [ACalleeText]);
+end;
+
+class function TPCSemantics.FormatMismatchText(const AFormatText: string; const ACount: Integer): string;
+begin
+  // SM0502: AFormatText is the literal as written, ACount the arguments after it
+  Result := Format(RSSemCallFormatMismatch, [AFormatText, ACount]);
+end;
+
+class function TPCSemantics.FormatNotLiteralText(const AFormatText: string): string;
+begin
+  // SM0500: AFormatText is the value as written
+  Result := Format(RSSemCallFormatNotLiteral, [AFormatText]);
+end;
+
 class function TPCSemantics.PackedFieldText(const AFieldName: string; const ARecordName: string;
   const ATypeText: string; const AByClang: Boolean): string;
 begin
@@ -13648,7 +13698,7 @@ procedure TPCSemantics.DoIntrinsic(const ACall: TPCCall);
 var
   LSig: TPCIntrinsicSig;
   LIndex: Integer;
-  LForm: TPCPrintForm;
+  LText: string;
   LTarget: TPCTypeExpr;
   LLocked: TPCOwnerType;
 begin
@@ -13682,13 +13732,9 @@ begin
     begin
       if DoIsPoisoned(ACall.Args[LIndex]) then
         Continue;
-      LForm := TPCTypeExpr.PrintFormOfArg(ACall.Args[LIndex]);
-      if LForm = pfUnprintable then
-        DoError(ACall.Args[LIndex], PC_ERR_SEM_425, RSSemCallUnprintable,
-          [ACall.Args[LIndex].ResolvedType.TypeText()])
-      else if LForm = pfNoAddress then
-        DoError(ACall.Args[LIndex], PC_ERR_SEM_425, RSSemCallNoAddress,
-          [ACall.Args[LIndex].ExprText()]);
+      LText := UnprintableArgText(ACall.Args[LIndex]);
+      if LText <> '' then
+        DoError(ACall.Args[LIndex], PC_ERR_SEM_425, '%s', [LText]);
     end;
     // PLAN-RECORDS M8: std::format takes its arguments by reference
     DoNoteMisalignedPrint(ACall);

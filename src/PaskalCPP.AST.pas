@@ -2276,6 +2276,13 @@ type
     // print argument there
     function PrintArgAt(const AFilename: string; const ALine: UInt64;
       const AColumn: UInt64; out AArg: TPCExpr): Boolean;
+    // PLAN-VENDOR 1e: the innermost call (a routine's, an intrinsic's, a
+    // C/C++ one's) holding the node whose emitted span is the narrowest at a
+    // location clang reported: AArgIndex = the argument that node lies in,
+    // -1 = the callee or the call itself (a template's substitution note is
+    // at the callee). False = no call there
+    function CallAt(const AFilename: string; const ALine: UInt64;
+      const AColumn: UInt64; out ACall: TPCCall; out AArgIndex: Integer): Boolean;
     // The field, or a packed record's parent type, whose emitted span is the
     // narrowest at a location clang reported: the emitter's packed-field check
     // (PLAN-RECORDS M9) and overlay-field check (F34) are spans of it. AOwner = the
@@ -7145,6 +7152,107 @@ begin
   if not LFound then
     Exit;
   AArg := TPCExpr(LBest);
+  Result := True;
+end;
+
+{ Call lookup }
+// CallAt's containment test: ANode is ARoot or lies anywhere below it
+
+function DoNodeWithin(const ARoot: TPCNode; const ANode: TPCNode): Boolean;
+var
+  LFound: Boolean;
+  LSearch: TPCNodeVisitor;
+begin
+  Result := False;
+  if ARoot = nil then
+    Exit;
+  if ARoot = ANode then
+    Exit(True);
+  LFound := False;
+  LSearch :=
+    procedure(const AChild: TPCNode)
+    begin
+      if LFound then
+        Exit;
+      if AChild = ANode then
+      begin
+        LFound := True;
+        Exit;
+      end;
+      AChild.EnumChildren(LSearch);
+    end;
+  try
+    ARoot.EnumChildren(LSearch);
+  finally
+    // The visitor captures itself: clear it to break the reference cycle
+    LSearch := nil;
+  end;
+  Result := LFound;
+end;
+
+function TPCAst.CallAt(const AFilename: string; const ALine: UInt64;
+  const AColumn: UInt64; out ACall: TPCCall; out AArgIndex: Integer): Boolean;
+var
+  LModule: TPCModule;
+  LBest: TPCNode;
+  LBestSpan: TPCEmitSpan;
+  LCall: TPCCall;
+  LIndex: Integer;
+  LSearch: TPCNodeVisitor;
+begin
+  // Every call holding the narrowest node is visited, an outer one before
+  // the calls in its arguments (preorder), so the last one taken is the
+  // innermost: println("{}", F(X)) at X is F's argument, not println's
+  Result := False;
+  ACall := nil;
+  AArgIndex := -1;
+  LModule := FindModuleByFile(AFilename);
+  if LModule = nil then
+    Exit;
+  // Any node: at a callee the narrowest is a part of its name
+  // (TPCNamePart), which lies within the callee all the same
+  if not DoNarrowestAt(LModule, ALine, AColumn, LBest, LBestSpan) then
+    Exit;
+
+  LCall := nil;
+  LSearch :=
+    procedure(const ANode: TPCNode)
+    var
+      LArg: Integer;
+    begin
+      if ANode is TPCCall then
+      begin
+        if (ANode = LBest) or DoNodeWithin(TPCCall(ANode).Callee, LBest) then
+        begin
+          LCall := TPCCall(ANode);
+          LIndex := -1;
+        end
+        else
+        begin
+          for LArg := 0 to TPCCall(ANode).Args.Count - 1 do
+          begin
+            if DoNodeWithin(TPCCall(ANode).Args[LArg], LBest) then
+            begin
+              LCall := TPCCall(ANode);
+              LIndex := LArg;
+              Break;
+            end;
+          end;
+        end;
+      end;
+      ANode.EnumChildren(LSearch);
+    end;
+  try
+    LSearch(LModule);
+  finally
+    // The visitor captures itself: clear it to break the reference cycle
+    LSearch := nil;
+  end;
+
+  if LCall = nil then
+    Exit;
+  ACall := LCall;
+  AArgIndex := LIndex;
   Result := True;
 end;
 

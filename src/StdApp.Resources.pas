@@ -1223,6 +1223,15 @@ resourcestring
   RSSemCallNoAddress = '''%s'' cannot be printed: an overload set or a method has no single address';
   { RSSemCallNoFormatter }
   RSSemCallNoFormatter = '''%s'' cannot be printed: the C/C++ type has no std::formatter';
+  { RSSemCallNoFormatterArgs }
+  // the callee as written (PLAN-VENDOR 1e: a C++ routine's call, several C/C++ arguments)
+  RSSemCallNoFormatterArgs = 'an argument of ''%s'' cannot be printed: its C/C++ type has no std::formatter';
+  { RSSemCallFormatMismatch }
+  // the format string literal as written, the argument count after it (PLAN-VENDOR 1e)
+  RSSemCallFormatMismatch = 'format string %s does not fit the %d argument(s) after it: each {} takes the next argument, and its format spec must suit that argument''s type';
+  { RSSemCallFormatNotLiteral }
+  // the format value as written (PLAN-VENDOR 1e)
+  RSSemCallFormatNotLiteral = 'format string ''%s'' is not a string literal: a format string is checked against its arguments when the program is built, so write the text itself';
   { RSSemCallOverloadNone }
   RSSemCallOverloadNone = 'no overload of ''%s'' takes (%s)';
   { RSSemCallOverloadMember }

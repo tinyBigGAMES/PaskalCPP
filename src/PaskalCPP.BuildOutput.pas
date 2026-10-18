@@ -97,6 +97,14 @@ const
   // the first of them the frontend claims: the use in its source
   PC_CLANG_INSTANTIATION_NOTE = 'in instantiation of ';
 
+  { PC_CLANG_SUBSTITUTION_NOTE }
+  // clang's note naming the call whose template arguments were being
+  // substituted ("while substituting deduced template arguments into function
+  // template 'F'"), asked as an instantiation note is: a check that fires
+  // while a C++ routine's parameter types are formed (the runtime's
+  // format_arg, PLAN-VENDOR 1e) is at the call only there
+  PC_CLANG_SUBSTITUTION_NOTE = 'while substituting ';
+
   { PC_ZIG_CLANG_EXITED }
   // zig's line for a TU whose clang failed: '<tu>:1:1: error: clang exited
   // with code <n>'. Not a diagnostic: the TU's .dia (or raw block) says why.
@@ -1277,9 +1285,10 @@ begin
   // True = a located error the frontend wrote the check for: AKey takes its
   // location and message, ACode its code. The untranslated location goes
   // to the frontend, which finds its own node there; a check that fired
-  // inside a template (F47: the runtime's Array) is asked again at each
-  // instantiation note's location, innermost first, until the frontend
-  // claims one (the use in its source)
+  // inside a template (F47: the runtime's Array; PLAN-VENDOR 1e: its
+  // format_arg) is asked again at each instantiation or substitution note's
+  // location, innermost first, until the frontend claims one (the use in its
+  // source)
   Result := False;
   ACode := PC_ERR_BUILDOUTPUT_TOOLDIAG;
   if (not Assigned(FFrontendCheck)) or (ADiag.Severity <> esError) or
@@ -1292,7 +1301,8 @@ begin
   begin
     for LNote in ADiag.Notes do
     begin
-      if (LNote.Filename = '') or (not LNote.MessageText.StartsWith(PC_CLANG_INSTANTIATION_NOTE)) then
+      if (LNote.Filename = '') or not (LNote.MessageText.StartsWith(PC_CLANG_INSTANTIATION_NOTE) or
+        LNote.MessageText.StartsWith(PC_CLANG_SUBSTITUTION_NOTE)) then
         Continue;
       LOwned := FFrontendCheck(LNote.Filename, LNote.Line, LNote.Column,
         ADiag.MessageText, DoEvaluatedText(ADiag), ADiag.FlagText, LCode, LText, LOutFilename,

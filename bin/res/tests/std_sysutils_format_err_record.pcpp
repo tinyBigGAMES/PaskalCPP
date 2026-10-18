@@ -1,0 +1,45 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_sysutils_format_err_record.pcpp - break step of std_sysutils_format.pcpp:
+  a record as an argument (SM0425 at the argument, as println reports it)
+
+  How to check, from repo\bin:
+    pcpp res\tests\std_sysutils_format_err_record.pcpp
+    pcpp res\tests\std_sysutils_format_err_record.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe std_sysutils_format_err_record;
+
+import
+  SysUtils;
+
+type
+  TPoint = record
+    X: int32;
+    Y: int32;
+  end;
+
+var
+  LPoint: TPoint;
+  LText: string;
+
+begin
+  LPoint.X := 1;
+  LPoint.Y := 2;
+  LText := FormatStr("{}", LPoint); // ERROR SM0425@28
+  println("{}", LText);
+end.

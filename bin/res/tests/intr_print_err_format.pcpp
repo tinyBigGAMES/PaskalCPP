@@ -14,7 +14,7 @@
   at https://mozilla.org/MPL/2.0/.
 -------------------------------------------------------------------------------
   intr_print_err_format.pcpp - break step of intr_print.pcpp:
-  a format string with more {} than arguments: clang reports it (ZB0016)
+  a format string with more {} than arguments (SM0502)
 
   How to check, from repo\bin:
     pcpp res\tests\intr_print_err_format.pcpp
@@ -29,5 +29,5 @@ var
 
 begin
   LN := 1;
-  println("{} {}", LN); // ERROR ZB0016
+  println("{} {}", LN); // ERROR SM0502@11
 end.

@@ -610,6 +610,7 @@ begin
   DoAdd('intr_print_err_value', 'intr', cmCheck, [], [], [], '');
   DoAdd('intr_print_err_cpp_value', 'intr', cmBuild, [], [], [], '');
   DoAdd('intr_print_err_format', 'intr', cmBuild, [], [], [], '');
+  DoAdd('intr_print_err_format_not_literal', 'intr', cmBuild, [], [], [], '');
   DoAdd('intr_shadow', 'intr', cmRun, [], [], [], '');
   DoAdd('intr_shadow_err_type_arg', 'intr', cmCheck, [], [], [], '');
   // PLAN-COMPLIANCE F8 test_ (scripts\zb_cmpl\f4\gen_test.py)
@@ -1043,6 +1044,11 @@ begin
   // std_: the std library units (res\libs\std), one file per unit
   DoAdd('std_sysutils', 'std', cmRun, [], [], [], '');
   DoAdd('std_sysutils_format', 'std', cmRun, [], [], [], '');
+  DoAdd('std_sysutils_format_err_count', 'std', cmBuild, [], [], [], '');
+  DoAdd('std_sysutils_format_err_not_literal', 'std', cmBuild, [], [], [], '');
+  DoAdd('std_sysutils_format_err_record', 'std', cmBuild, [], [], [], '');
+  DoAdd('std_sysutils_format_err_cpp_value', 'std', cmBuild, [], [], [], '');
+  DoAdd('std_sysutils_format_err_cpp_values', 'std', cmBuild, [], [], [], '');
 
   // hello: the first end-to-end program (an exe built at @optimize small)
   DoAdd('hello', 'exe', cmRun, [], [], [], '');

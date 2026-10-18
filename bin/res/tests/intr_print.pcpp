@@ -53,7 +53,9 @@
     intr_print_err_cpp_value.pcpp
       a C++ value with no formatter printed (SM0425, the emitted check)
     intr_print_err_format.pcpp
-      a format string with more {} than arguments: clang reports it (ZB0016)
+      a format string with more {} than arguments (SM0502)
+    intr_print_err_format_not_literal.pcpp
+      a string variable as the format string (SM0500)
 *******************************************************************************/
 
 module exe intr_print;

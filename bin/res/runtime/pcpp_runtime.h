@@ -706,8 +706,16 @@ decltype(auto) format_arg(const T& value) {
                          detail::format_element_mapped<V>()) {
         // An array (static or dynamic) whose elements need a form
         return print_map(value, [](const auto& element) { return detail::format_element(element); });
-    } else {
+    } else if constexpr (printable<V>) {
         return (value);
+    } else {
+        // No std::formatter (a PaskalCPP record / object / overlay, a C/C++
+        // type without one; PLAN-VENDOR 1e): the frontend reports SM0425 at
+        // the caller's argument (BuildOutput asks at the instantiation
+        // notes), and the placeholder keeps std::format from instantiating
+        // the missing formatter, so this is the only report
+        static_assert(printable<V>, "pcpp:SM0425");
+        return std::string_view("?");
     }
 }
 
