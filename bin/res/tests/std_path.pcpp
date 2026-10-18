@@ -1,0 +1,206 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_path.pcpp - Std library compliance: the path unit (res\libs\std\path.pcpp)
+
+  path.Resolve turns any spelling of a path into one full, normalized path:
+  $P: (the executable's folder, from the OS), $D: (the current directory),
+  $S: or no prefix (the given base, else the current directory), matched at
+  the start only and in either case; leading / trailing blanks trimmed; '.'
+  and '..' folded and repeated separators joined as text; a trailing
+  separator kept. Windows: forward slashes up to 247 UTF-16 units, the
+  long-path spelling past it (\\?\, \\?\UNC\), both slash forms read alike.
+  Linux: the plain /... path at any length. Resolving a result again gives it
+  back. Overloads take a string or a ptr to const char (nil = ""); an empty
+  path gives "". path.ExeDir is the executable's folder, no trailing separator.
+  Each row prints "ok <case>", or "FAIL <case>" with what came back and what
+  the rule says; a row on the executable's folder or the current directory
+  compares with path.ExeDir or another spelling, so the output is the same
+  wherever the program runs.
+
+  How to check, from repo\bin:
+    pcpp res\tests\std_path.pcpp -r
+    pcpp res\tests\std_path.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT windows:
+    ok   fold
+    ok   slashes
+    ok   trailing
+    ok   above root
+    ok   base
+    ok   base trailing
+    ok   S prefix
+    ok   P overrides base
+    ok   D prefix
+    ok   lower case prefix
+    ok   prefix inside
+    ok   trim
+    ok   trim after prefix
+    ok   empty
+    ok   blanks
+    ok   prefix only
+    ok   again
+    ok   ptr
+    ok   ptr base
+    ok   ptr nil
+    ok   ptr nil base
+    ok   exe dir
+    ok   utf8
+    ok   at 247
+    ok   past 247
+    ok   past 247 again
+    ok   utf16 units
+    ok   unc
+    ok   unc long
+    ok   long slashes
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXPECT linux:
+    ok   fold
+    ok   slashes
+    ok   trailing
+    ok   above root
+    ok   base
+    ok   base trailing
+    ok   S prefix
+    ok   P overrides base
+    ok   D prefix
+    ok   lower case prefix
+    ok   prefix inside
+    ok   trim
+    ok   trim after prefix
+    ok   empty
+    ok   blanks
+    ok   prefix only
+    ok   again
+    ok   ptr
+    ok   ptr base
+    ok   ptr nil
+    ok   ptr nil base
+    ok   exe dir
+    ok   utf8
+    ok   long
+    ok   relative base
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  The [Heap] line is the debug build's heap report.
+*******************************************************************************/
+
+module exe std_path;
+
+import path;
+
+routine Check(const AName: string; const AGot: string; const AWant: string);
+begin
+  if AGot = AWant then
+    println("ok   {}", AName);
+  else
+    println("FAIL {}: got [{}] want [{}]", AName, AGot, AWant);
+  end;
+end;
+
+// AText ACount times over
+routine Copies(const AText: string; const ACount: int32): string;
+var
+  LI: int32;
+  LText: string;
+begin
+  for LI := 1 to ACount do
+    LText := LText + AText;
+  end;
+  return LText;
+end;
+
+var
+  LExe: string;
+  LBase: string;
+  LCPath: ptr to const char;
+  LCBase: ptr to const char;
+  LLong: string;
+
+begin
+  LExe := path.ExeDir();
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  Check("fold", path.Resolve("C:\\a\\.\\b\\..\\c"), "C:/a/c");
+  Check("slashes", path.Resolve("C:/a\\b//c"), "C:/a/b/c");
+  Check("trailing", path.Resolve("C:\\a\\b\\"), "C:/a/b/");
+  Check("above root", path.Resolve("C:\\..\\x"), "C:/x");
+  LBase := "C:\\base\\dir";
+  Check("base", path.Resolve("sub\\f.txt", LBase), "C:/base/dir/sub/f.txt");
+  Check("base trailing", path.Resolve("sub/f.txt", "C:/base/dir/"), "C:/base/dir/sub/f.txt");
+  Check("S prefix", path.Resolve("$S:f.txt", LBase), "C:/base/dir/f.txt");
+  Check("P overrides base", path.Resolve("$P:f.txt", LBase), LExe + "/f.txt");
+  Check("D prefix", path.Resolve("$D:f.txt", LBase), path.Resolve("f.txt"));
+  Check("lower case prefix", path.Resolve("$p:f.txt"), LExe + "/f.txt");
+  Check("prefix inside", path.Resolve("C:\\a\\$P:b"), "C:/a/$P:b");
+  Check("trim", path.Resolve("  C:\\a \t"), "C:/a");
+  Check("trim after prefix", path.Resolve("$P:   f.txt"), LExe + "/f.txt");
+@else
+  Check("fold", path.Resolve("/a/./b/../c"), "/a/c");
+  Check("slashes", path.Resolve("/a//b///c"), "/a/b/c");
+  Check("trailing", path.Resolve("/a/b/"), "/a/b/");
+  Check("above root", path.Resolve("/../x"), "/x");
+  LBase := "/base/dir";
+  Check("base", path.Resolve("sub/f.txt", LBase), "/base/dir/sub/f.txt");
+  Check("base trailing", path.Resolve("sub/f.txt", "/base/dir/"), "/base/dir/sub/f.txt");
+  Check("S prefix", path.Resolve("$S:f.txt", LBase), "/base/dir/f.txt");
+  Check("P overrides base", path.Resolve("$P:f.txt", LBase), LExe + "/f.txt");
+  Check("D prefix", path.Resolve("$D:f.txt", LBase), path.Resolve("f.txt"));
+  Check("lower case prefix", path.Resolve("$p:f.txt"), LExe + "/f.txt");
+  Check("prefix inside", path.Resolve("/a/$P:b"), "/a/$P:b");
+  Check("trim", path.Resolve("  /a \t"), "/a");
+  Check("trim after prefix", path.Resolve("$P:   f.txt"), LExe + "/f.txt");
+@endif
+
+  Check("empty", path.Resolve(""), "");
+  Check("blanks", path.Resolve("   "), "");
+  Check("prefix only", path.Resolve("$P:  "), "");
+  Check("again", path.Resolve(path.Resolve("$P:a/../b")), path.Resolve("$P:a/../b"));
+
+  LCPath := "$P:c.txt";
+  Check("ptr", path.Resolve(LCPath), LExe + "/c.txt");
+  LCPath := "f.txt";
+  LCBase := LBase.c_str();
+  Check("ptr base", path.Resolve(LCPath, LCBase), path.Resolve("f.txt", LBase));
+  LCPath := nil;
+  Check("ptr nil", path.Resolve(LCPath), "");
+  LCPath := "f.txt";
+  LCBase := nil;
+  Check("ptr nil base", path.Resolve(LCPath, LCBase), path.Resolve("f.txt"));
+
+  // No trailing separator, and the same folder $P: names
+  Check("exe dir", LExe, path.Resolve("$P:."));
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  Check("utf8", path.Resolve("C:\\ünï\\..\\ö.txt"), "C:/ö.txt");
+  // "C:/" + 244 = 247 units: the plain spelling; one more: the long one
+  LLong := "C:/" + Copies("x", 244);
+  Check("at 247", path.Resolve(LLong), LLong);
+  LLong := "C:/" + Copies("y", 120) + "/" + Copies("z", 124);
+  Check("past 247", path.Resolve(LLong), "\\\\?\\C:\\" + Copies("y", 120) + "\\" + Copies("z", 124));
+  Check("past 247 again", path.Resolve(path.Resolve(LLong)), path.Resolve(LLong));
+  // 247 UTF-16 units are 491 UTF-8 bytes here: still the plain spelling
+  LLong := "C:/" + Copies("ö", 244);
+  Check("utf16 units", path.Resolve(LLong), LLong);
+  Check("unc", path.Resolve("\\\\srv\\share\\a\\..\\b"), "//srv/share/b");
+  Check("unc long", path.Resolve("\\\\srv\\share\\" + Copies("u", 250)), "\\\\?\\UNC\\srv\\share\\" + Copies("u", 250));
+  Check("long slashes", path.Resolve("//?/C:/a/b"), "\\\\?\\C:\\a\\b");
+@else
+  Check("utf8", path.Resolve("/ünï/../ö.txt"), "/ö.txt");
+  LLong := "/" + Copies("y", 300) + "/" + Copies("z", 300);
+  Check("long", path.Resolve(LLong), LLong);
+  // A relative base is made absolute against the current directory
+  Check("relative base", path.Resolve("f.txt", "rel/dir"), path.Resolve("$D:rel/dir/f.txt"));
+@endif
+end.

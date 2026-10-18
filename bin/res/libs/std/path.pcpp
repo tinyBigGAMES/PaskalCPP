@@ -1,0 +1,396 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  path.pcpp - the path unit: `import path;` turns any spelling of a path
+  into one full, normalized path (path.Resolve), with the same prefixes the
+  compiler's own directives take ($P: $D: $S:), and tells where the running
+  program lives (path.ExeDir). Every name is read qualified: path.Resolve.
+==============================================================================*/
+
+module unit path;
+
+// The implementation is C++ in the unit's own source file: a plain #include
+// here would go to the unit's header and bring <windows.h> (and its macros)
+// into every program that imports path. The PaskalCPP routines below are the
+// interface; nothing in this block is visible to an importer.
+cppstart source
+#include <string>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#include <filesystem>
+#endif
+
+namespace {
+
+// Trims every byte <= space at both ends (Delphi's Trim: a UTF-8 lead or
+// continuation byte is never <= space, so text is never cut inside a char)
+std::string PathDoTrim(const std::string& AText)
+{
+  std::size_t LFirst = 0;
+  std::size_t LLast = AText.size();
+  while ((LFirst < LLast) && (static_cast<unsigned char>(AText[LFirst]) <= ' '))
+    ++LFirst;
+  while ((LLast > LFirst) && (static_cast<unsigned char>(AText[LLast - 1]) <= ' '))
+    --LLast;
+  return AText.substr(LFirst, LLast - LFirst);
+}
+
+// True when AText starts with the prefix "$<ALetter>:", the letter in either case
+bool PathDoHasPrefix(const std::string& AText, const char ALetter)
+{
+  if (AText.size() < 3)
+    return false;
+  const char LUpper = static_cast<char>((AText[1] >= 'a' && AText[1] <= 'z') ? AText[1] - 32 : AText[1]);
+  return (AText[0] == '$') && (LUpper == ALetter) && (AText[2] == ':');
+}
+
+#ifdef _WIN32
+
+// PaskalCPP strings are UTF-8; Win32's wide routines take UTF-16. The ANSI
+// routines (and std::filesystem::path(std::string)) would read the bytes in
+// the ANSI code page, so every conversion is explicit.
+std::wstring PathDoWiden(const std::string& AText)
+{
+  if (AText.empty())
+    return std::wstring();
+  const int LLen = MultiByteToWideChar(CP_UTF8, 0, AText.data(), static_cast<int>(AText.size()), nullptr, 0);
+  std::wstring LWide(static_cast<std::size_t>(LLen), L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, AText.data(), static_cast<int>(AText.size()), LWide.data(), LLen);
+  return LWide;
+}
+
+std::string PathDoNarrow(const std::wstring& AWide)
+{
+  if (AWide.empty())
+    return std::string();
+  const int LLen = WideCharToMultiByte(CP_UTF8, 0, AWide.data(), static_cast<int>(AWide.size()), nullptr, 0, nullptr, nullptr);
+  std::string LText(static_cast<std::size_t>(LLen), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, AWide.data(), static_cast<int>(AWide.size()), LText.data(), LLen, nullptr, nullptr);
+  return LText;
+}
+
+bool PathDoIsSep(const wchar_t AChar)
+{
+  return (AChar == L'\\') || (AChar == L'/');
+}
+
+// The long-path spelling in either slash (\\?\..., //?/..., or a mix)
+bool PathDoIsLongForm(const std::wstring& APath)
+{
+  return (APath.size() >= 4) && PathDoIsSep(APath[0]) && PathDoIsSep(APath[1]) &&
+    (APath[2] == L'?') && PathDoIsSep(APath[3]);
+}
+
+std::wstring PathDoReplace(std::wstring APath, const wchar_t AFrom, const wchar_t ATo)
+{
+  for (wchar_t& LChar : APath)
+    if (LChar == AFrom)
+      LChar = ATo;
+  return APath;
+}
+
+// A separator first, or a drive letter and ':'
+bool PathDoIsRooted(const std::wstring& APath)
+{
+  if (!APath.empty() && PathDoIsSep(APath[0]))
+    return true;
+  return (APath.size() >= 2) && (APath[1] == L':');
+}
+
+// Win32's own full-path rule (GetFullPathNameW: '.' and '..' folded, repeated
+// separators joined, no disk access, symlinks not followed)
+std::wstring PathDoFullPath(const std::wstring& APath)
+{
+  const DWORD LNeed = GetFullPathNameW(APath.c_str(), 0, nullptr, nullptr);
+  if (LNeed == 0)
+    return APath;
+  std::wstring LFull(LNeed, L'\0');
+  const DWORD LLen = GetFullPathNameW(APath.c_str(), LNeed, LFull.data(), nullptr);
+  if ((LLen == 0) || (LLen >= LNeed))
+    return APath;
+  LFull.resize(LLen);
+  return LFull;
+}
+
+// The one output form: up to 247 UTF-16 units (the plain Win32 limit) the
+// forward-slash spelling, past it the long-path spelling (backslashes,
+// \\?\UNC\ for a share, a device path \\.\ as is). Idempotent on both.
+std::wstring PathDoFinish(const std::wstring& AFull)
+{
+  if (PathDoIsLongForm(AFull))
+    return PathDoReplace(AFull, L'/', L'\\');
+  if (AFull.size() <= 247)
+    return PathDoReplace(AFull, L'\\', L'/');
+  const std::wstring LPath = PathDoReplace(AFull, L'/', L'\\');
+  if (LPath.rfind(L"\\\\.\\", 0) == 0)
+    return LPath;
+  if (LPath.rfind(L"\\\\", 0) == 0)
+    return L"\\\\?\\UNC\\" + LPath.substr(2);
+  return L"\\\\?\\" + LPath;
+}
+
+std::wstring PathDoCurrentDir()
+{
+  const DWORD LNeed = GetCurrentDirectoryW(0, nullptr);
+  std::wstring LDir(LNeed, L'\0');
+  const DWORD LLen = GetCurrentDirectoryW(LNeed, LDir.data());
+  LDir.resize(LLen);
+  return LDir;
+}
+
+// The folder of this process's executable, asked of the OS (never argv[0]),
+// without a trailing separator except at a root (C:\)
+std::wstring PathDoExeDir()
+{
+  std::wstring LFile(MAX_PATH, L'\0');
+  for (;;)
+  {
+    const DWORD LLen = GetModuleFileNameW(nullptr, LFile.data(), static_cast<DWORD>(LFile.size()));
+    if (LLen == 0)
+      return std::wstring();
+    if (LLen < LFile.size())
+    {
+      LFile.resize(LLen);
+      break;
+    }
+    LFile.resize(LFile.size() * 2);
+  }
+  const std::size_t LSep = LFile.find_last_of(L"\\/");
+  if (LSep == std::wstring::npos)
+    return std::wstring();
+  if ((LSep == 2) && (LFile[1] == L':'))
+    return LFile.substr(0, 3);
+  return LFile.substr(0, LSep);
+}
+
+std::wstring PathDoCombine(const std::wstring& ABase, const std::wstring& APath)
+{
+  if (!ABase.empty() && PathDoIsSep(ABase.back()))
+    return ABase + APath;
+  return ABase + L"\\" + APath;
+}
+
+#else
+
+bool PathDoIsRooted(const std::string& APath)
+{
+  return !APath.empty() && (APath[0] == '/');
+}
+
+std::string PathDoCurrentDir()
+{
+  std::error_code LError;
+  const std::filesystem::path LDir = std::filesystem::current_path(LError);
+  return LError ? std::string() : LDir.generic_string();
+}
+
+std::string PathDoCombine(const std::string& ABase, const std::string& APath)
+{
+  if (!ABase.empty() && (ABase.back() == '/'))
+    return ABase + APath;
+  return ABase + "/" + APath;
+}
+
+// Win32's full-path rule on Linux: a path still relative (a relative base) is
+// made absolute against the current directory, then '.' and '..' are folded
+// and repeated separators joined, as text (no disk access, symlinks not
+// followed); a trailing '/' is kept only when the path was written with one,
+// as Win32 keeps a trailing separator
+std::string PathDoFullPath(const std::string& AText)
+{
+  const std::string LPath = PathDoIsRooted(AText) ? AText : PathDoCombine(PathDoCurrentDir(), AText);
+  std::string LNormal = std::filesystem::path(LPath).lexically_normal().generic_string();
+  while ((LNormal.size() > 1) && (LNormal.back() == '/'))
+    LNormal.pop_back();
+  if ((LNormal.size() > 1) && (LPath.back() == '/'))
+    LNormal += '/';
+  return LNormal;
+}
+
+// The folder of this process's executable, asked of the OS (never argv[0]),
+// without a trailing separator except at the root
+std::string PathDoExeDir()
+{
+  std::string LFile(4096, '\0');
+  for (;;)
+  {
+    const ssize_t LLen = readlink("/proc/self/exe", LFile.data(), LFile.size());
+    if (LLen <= 0)
+      return std::string();
+    if (static_cast<std::size_t>(LLen) < LFile.size())
+    {
+      LFile.resize(static_cast<std::size_t>(LLen));
+      break;
+    }
+    LFile.resize(LFile.size() * 2);
+  }
+  const std::size_t LSep = LFile.find_last_of('/');
+  if (LSep == std::string::npos)
+    return std::string();
+  if (LSep == 0)
+    return "/";
+  return LFile.substr(0, LSep);
+}
+
+#endif
+
+// path.Resolve's rule, once, for every overload (a nil pointer reads as "")
+std::string PathResolve(const char* APath, const char* ABaseDir)
+{
+  std::string LPath = PathDoTrim(APath ? std::string(APath) : std::string());
+  std::string LBase = ABaseDir ? std::string(ABaseDir) : std::string();
+  if (LPath.empty())
+    return std::string();
+
+  // An explicit prefix, at the very start only, overrides the caller's base
+  bool LExeBase = false;
+  bool LCurrentBase = false;
+  if (PathDoHasPrefix(LPath, 'P'))
+    LExeBase = true;
+  else if (PathDoHasPrefix(LPath, 'D'))
+    LCurrentBase = true;
+  if (LExeBase || LCurrentBase || PathDoHasPrefix(LPath, 'S'))
+    LPath = PathDoTrim(LPath.substr(3));
+  if (LPath.empty())
+    return std::string();
+
+#ifdef _WIN32
+  std::wstring LWidePath = PathDoWiden(LPath);
+  std::wstring LWideBase = LExeBase ? PathDoExeDir() : (LCurrentBase ? PathDoCurrentDir() : PathDoWiden(LBase));
+  // The long-path spelling takes backslashes only: one typed with '/' is the same path
+  if (PathDoIsLongForm(LWidePath))
+    LWidePath = PathDoReplace(LWidePath, L'/', L'\\');
+  if (PathDoIsLongForm(LWideBase))
+    LWideBase = PathDoReplace(LWideBase, L'/', L'\\');
+  if (PathDoIsRooted(LWidePath))
+    return PathDoNarrow(PathDoFinish(PathDoFullPath(LWidePath)));
+  if (LWideBase.empty())
+    LWideBase = PathDoCurrentDir();
+  return PathDoNarrow(PathDoFinish(PathDoFullPath(PathDoCombine(LWideBase, LWidePath))));
+#else
+  if (LExeBase)
+    LBase = PathDoExeDir();
+  else if (LCurrentBase)
+    LBase = PathDoCurrentDir();
+  if (PathDoIsRooted(LPath))
+    return PathDoFullPath(LPath);
+  if (LBase.empty())
+    LBase = PathDoCurrentDir();
+  return PathDoFullPath(PathDoCombine(LBase, LPath));
+#endif
+}
+
+std::string PathExeDir()
+{
+#ifdef _WIN32
+  const std::wstring LDir = PathDoExeDir();
+  return LDir.empty() ? std::string() : PathDoNarrow(PathDoFinish(LDir));
+#else
+  return PathDoExeDir();
+#endif
+}
+
+} // namespace
+cppend;
+
+/// Resolves a path to one full, normalized path.
+///
+/// The path may start with a prefix that names its base folder, matched at
+/// the very start and in either case:
+/// - `$P:` the folder of the running program's executable (asked of the
+///   OS, so it holds wherever the program was started from);
+/// - `$D:` the current working directory;
+/// - `$S:` the caller's base folder, written out (the same as no prefix).
+///
+/// A rooted path is only normalized; any other is resolved against its base
+/// (no base: the current working directory). `.` and `..` are folded and
+/// repeated separators joined, as text: the disk is never touched, the path
+/// need not exist and symbolic links are not followed. Leading and trailing
+/// blanks are trimmed.
+///
+/// The result on Windows uses forward slashes up to 247 UTF-16 units (the
+/// plain Win32 limit) and the long-path spelling past it (`\\?\C:\...` or
+/// `\\?\UNC\server\share\...`, backslashes), so every file routine takes it
+/// at any length; on Linux it is the plain `/...` path. Resolving a result
+/// again gives it back unchanged. Text is UTF-8 in and out.
+///
+/// To hand the result to a C routine, keep it in a variable and pass that
+/// variable's `.c_str()` while the variable lives.
+/// @param APath the path to resolve; empty (or only a prefix) gives ""
+/// @returns the full path, or "" for an empty path
+/// @since 0.2
+/// @see path.ExeDir
+/// @example
+///   LZip := path.Resolve("$P:secret.zip");   // beside the program
+///   LCfg := path.Resolve("$D:../app.cfg");   // above the current folder
+exported routine Resolve(const APath: string): string;
+begin
+  return PathResolve(APath.c_str(), nil);
+end;
+
+/// Resolves a path against a given base folder; see `path.Resolve(APath)`
+/// for the prefixes and the result's form.
+/// @param APath the path to resolve; `$P:` and `$D:` override ABaseDir
+/// @param ABaseDir the folder a relative path (or `$S:`) is resolved against;
+///   empty: the current working directory
+/// @returns the full path, or "" for an empty path
+/// @since 0.2
+/// @example
+///   LIcon := path.Resolve("icons/app.png", LDataDir);
+exported routine Resolve(const APath: string; const ABaseDir: string): string;
+begin
+  return PathResolve(APath.c_str(), ABaseDir.c_str());
+end;
+
+/// Resolves a C string path, as `path.Resolve(APath)` does for a string:
+/// for a path that comes from C (an argv entry, a C library's result).
+/// @param APath a NUL-terminated UTF-8 path; nil gives ""
+/// @returns the full path, or "" for an empty or nil path
+/// @since 0.2
+exported routine Resolve(const APath: ptr to const char): string;
+begin
+  return PathResolve(APath, nil);
+end;
+
+/// Resolves a C string path against a C string base folder, as
+/// `path.Resolve(APath, ABaseDir)` does for strings.
+/// @param APath a NUL-terminated UTF-8 path; nil gives ""
+/// @param ABaseDir a NUL-terminated UTF-8 base folder; nil or empty: the
+///   current working directory
+/// @returns the full path, or "" for an empty or nil path
+/// @since 0.2
+exported routine Resolve(const APath: ptr to const char; const ABaseDir: ptr to const char): string;
+begin
+  return PathResolve(APath, ABaseDir);
+end;
+
+/// The folder that holds the running program's executable, in the form
+/// `path.Resolve` returns, with no trailing separator (except at a root).
+/// Asked of the OS, so it is right however the program was started (argv[0]
+/// and `paramstr(0)` may be relative or a bare name).
+/// @returns the executable's folder, or "" when the OS cannot tell
+/// @since 0.2
+/// @see path.Resolve
+exported routine ExeDir(): string;
+begin
+  return PathExeDir();
+end;
+
+end.
