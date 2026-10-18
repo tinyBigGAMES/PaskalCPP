@@ -78,6 +78,8 @@ const
   PC_ERR_SEM_018 = 'SM0018';   // <m> is a member of <T>: write self.<m> (PLAN-OBJECT D9)
   { PC_ERR_SEM_019 }
   PC_ERR_SEM_019 = 'SM0019';   // <m> is hidden in <T> (PLAN-OBJECT D10)
+  { PC_ERR_SEM_020 }
+  PC_ERR_SEM_020 = 'SM0020';   // <name> is in two imported units: write a.<name> or b.<name> (PLAN-IMPORT-RESOLUTION)
   { PC_ERR_SEM_100 }
   PC_ERR_SEM_100 = 'SM0100';   // <value> is not a value of @<dir>: <accepted>
   { PC_ERR_SEM_101 }
@@ -613,6 +615,23 @@ type
     function DoListChoice(const AList: TList<TPCStmt>; const ACount: Integer; const AName: string;
       const AModuleName: string; const AExportedOnly: Boolean; out ASpelling: string): Boolean;
     function DoChoiceSpelling(const AName: string; out ASpelling: string): Boolean;
+    // The import step of a bare name the frames, the intrinsics and the
+    // used-before scan left alone (PLAN-IMPORT-RESOLUTION): the module's own
+    // imports, through the one rule TPCScopes.FindImported. False = no
+    // imported unit exports AName. True with AFound filled = one unit's
+    // declarations (an overload set stays that unit's set); True with AFound
+    // empty = two or more units export it: SM0020 at ARange when AReport, a
+    // note at each candidate's declaration
+    function DoImportedName(const ARange: TSourceRange; const AReport: Boolean; const AName: string;
+      const AFound: TList<TPCNode>): Boolean;
+    // What a lookup found, bound on a bare value name: one declaration, or a
+    // routine set (any member spells it for the emitter); anything else
+    // poisons it (a repeat was SM0004; an ambiguous import was SM0020)
+    procedure DoBindFound(const AName: TPCName; const AFound: TList<TPCNode>);
+    // The same in a type position: one type declaration, else SM0013 (an
+    // empty AFound was reported already)
+    procedure DoBindFoundType(const AType: TPCNamedType; const ALookupName: string;
+      const AFound: TList<TPCNode>);
 
     // Duplicates (SM0004)
     procedure DoReportDuplicate(const ALater: TPCNode; const AFirst: TPCNode; const AName: string);
@@ -7626,6 +7645,12 @@ begin
   LFound := TList<TPCNode>.Create();
   try
     DoLookup(AExternal.LibText, LFound);
+    // An imported unit's const names a library too (PLAN-IMPORT-RESOLUTION);
+    // two units export it = SM0020 at the name, and nothing more
+    if (LFound.Count = 0) and
+      DoImportedName(AExternal.LibRange, not ADecl.IsRecovered, AExternal.LibText, LFound) and
+      (LFound.Count = 0) then
+      Exit;
     if (LFound.Count = 1) and (LFound[0] is TPCConstDecl) then
       LConst := TPCConstDecl(LFound[0]);
   finally
@@ -10440,17 +10465,25 @@ begin
       DoBareMember(AFor, AFor.IteratorName);
       Exit;
     end;
+    if LFound.Count = 0 then
+    begin
+      if DoUsedLater(AFor.IteratorName) <> nil then
+      begin
+        DoError(AFor, PC_ERR_SEM_002, RSSemCoreUsedBefore, [AFor.IteratorName]);
+        Exit;
+      end;
+      // An imported unit's var is declared before the loop too
+      // (PLAN-IMPORT-RESOLUTION); two units = SM0020; none = C/C++
+      if not DoImportedName(AFor.Range, True, AFor.IteratorName, LFound) then
+        Exit;
+      if LFound.Count = 0 then
+        Exit;
+    end;
     if LFound.Count > 1 then
     begin
       // An overload set names routines; any other repeat was SM0004
       if DoAllRoutines(LFound) then
         DoError(AFor, PC_ERR_SEM_600, RSSemStmtForNotVar, [AFor.IteratorName, RSSemStmtKindRoutine]);
-      Exit;
-    end;
-    if LFound.Count = 0 then
-    begin
-      if DoUsedLater(AFor.IteratorName) <> nil then
-        DoError(AFor, PC_ERR_SEM_002, RSSemCoreUsedBefore, [AFor.IteratorName]);
       Exit;
     end;
     LDecl := LFound[0];
@@ -11866,6 +11899,103 @@ begin
   Result := False;
 end;
 
+function TPCSemantics.DoImportedName(const ARange: TSourceRange; const AReport: Boolean; const AName: string;
+  const AFound: TList<TPCNode>): Boolean;
+var
+  LIndex: Integer;
+  LImports: TList<TPCImport>;
+  LHolders: TList<TPCImport>;
+  LFound: TList<TPCNode>;
+  LOfHolder: TList<TPCNode>;
+  LHolder: TPCImport;
+  LNode: TPCNode;
+begin
+  Result := False;
+  // The module frame holds this module's own import clause; a unit's own
+  // imports are never followed (FindImported reads each unit's own decls)
+  LImports := nil;
+  for LIndex := 0 to FFrames.Count - 1 do
+  begin
+    if FFrames[LIndex].FrameKind = fkModule then
+    begin
+      LImports := FFrames[LIndex].Imports;
+      Break;
+    end;
+  end;
+  if LImports = nil then
+    Exit;
+  LHolders := TList<TPCImport>.Create();
+  LFound := TList<TPCNode>.Create();
+  try
+    TPCScopes.FindImported(LImports, AName, LFound, LHolders);
+    if LHolders.Count = 0 then
+      Exit;
+    Result := True;
+    if LHolders.Count = 1 then
+    begin
+      AFound.AddRange(LFound);
+      Exit;
+    end;
+    // Two units or more: no order decides between them, the use qualifies
+    if not AReport then
+      Exit;
+    if not DoReportRange(ARange, esError, PC_ERR_SEM_020, RSSemCoreImportAmbiguous,
+      [AName, LHolders[0].ModuleName, LHolders[1].ModuleName, LHolders[0].ModuleName, AName,
+      LHolders[1].ModuleName, AName]) then
+      Exit;
+    LOfHolder := TList<TPCNode>.Create();
+    try
+      for LHolder in LHolders do
+      begin
+        LOfHolder.Clear();
+        TPCScopes.ModuleMember(LHolder.ImportedModule, AName, LOfHolder);
+        for LNode in LOfHolder do
+          DoNote(LNode, RSSemCoreImportHolder, [AName, LHolder.ModuleName]);
+      end;
+    finally
+      LOfHolder.Free();
+    end;
+  finally
+    LFound.Free();
+    LHolders.Free();
+  end;
+end;
+
+procedure TPCSemantics.DoBindFound(const AName: TPCName; const AFound: TList<TPCNode>);
+begin
+  if AFound.Count = 1 then
+  begin
+    AName.ResolvedDecl := AFound[0];
+    AName.ResolvedKind := DoResolvedKindOf(AFound[0]);
+  end
+  else if (AFound.Count > 1) and DoAllRoutines(AFound) then
+  begin
+    // An overload set lives in one frame or one unit: any member spells its
+    // qualification for the emitter (PLAN-EMITTER H2); A6 picks at the call
+    AName.ResolvedKind := rkRoutine;
+    AName.ResolvedSetMember := TPCRoutine(AFound[0]);
+  end
+  else
+    DoPoison(AName);
+end;
+
+procedure TPCSemantics.DoBindFoundType(const AType: TPCNamedType; const ALookupName: string;
+  const AFound: TList<TPCNode>);
+begin
+  if AFound.Count = 1 then
+  begin
+    if AFound[0] is TPCTypeDecl then
+    begin
+      AType.ResolvedKind := rkType;
+      AType.ResolvedDecl := TPCTypeDecl(AFound[0]);
+    end
+    else
+      DoError(AType, PC_ERR_SEM_013, RSSemCoreNotType, [ALookupName]);
+  end
+  else if (AFound.Count > 1) and DoAllRoutines(AFound) then
+    DoError(AType, PC_ERR_SEM_013, RSSemCoreNotType, [ALookupName]);
+end;
+
 procedure TPCSemantics.DoResolveName(const AName: TPCName);
 var
   LName: string;
@@ -11920,24 +12050,11 @@ begin
       DoPoison(AName);
       Exit;
     end;
-    if LFound.Count = 1 then
-    begin
-      AName.ResolvedDecl := LFound[0];
-      AName.ResolvedKind := DoResolvedKindOf(LFound[0]);
-    end
-    else if LFound.Count > 1 then
-    begin
-      // An overload set: A6 picks at the call; anything else was SM0004
-      if DoAllRoutines(LFound) then
-      begin
-        // The set lives in one frame: any member spells its qualification
-        // for the emitter (PLAN-EMITTER H2); the pick stays clang's
-        AName.ResolvedKind := rkRoutine;
-        AName.ResolvedSetMember := TPCRoutine(LFound[0]);
-      end
-      else
-        DoPoison(AName);
-    end
+    // Order (PLAN-IMPORT-RESOLUTION): the module's own frames, the system
+    // scope's intrinsics, an own name used before its declaration, the
+    // module's own imports, a bare choice value, then C/C++ (opaque)
+    if LFound.Count > 0 then
+      DoBindFound(AName, LFound)
     else if DoIntrinsicOf(LName) <> ikNone then
       AName.ResolvedKind := rkIntrinsic
     else if DoUsedLater(LName) <> nil then
@@ -11945,6 +12062,8 @@ begin
       DoError(AName, PC_ERR_SEM_002, RSSemCoreUsedBefore, [LName]);
       DoPoison(AName);
     end
+    else if DoImportedName(AName.Range, True, LName, LFound) then
+      DoBindFound(AName, LFound)
     else if DoChoiceSpelling(LName, LSpelling) then
     begin
       DoError(AName, PC_ERR_SEM_015, RSSemCoreBareChoice, [LName, LSpelling]);
@@ -11992,24 +12111,14 @@ begin
 
   LFound := TList<TPCNode>.Create();
   try
+    // DoResolveName's order, without the intrinsics (none is a type)
     DoLookup(LName, LFound);
-    if LFound.Count = 1 then
-    begin
-      if LFound[0] is TPCTypeDecl then
-      begin
-        AType.ResolvedKind := rkType;
-        AType.ResolvedDecl := TPCTypeDecl(LFound[0]);
-      end
-      else
-        DoError(AType, PC_ERR_SEM_013, RSSemCoreNotType, [LName]);
-    end
-    else if LFound.Count > 1 then
-    begin
-      if DoAllRoutines(LFound) then
-        DoError(AType, PC_ERR_SEM_013, RSSemCoreNotType, [LName]);
-    end
+    if LFound.Count > 0 then
+      DoBindFoundType(AType, LName, LFound)
     else if DoUsedLater(LName) <> nil then
       DoError(AType, PC_ERR_SEM_002, RSSemCoreUsedBefore, [LName])
+    else if DoImportedName(AType.Range, True, LName, LFound) then
+      DoBindFoundType(AType, LName, LFound)
     else if DoChoiceSpelling(LName, LSpelling) then
       // A visible choice value wins over C/C++ (PROJECT.md): it is a value,
       // never a type, so it is no opaque C++ type name either
@@ -12297,7 +12406,14 @@ begin
   // name; a module's exported set; the first class on the parent chain
   // that has it
   if (ACallee is TPCName) and (TPCName(ACallee).Parts.Count = 1) then
-    DoLookup(TPCName(ACallee).Parts[0].PartText, AFound)
+  begin
+    DoLookup(TPCName(ACallee).Parts[0].PartText, AFound);
+    // No frame has it, yet it resolved to a routine: DoResolveName took the
+    // import step, so the one unit that exports it holds the set (an
+    // ambiguous name was reported there and poisoned: not rkRoutine)
+    if (AFound.Count = 0) and (TPCName(ACallee).ResolvedKind = rkRoutine) then
+      DoImportedName(ACallee.Range, False, TPCName(ACallee).Parts[0].PartText, AFound);
+  end
   else if (ACallee is TPCMember) and (TPCMember(ACallee).Member <> nil) then
   begin
     LMember := TPCMember(ACallee);

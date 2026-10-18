@@ -728,6 +728,13 @@ resourcestring
   RSSemCoreModuleNoName = '''%s'' has no ''%s''';
   { RSSemCoreNotExported }
   RSSemCoreNotExported = '''%s'' is not exported by ''%s''';
+  { RSSemCoreImportAmbiguous }
+  // A bare name two imported units export (PLAN-IMPORT-RESOLUTION, SM0020):
+  // name, first unit, second unit, then each qualified form
+  RSSemCoreImportAmbiguous = '''%s'' is in ''%s'' and ''%s'': write %s.%s or %s.%s';
+  { RSSemCoreImportHolder }
+  // The note at each candidate: name, its unit
+  RSSemCoreImportHolder = '''%s'' is declared in ''%s'' here';
   { RSSemCoreNotModule }
   RSSemCoreNotModule = '''%s'' is not an imported module';
   { RSSemCoreQualifiedParts }

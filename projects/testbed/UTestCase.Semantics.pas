@@ -56,6 +56,7 @@ type
     procedure DoTestReserved();
     procedure DoTestBareMember();
     procedure DoTestHidden();
+    procedure DoTestImportBare();
     procedure DoTestChoices();
     procedure DoTestTemplates();
     procedure DoTestSystem();
@@ -201,6 +202,25 @@ begin
   finally
     LParts.Free();
   end;
+end;
+
+function DoFirstForLoop(const ANode: TPCNode): TPCFor;
+var
+  LFound: TPCFor;
+begin
+  // The first for statement in tree order, nil if none
+  if ANode = nil then
+    Exit(nil);
+  if ANode is TPCFor then
+    Exit(TPCFor(ANode));
+  LFound := nil;
+  ANode.EnumChildren(
+    procedure(const AChild: TPCNode)
+    begin
+      if LFound = nil then
+        LFound := DoFirstForLoop(AChild);
+    end);
+  Result := LFound;
 end;
 
 function DoNotesText(const AErrors: TErrors): string;
@@ -947,6 +967,7 @@ begin
   RegisterTest('core.reserved', DoTestReserved);
   RegisterTest('core.bare_member', DoTestBareMember);
   RegisterTest('core.hidden', DoTestHidden);
+  RegisterTest('core.import_bare', DoTestImportBare);
   RegisterTest('core.choices', DoTestChoices);
   RegisterTest('core.templates', DoTestTemplates);
   RegisterTest('core.system', DoTestSystem);
@@ -1326,6 +1347,42 @@ begin
         'SM0019 23: ''HM'' is hidden in ''TBase'': only the methods of ''TBase'' and of its descendants reach it; ' +
         'SM0019 23: ''HF'' is hidden in ''TBase'': only the methods of ''TBase'' and of its descendants reach it',
         'hidden: messages ' + DoReports(AErrors));
+    end);
+end;
+
+procedure TPCSemanticsTests.DoTestImportBare();
+begin
+  // PLAN-IMPORT-RESOLUTION: a bare name through sc19's own imports. KOne /
+  // TIb / Lone / Over / GI: one unit (sc_ib1). KBoth (7) and TSame (9): two
+  // units, SM0020 at the use, a note at each unit's declaration (sc_ib1 4 /
+  // 13, sc_ib2 4 / 6). KOwn: the module's own const (4); KLocal: R's local
+  // (20); len: the intrinsic, not sc_ib1's routine; G (sc_ib2's own import's)
+  // and CppOnly: opaque; sc_ib1.KBoth: qualified, as before
+  DoWithSem(TPath.Combine(DoCoreDir(), 'sc19_bare.pcpp'), 100,
+    procedure(const AModule: TPCModule; const AAst: TPCAst; const AErrors: TErrors)
+    var
+      LFor: TPCFor;
+    begin
+      Check(DoReportsText(AErrors) = 'SM0020/esError@7:14 SM0020/esError@9:6',
+        'import bare: reports ' + DoReportsText(AErrors));
+      Check(DoReports(AErrors) =
+        'SM0020 7: ''KBoth'' is in ''sc_ib1'' and ''sc_ib2'': write sc_ib1.KBoth or sc_ib2.KBoth; ' +
+        'SM0020 9: ''TSame'' is in ''sc_ib1'' and ''sc_ib2'': write sc_ib1.TSame or sc_ib2.TSame',
+        'import bare: messages ' + DoReports(AErrors));
+      Check(DoNotesText(AErrors) = 'SM0020@7^4^4 SM0020@9^13^6', 'import bare: notes ' + DoNotesText(AErrors));
+      Check(DoNamesText(AModule) =
+        'KOne@6:14=rkConst@3 KBoth@7:14=rkNone TIb@8:6=rkType@10 TSame@9:6=rkNone ' +
+        // Over(true): only Over(bool) (24) takes it, so the set binds as that lone routine
+        'call@10:14=rkRoutine@16 Lone@10:14=rkRoutine@16 call@11:14=rkRoutine@24 Over@11:14=rkRoutine@24 ' +
+        'KOwn@12:14=rkConst@4 G@13:14=rkOpaque CppOnly@14:14=rkOpaque ' +
+        'call@16:14=rkIntrinsic/ikLen len@16:14=rkIntrinsic L@16:18=rkVar@15 ' +
+        '.KBoth@17:14=rkConst@4 sc_ib1@17:14=rkModule@2 KLocal@22:10=rkVar@20',
+        'import bare: names ' + DoNamesText(AModule));
+      // The for iterator binds to sc_ib1's exported var (declared on its line 8)
+      LFor := DoFirstForLoop(AModule);
+      Check((LFor <> nil) and (LFor.ResolvedIterator is TPCVarDecl) and
+        (TPCVarDecl(LFor.ResolvedIterator).DeclName = 'GI') and (LFor.ResolvedIterator.Range.StartLine = 8),
+        'import bare: for GI binds to sc_ib1.GI');
     end);
 end;
 
