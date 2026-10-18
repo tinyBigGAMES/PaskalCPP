@@ -70,6 +70,8 @@ type
     procedure DoTestStmtsJumps();
     procedure DoTestStmtsGuards();
     procedure DoTestStmtsReturnBody();
+    procedure DoTestStmtsBareImport();
+    procedure DoTestStmtsForCpp();
     procedure DoCheckExprs(const ATest: string);
     procedure DoTestExprsOps();
     procedure DoTestExprsNames();
@@ -314,6 +316,8 @@ begin
   RegisterTest('stmts_jumps', DoTestStmtsJumps);
   RegisterTest('stmts_guards', DoTestStmtsGuards);
   RegisterTest('stmts_return_body', DoTestStmtsReturnBody);
+  RegisterTest('stmts_bare_import', DoTestStmtsBareImport);
+  RegisterTest('stmts_for_cpp', DoTestStmtsForCpp);
   RegisterTest('exprs_ops', DoTestExprsOps);
   RegisterTest('exprs_names', DoTestExprsNames);
   RegisterTest('exprs_strings', DoTestExprsStrings);
@@ -819,6 +823,20 @@ end;
 procedure TPCEmitterTests.DoTestStmtsForInt();
 begin
   DoCheckStmts('forint');
+end;
+
+procedure TPCEmitterTests.DoTestStmtsBareImport();
+begin
+  // PLAN-IMPORT-RESOLUTION: bare names an import exports (a lone routine,
+  // one unit's set, a var, a for iterator) written as their qualified forms
+  DoCheckStmts('barepick');
+end;
+
+procedure TPCEmitterTests.DoTestStmtsForCpp();
+begin
+  // A C/C++ variable as the for iterator (BNF sec 5): written as named, the
+  // end's type from decltype (TPCFor.ResolvedIteratorOpaque)
+  DoCheckStmts('forcpp');
 end;
 
 procedure TPCEmitterTests.DoTestStmtsForChoices();

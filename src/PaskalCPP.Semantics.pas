@@ -10456,6 +10456,7 @@ begin
   // A name PaskalCPP does not know is a C/C++ variable: clang judges it.
   // nil = no PaskalCPP type to check the bounds against
   Result := nil;
+  AFor.ResolvedIteratorOpaque := False;
   LFound := TList<TPCNode>.Create();
   try
     DoLookup(AFor.IteratorName, LFound, LFrameKind);
@@ -10473,9 +10474,13 @@ begin
         Exit;
       end;
       // An imported unit's var is declared before the loop too
-      // (PLAN-IMPORT-RESOLUTION); two units = SM0020; none = C/C++
+      // (PLAN-IMPORT-RESOLUTION); two units = SM0020; none = a C/C++
+      // variable, clang judges it (BNF sec 5): the emitter's C++ form
       if not DoImportedName(AFor.Range, True, AFor.IteratorName, LFound) then
+      begin
+        AFor.ResolvedIteratorOpaque := True;
         Exit;
+      end;
       if LFound.Count = 0 then
         Exit;
     end;

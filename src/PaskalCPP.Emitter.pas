@@ -5817,6 +5817,13 @@ begin
     LName := TPCParam(AFor.ResolvedIterator).ParamName;
     LType := TPCParam(AFor.ResolvedIterator).TypeExpr;
   end
+  else if AFor.ResolvedIteratorOpaque then
+  begin
+    // A C/C++ variable (BNF sec 5): its name as written; its type is
+    // clang's (no PaskalCPP type: the end's type is written from decltype)
+    LName := AFor.IteratorName;
+    LType := nil;
+  end
   else
   begin
     DoMissing(ofSource, 'for iterator');
@@ -5830,7 +5837,10 @@ begin
   DoText(ofSource, '{ ' + LName + ' = (');
   DoWriteExpr(ofSource, AFor.StartExpr);
   DoText(ofSource, '); const ');
-  DoWriteBorrowedType(ofSource, LType);
+  if LType <> nil then
+    DoWriteBorrowedType(ofSource, LType)
+  else
+    DoText(ofSource, 'std::remove_cvref_t<decltype((' + LName + '))>');
   DoText(ofSource, ' ' + LEnd + ' = (');
   DoWriteExpr(ofSource, AFor.EndExpr);
   DoText(ofSource, '); if (' + LName);
@@ -5843,7 +5853,7 @@ begin
 
   // The step. A choices iterator steps through its ordinal (an enum class
   // has no ++ / --): I = static_cast<T>(static_cast<std::int64_t>(I) +- 1)
-  if LType.Canon() is TPCChoicesType then
+  if (LType <> nil) and (LType.Canon() is TPCChoicesType) then
   begin
     DoText(ofSource, LName + ' = static_cast<');
     DoWriteBorrowedType(ofSource, LType);

@@ -18,7 +18,8 @@
   for V := A to | downto B do ... end; (BNF.md sec 5): V is a variable
   declared before the loop, of an integer, char, wchar or choices type; to counts
   up, downto down, both ends included, and an empty range runs nothing.
-  The body reads V but never writes it.
+  The body reads V but never writes it. A C/C++ variable mixed into the file
+  is an iterator too; its type is clang's (GCpp).
 
   How to check, from repo\bin:
     pcpp res\tests\stmt_for.pcpp -r
@@ -29,6 +30,7 @@
     chars a b c
     wide x y z
     choices 0 1 2
+    cpp 7 8 9
     empty 0
     [Heap] Allocs: 0, Frees: 0, Leaked: 0
   EXITCODE: 0
@@ -48,6 +50,8 @@ module exe stmt_for;
 
 type
   TColor = choices(cRed, cGreen, cBlue);
+
+int GCpp = 0;
 
 var
   LI: int32;
@@ -80,6 +84,11 @@ begin
   print("choices");
   for LK := TColor.cRed to TColor.cBlue do
     print(" {}", int32(LK));
+  end;
+  println("");
+  print("cpp");
+  for GCpp := 7 to 9 do
+    print(" {}", GCpp);
   end;
   println("");
   LRuns := 0;

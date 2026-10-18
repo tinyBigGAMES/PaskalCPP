@@ -1646,6 +1646,9 @@ type
     IteratorName: string;
     IteratorRange: TSourceRange;    // parser: the iterator name token (a use, not a declaration)
     ResolvedIterator: TPCNode;      // semantics: the var or param the name binds to
+    // semantics: no PaskalCPP name binds it, so it is a C/C++ variable (BNF
+    // sec 5: its type is clang's); ResolvedIterator stays nil
+    ResolvedIteratorOpaque: Boolean;
     StartExpr: TPCExpr;
     EndExpr: TPCExpr;
     IsDownTo: Boolean;
