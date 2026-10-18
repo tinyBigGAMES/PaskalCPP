@@ -64,8 +64,9 @@ let gForceClose = false;
 let gState = { folders: [], lastDialogDir: '', openFiles: [], activeFile: '', showExamples: true,
   window: null, layout: null, build: null, explorerOpen: null, debugHosts: {} };
 
-// Build mode / target lists: PC_BUILD_MODES / PC_BUILD_TARGETS (build:start
-// section below; validBuild runs only after the module has loaded)
+// Build mode / target lists: PC_BUILD_MODES / PC_RETIRED_BUILD_MODES /
+// PC_BUILD_TARGETS (build:start section below; validBuild and savedBuild run
+// only after the module has loaded)
 const PC_WINDOW_MIN_W = 400;
 const PC_WINDOW_MIN_H = 300;
 
@@ -98,6 +99,16 @@ function validBuild(AData) {
     return null;
   }
   return { mode: AData.mode, target: AData.target };
+}
+
+// The build choice as state.json holds it: a retired level name is read as
+// its new name (PC_RETIRED_BUILD_MODES), then checked as any choice
+function savedBuild(AData) {
+  if (AData && typeof AData.mode === 'string' &&
+      Object.prototype.hasOwnProperty.call(PC_RETIRED_BUILD_MODES, AData.mode)) {
+    return validBuild({ mode: PC_RETIRED_BUILD_MODES[AData.mode], target: AData.target });
+  }
+  return validBuild(AData);
 }
 
 // Open explorer folders (the explorer's keys), or null when missing or malformed
@@ -136,7 +147,7 @@ function loadState() {
     // Missing or malformed in older state files: null = defaults
     gState.window = validWindow(LData.window);
     gState.layout = validLayout(LData.layout);
-    gState.build = validBuild(LData.build);
+    gState.build = savedBuild(LData.build);
     gState.explorerOpen = validExplorerOpen(LData.explorerOpen);
     // Missing or malformed in older state files: none remembered
     gState.debugHosts = validDebugHosts(LData.debugHosts);
@@ -1093,7 +1104,11 @@ const PC_BIN_DIR = path.resolve(process.resourcesPath, '..', '..', '..');
 const PC_COMPILER = path.join(PC_BIN_DIR, 'pcpp.exe');
 // pcpp -opt <level> (PC_DIRECTIVE_VALUES optimize) and -t <triple> (the
 // official targets, DESIGN.md sec 7); the first of each is the default
-const PC_BUILD_MODES = ['debug', 'release_safe', 'release_fast', 'release_small'];
+const PC_BUILD_MODES = ['debug', 'safe', 'fast', 'tiny'];
+// A toolbar level saved before the 2026-10-18 rename (PC_RETIRED_VALUES in
+// PaskalCPP.Common): mapped once when state.json is read, saved in the new
+// name by the next saveState; pcpp itself never takes an old name
+const PC_RETIRED_BUILD_MODES = { release_safe: 'safe', release_fast: 'fast', release_small: 'tiny' };
 const PC_BUILD_TARGETS = ['x86_64-windows-gnu', 'x86_64-linux-gnu'];
 // Any CSI escape (colours, cursor moves, clear line, DEC private modes) -
 // OUTPUT is plain text
