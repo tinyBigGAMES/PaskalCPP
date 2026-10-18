@@ -1909,8 +1909,8 @@ resourcestring
   RSPcDevHelpVerbsHeader = 'VERBS:';
   { RSPcDevHelpEditorAsar }
   RSPcDevHelpEditorAsar = 'Pack repo\projects\editor into the editor''s app.asar';
-  { RSPcDevHelpEditorVerInfo }
-  RSPcDevHelpEditorVerInfo = 'Stamp editor.exe with the PaskalCPP version (%s) and icon';
+  { RSPcDevHelpVerInfo }
+  RSPcDevHelpVerInfo = 'Stamp editor.exe and pcpp.exe with the PaskalCPP version (%s) and icon';
   { RSPcDevHelpHelp }
   RSPcDevHelpHelp = 'Display this help message';
   { RSPcDevUnknownArg }
@@ -1938,13 +1938,15 @@ resourcestring
   { RSPcDevIconNotFound }
   RSPcDevIconNotFound = 'Editor icon not found: %s';
   { RSPcDevIconStamped }
-  RSPcDevIconStamped = 'Icon stamped: %s';
+  RSPcDevIconStamped = 'Icon %s stamped on %s';
   { RSPcDevIconFailed }
-  RSPcDevIconFailed = 'Cannot stamp the icon on %s (is the editor running?): %s';
+  RSPcDevIconFailed = 'Cannot stamp the icon on %s (is it running?): %s';
   { RSPcDevVersionStamped }
   RSPcDevVersionStamped = 'Version %s stamped on %s';
   { RSPcDevVersionFailed }
-  RSPcDevVersionFailed = 'Cannot stamp the version on %s (is the editor running?): %s';
+  RSPcDevVersionFailed = 'Cannot stamp the version on %s (is it running?): %s';
+  { RSPcDevExeNotFound }
+  RSPcDevExeNotFound = 'Program to stamp not found: %s';
 
 implementation
 
