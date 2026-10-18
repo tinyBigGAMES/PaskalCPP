@@ -16,8 +16,10 @@
   lsp_completion.pcpp - LSP compliance: completion (Ctrl+Space, '.', '->')
 
   Typing a name, or '.' / '->' after one, opens a list of what can be
-  written there. PaskalCPP names come first; then intrinsics, builtin types
-  and keywords. C/C++ names are never listed (C++ is clang's).
+  written there. PaskalCPP names come first; then intrinsics, then the names
+  the imported units export (bare when one unit exports the name; one entry
+  per unit, written unit.Name, when several do), builtin types and keywords.
+  C/C++ names are never listed (C++ is clang's).
 
   How to check: put the cursor where a CHECK line says (on the code line
   below it), press Ctrl+Space, and compare the TOP of the list (the
@@ -93,6 +95,11 @@ begin
 
   // CHECK: right after "lsp_unit." -> Twice (only what the unit exports)
   GCount := lsp_unit.Twice(GPoint.X);
+
+  // CHECK: after the Tw of Twice -> Twice: lsp_unit exports it and no other
+  //        imported unit does, so it is written bare; choosing it writes
+  //        Twice(AX)
+  GCount := Twice(GCount);
 
   // CHECK: right after "TCol." -> cRed, cGreen, cBlue
   GColor := TCol.cGreen;

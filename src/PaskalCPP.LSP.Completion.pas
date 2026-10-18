@@ -137,6 +137,13 @@ type
       const AInsertText: string); static;
     class procedure DoScopeItems(const AModule: TPCModule; const AContext: TPCLspCompletionContext;
       const AItems: TList<TPCLspCompletionItem>); static;
+    // The names the module's own imports export (PLAN-IMPORT-RESOLUTION), in
+    // SEM's order: after the frames and the intrinsics, whose names hide
+    // them. One unit = offered bare (an overload set one entry); several
+    // units = one entry per unit, inserted qualified (the bare name is
+    // SM0020), its unit.Name the detail. TPCScopes.FindImported decides
+    class procedure DoImportItems(const AFrames: TList<TPCScopeFrame>; const AHidden: TDictionary<string, Boolean>;
+      const APrefix: string; const AItems: TList<TPCLspCompletionItem>); static;
     class procedure DoVarargsItems(const APrefix: string; const AItems: TList<TPCLspCompletionItem>); static;
     class procedure DoMemberItems(const AModule: TPCModule; const AContext: TPCLspCompletionContext;
       const AItems: TList<TPCLspCompletionItem>); static;
@@ -509,10 +516,17 @@ begin
     // declaration of the same name is nearer
     for LKind := Low(TPCIntrinsicKind) to High(TPCIntrinsicKind) do
     begin
-      if (PC_INTRINSIC_NAMES[LKind] <> '') and not LHidden.ContainsKey(PC_INTRINSIC_NAMES[LKind]) then
+      if PC_INTRINSIC_NAMES[LKind] = '' then
+        Continue;
+      if not LHidden.ContainsKey(PC_INTRINSIC_NAMES[LKind]) then
         DoAddWord(AItems, AContext.Prefix, PC_INTRINSIC_NAMES[LKind], PC_LSP_COMPLETION_FUNCTION,
           PC_INTRINSIC_NAMES[LKind] + TPCIntrinsicSigs.SigText(LKind), PC_LSP_COMPLETION_SORT_DECL, '');
+      // An intrinsic hides an imported unit's export of its name (SEM's order)
+      LHidden.AddOrSetValue(PC_INTRINSIC_NAMES[LKind], True);
     end;
+
+    // The module's own imports: after the frames and the intrinsics
+    DoImportItems(LFrames, LHidden, AContext.Prefix, AItems);
 
     // The words the lexer registers: builtin types, then keywords
     for LRow in PC_PASKAL_TOKENS do
@@ -531,6 +545,93 @@ begin
     LFound.Free();
     LHidden.Free();
     LFrames.Free();
+  end;
+end;
+
+class procedure TPCLspCompletion.DoImportItems(const AFrames: TList<TPCScopeFrame>;
+  const AHidden: TDictionary<string, Boolean>; const APrefix: string; const AItems: TList<TPCLspCompletionItem>);
+var
+  LFrame: TPCScopeFrame;
+  LImports: TList<TPCImport>;
+  LImport: TPCImport;
+  LExports: TList<TPCNode>;
+  LNode: TPCNode;
+  LNames: TList<string>;
+  LName: string;
+  LFound: TList<TPCNode>;
+  LHolders: TList<TPCImport>;
+  LOfHolder: TList<TPCNode>;
+  LHolder: TPCImport;
+  LItem: TPCLspCompletionItem;
+  LQualified: string;
+begin
+  // The module frame holds the module's own import clause (never a unit's)
+  LImports := nil;
+  for LFrame in AFrames do
+  begin
+    if LFrame.FrameKind = fkModule then
+      LImports := LFrame.Imports;
+  end;
+  if LImports = nil then
+    Exit;
+  LExports := TList<TPCNode>.Create();
+  LNames := TList<string>.Create();
+  LFound := TList<TPCNode>.Create();
+  LHolders := TList<TPCImport>.Create();
+  LOfHolder := TList<TPCNode>.Create();
+  try
+    // Every exported name once, in the clause's order, then each unit's
+    for LImport in LImports do
+    begin
+      if (LImport = nil) or (LImport.ImportedModule = nil) then
+        Continue;
+      LExports.Clear();
+      TPCScopes.ModuleMembers(LImport.ImportedModule, LExports);
+      for LNode in LExports do
+      begin
+        LName := TPCLspSymbols.NameOf(LNode);
+        if (LName <> '') and not LNames.Contains(LName) then
+          LNames.Add(LName);
+      end;
+    end;
+    for LName in LNames do
+    begin
+      // An own name, a local or an intrinsic of this spelling wins, and so
+      // does an own name declared later (SEM: SM0002, never the import)
+      if AHidden.ContainsKey(LName) or not LName.StartsWith(APrefix) then
+        Continue;
+      if TPCScopes.DeclaredLater(AFrames, LName) <> nil then
+        Continue;
+      LFound.Clear();
+      LHolders.Clear();
+      TPCScopes.FindImported(LImports, LName, LFound, LHolders);
+      if LHolders.Count = 1 then
+      begin
+        AItems.Add(DoItemOf(LName, LFound));
+        Continue;
+      end;
+      // Several units: each entry writes its own qualified form
+      for LHolder in LHolders do
+      begin
+        LOfHolder.Clear();
+        TPCScopes.ModuleMember(LHolder.ImportedModule, LName, LOfHolder);
+        if LOfHolder.Count = 0 then
+          Continue;
+        LQualified := LHolder.ModuleName + '.' + LName;
+        LItem := DoItemOf(LQualified, LOfHolder);
+        LItem.ItemLabel := LName;
+        LItem.Detail := LQualified;
+        if LItem.InsertText = '' then
+          LItem.InsertText := LQualified;
+        AItems.Add(LItem);
+      end;
+    end;
+  finally
+    LOfHolder.Free();
+    LHolders.Free();
+    LFound.Free();
+    LNames.Free();
+    LExports.Free();
   end;
 end;
 

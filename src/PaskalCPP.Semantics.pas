@@ -1455,40 +1455,10 @@ begin
 end;
 
 function TPCSemantics.DoUsedLater(const AName: string): TPCNode;
-var
-  LIndex: Integer;
-  LValue: Integer;
-  LFrame: TPCScopeFrame;
-  LDecls: TList<TPCDecl>;
-  LChoices: TPCChoicesType;
 begin
-  // A name declared later in a frame on the chain: one rule for every frame,
-  // the items at index >= each list's visible count (scopes.md used-before)
-  Result := nil;
-  LDecls := TList<TPCDecl>.Create();
-  try
-    for LIndex := FFrames.Count - 1 downto 0 do
-    begin
-      LFrame := FFrames[LIndex];
-      if LFrame.FrameKind = fkChoices then
-      begin
-        LChoices := TPCChoicesType(LFrame.Owner);
-        for LValue := LFrame.FirstCount to LChoices.Values.Count - 1 do
-        begin
-          if (LChoices.Values[LValue] <> nil) and (LChoices.Values[LValue].ValueName = AName) then
-            Exit(LChoices.Values[LValue]);
-        end;
-        Continue;
-      end;
-      LDecls.Clear();
-      TPCDecl.CollectNamedAfter(LFrame.First, LFrame.FirstCount - 1, AName, LDecls);
-      TPCDecl.CollectNamedAfter(LFrame.Second, LFrame.SecondCount - 1, AName, LDecls);
-      if LDecls.Count > 0 then
-        Exit(LDecls[0]);
-    end;
-  finally
-    LDecls.Free();
-  end;
+  // A name declared later in a frame on the chain (scopes.md used-before):
+  // the one rule lives in TPCScopes (the LSP's completion reads it too)
+  Result := TPCScopes.DeclaredLater(FFrames, AName);
 end;
 
 function TPCSemantics.DoIntrinsicOf(const AName: string): TPCIntrinsicKind;

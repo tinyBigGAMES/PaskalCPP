@@ -64,6 +64,7 @@ type
     procedure DoTestRecoveryInvariant();
     procedure DoTestRecoveryAnswers();
     procedure DoTestCompletion();
+    procedure DoTestCompletionImports();
     procedure DoTestFormattingCore();
     procedure DoTestFormatting();
     procedure DoTestFormattingServer();
@@ -586,6 +587,36 @@ begin
       if not LValue.TryGetValue<string>('label', LLabel) then
         LLabel := '?';
       LParts.Add(LLabel);
+    end;
+    Result := string.Join(',', LParts.ToArray());
+  finally
+    LParts.Free();
+  end;
+end;
+
+{ CompletionInserts }
+// The insertText of every item of the reply to AId in reply order, joined
+// by ',' ('' for an item without one); '<null>' for a null result
+function CompletionInserts(const ASession: TLspSession; const AId: Integer): string;
+var
+  LItems: TJSONArray;
+  LNull: Boolean;
+  LValue: TJSONValue;
+  LInsert: string;
+  LParts: TList<string>;
+begin
+  LItems := CompletionList(ASession, AId, LNull);
+  if LNull then
+    Exit('<null>');
+  if LItems = nil then
+    Exit('<no items>');
+  LParts := TList<string>.Create();
+  try
+    for LValue in LItems do
+    begin
+      if not LValue.TryGetValue<string>('insertText', LInsert) then
+        LInsert := '';
+      LParts.Add(LInsert);
     end;
     Result := string.Join(',', LParts.ToArray());
   finally
@@ -1745,6 +1776,7 @@ begin
   RegisterTest('recovery_invariant', DoTestRecoveryInvariant);
   RegisterTest('recovery_answers', DoTestRecoveryAnswers);
   RegisterTest('completion', DoTestCompletion);
+  RegisterTest('completion_imports', DoTestCompletionImports);
   RegisterTest('formatting_core', DoTestFormattingCore);
   RegisterTest('formatting', DoTestFormatting);
   RegisterTest('formatting_server', DoTestFormattingServer);
@@ -4123,6 +4155,93 @@ begin
     if not LEdit.TryGetValue<string>('newText', LNewText) then
       LNewText := '';
     Result := Copy(Result, 1, LStart) + LNewText + Copy(Result, LEnd + 1, MaxInt);
+  end;
+end;
+
+procedure TPCLspTests.DoTestCompletionImports();
+var
+  LSession: TLspSession;
+  LMain: string;
+  LUnitA: string;
+  LUnitB: string;
+  LLabels: string;
+  LLenItem: string;
+  LHover: string;
+begin
+  // PLAN-IMPORT-RESOLUTION atom 4: completion offers the names the module's
+  // own imports export, after the frames and the intrinsics (SEM's order);
+  // definition / hover answer a bare imported name. Every expected list is
+  // written by hand from the buffers (0-based lines, UTF-16 characters)
+  LMain := TestFile('lspt_cimp.pcpp');
+  LUnitA := TestFile('lspt_ia.pcpp');
+  LUnitB := TestFile('lspt_ib.pcpp');
+  LSession := NewSession();
+  try
+    RunSession([PC_LSPT_INITIALIZE, PC_LSPT_INITIALIZED,
+      OpenMessage(LUnitA,
+        'module unit lspt_ia;'#10 +                                   // 0
+        'exported routine IaOnly(const AX: int32): int32;'#10 +       // 1
+        'begin'#10 +                                                  // 2
+        '  return AX;'#10 +                                           // 3
+        'end;'#10 +                                                   // 4
+        'exported const'#10 +                                         // 5
+        '  IShared: int32 = 1;'#10 +                                  // 6
+        '  IOwn: int32 = 3;'#10 +                                     // 7
+        'exported var'#10 +                                           // 8
+        '  IaVar: int32;'#10 +                                        // 9
+        'exported routine len(const AX: int32): int32;'#10 +          // 10
+        'begin'#10 +                                                  // 11
+        '  return AX;'#10 +                                           // 12
+        'end;'#10 +                                                   // 13
+        'end.'#10),                                                   // 14
+      OpenMessage(LUnitB,
+        'module unit lspt_ib;'#10 +                                   // 0
+        'exported const'#10 +                                         // 1
+        '  IShared: int32 = 2;'#10 +                                  // 2
+        'end.'#10),                                                   // 3
+      OpenMessage(LMain,
+        'module exe lspt_cimp;'#10 +                                  // 0
+        'import lspt_ia, lspt_ib;'#10 +                               // 1
+        'const'#10 +                                                  // 2
+        '  IOwn: int32 = 1;'#10 +                                     // 3
+        'var'#10 +                                                    // 4
+        '  GL: int64;'#10 +                                           // 5
+        'begin'#10 +                                                  // 6
+        '  IaVar := IaOnly(IOwn);'#10 +                               // 7
+        '  GL := len("ab");'#10 +                                     // 8
+        'end.'#10),                                                   // 9
+      CompletionMessage(10, LMain, 7, 3, ''),       // I| : IaVar's first letter
+      CompletionMessage(11, LMain, 8, 9, ''),       // l| : len's first letter
+      DefinitionMessage(12, LMain, 7, 13),          // in IaOnly
+      DefinitionMessage(13, LMain, 7, 4),           // in IaVar
+      DefinitionMessage(14, LMain, 7, 19),          // in IOwn (the call's argument)
+      HoverMessage(15, LMain, 7, 4),                // on IaVar
+      PC_LSPT_SHUTDOWN, PC_LSPT_EXIT], LSession);
+
+    // Own IOwn first (the module frame); lspt_ia's IOwn is hidden by it;
+    // IShared is in both units: one entry per unit, each inserted
+    // qualified; IaOnly a call snippet
+    Check(CompletionLabels(LSession, 10) = 'IOwn,IaOnly,IShared,IShared,IaVar',
+      'imports: labels (got ' + CompletionLabels(LSession, 10) + ')');
+    Check(CompletionInserts(LSession, 10) = ',IaOnly(${1:AX}),lspt_ia.IShared,lspt_ib.IShared,',
+      'imports: inserts (got ' + CompletionInserts(LSession, 10) + ')');
+    // The intrinsic len hides lspt_ia's len: one entry, the intrinsic's
+    LLabels := ',' + CompletionLabels(LSession, 11) + ',';
+    LLenItem := CompletionItem(LSession, 11, 'len');
+    Check((LLabels.IndexOf(',len,') >= 0) and (LLabels.IndexOf(',len,') = LLabels.LastIndexOf(',len,')) and
+      (Pos('routine', LLenItem) = 0),
+      'imports: one len, the intrinsic (labels ' + LLabels + ', item ' + LLenItem + ')');
+    Check(DefinitionText(LSession, 12) = 'lspt_ia.pcpp:1:17-1:23',
+      'imports: definition of a bare IaOnly (got ' + DefinitionText(LSession, 12) + ')');
+    Check(DefinitionText(LSession, 13) = 'lspt_ia.pcpp:9:2-9:7',
+      'imports: definition of a bare IaVar (got ' + DefinitionText(LSession, 13) + ')');
+    Check(DefinitionText(LSession, 14) = 'lspt_cimp.pcpp:3:2-3:6',
+      'imports: the own IOwn wins (got ' + DefinitionText(LSession, 14) + ')');
+    LHover := HoverValue(LSession, 15);
+    Check(LHover.Contains('IaVar') and LHover.Contains('int32'),
+      'imports: hover on a bare IaVar (got ' + LHover + ')');
+  finally
+    FreeSession(LSession);
   end;
 end;
 

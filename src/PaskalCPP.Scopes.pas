@@ -223,6 +223,12 @@ type
     // that set); several = ambiguous, never merged
     class procedure FindImported(const AImports: TList<TPCImport>; const AName: string;
       const AFound: TList<TPCNode>; const AHolders: TList<TPCImport>); static;
+    // The used-before rule (scopes.md): the first item named AName declared
+    // LATER in a frame of AFrames (innermost first; the items past each list's
+    // visible count, a choices frame's values past its count), else nil. SEM
+    // reports such a use (SM0002); completion never offers an import's name
+    // over it (an own name wins, even one declared later)
+    class function DeclaredLater(const AFrames: TList<TPCScopeFrame>; const AName: string): TPCNode; static;
 
     // What the head of a qualified name (ABase '.' Name) names, as SEM
     // resolved ABase: the import a one-part name resolved to (a module head),
@@ -1253,6 +1259,43 @@ begin
     end;
   finally
     LHit.Free();
+  end;
+end;
+
+class function TPCScopes.DeclaredLater(const AFrames: TList<TPCScopeFrame>; const AName: string): TPCNode;
+var
+  LIndex: Integer;
+  LValue: Integer;
+  LFrame: TPCScopeFrame;
+  LDecls: TList<TPCDecl>;
+  LChoices: TPCChoicesType;
+begin
+  // One rule for every frame: the items at index >= each list's visible
+  // count (was TPCSemantics.DoUsedLater; the LSP's completion reads it too)
+  Result := nil;
+  LDecls := TList<TPCDecl>.Create();
+  try
+    for LIndex := AFrames.Count - 1 downto 0 do
+    begin
+      LFrame := AFrames[LIndex];
+      if LFrame.FrameKind = fkChoices then
+      begin
+        LChoices := TPCChoicesType(LFrame.Owner);
+        for LValue := LFrame.FirstCount to LChoices.Values.Count - 1 do
+        begin
+          if (LChoices.Values[LValue] <> nil) and (LChoices.Values[LValue].ValueName = AName) then
+            Exit(LChoices.Values[LValue]);
+        end;
+        Continue;
+      end;
+      LDecls.Clear();
+      TPCDecl.CollectNamedAfter(LFrame.First, LFrame.FirstCount - 1, AName, LDecls);
+      TPCDecl.CollectNamedAfter(LFrame.Second, LFrame.SecondCount - 1, AName, LDecls);
+      if LDecls.Count > 0 then
+        Exit(LDecls[0]);
+    end;
+  finally
+    LDecls.Free();
   end;
 end;
 
