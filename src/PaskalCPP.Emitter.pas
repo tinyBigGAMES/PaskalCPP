@@ -852,8 +852,9 @@ begin
   if AStmt is TPCDirective then
     Exit(epNone);
 
-  // Module-level verbatim goes to its target file (the parser stamps
-  // etHeader on a # line, BNF sec 10); etInPlace exists only in bodies
+  // Module-level verbatim goes to its target file (the parser stamps a # line
+  // with the current cpp header|source placement, BNF sec 10); etInPlace
+  // exists only in bodies
   if AStmt is TPCVerbatimStmt then
   begin
     LTarget := TPCVerbatimStmt(AStmt).Verbatim.EmitTarget;

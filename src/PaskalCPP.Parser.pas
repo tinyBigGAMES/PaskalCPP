@@ -2342,7 +2342,7 @@ begin
     if DoIsOneOf(LToken.Kind, [tkEOF, tkKwInitialize, tkKwFinalize, tkKwBegin, tkKwEnd]) then
       Exit;
     if LToken.Kind = tkCppPreprocessor then
-      DoParsePreprocessor(FModule.Decls, etHeader)
+      DoParsePreprocessor(FModule.Decls, FPlacement)
     else if LToken.Kind = tkKwCpp then
       DoParsePlacement()
     else if LToken.Kind = tkKwCppstart then
@@ -2407,8 +2407,9 @@ procedure TPCParser.DoParsePreprocessor(const AOwner: TList<TPCStmt>; const ATar
 var
   LIndex: Integer;
 begin
-  // A # line: at module level always the header, in a body in place
-  // (BNF.md sec 10, parser.md "Statements")
+  // A # line: at module level where cpp header|source puts the plain C++
+  // around it (user 2026-10-17; it went to the header always), in a body in
+  // place (BNF.md sec 10, parser.md "Statements")
   LIndex := DoCurrentIndex();
   DoAdvance();
   AOwner.Add(DoNewVerbatim(LIndex, LIndex, vkPreproc, ATarget));

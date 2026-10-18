@@ -24,10 +24,10 @@
 
 module unit path;
 
-// The implementation is C++ in the unit's own source file: a plain #include
-// here would go to the unit's header and bring <windows.h> (and its macros)
-// into every program that imports path. The PaskalCPP routines below are the
-// interface; nothing in this block is visible to an importer.
+// The implementation is C++ in the unit's own source file, in one block: its
+// #include lines (<windows.h> and its macros) never reach a program that
+// imports path. The PaskalCPP routines below are the interface; nothing in
+// this block is visible to an importer.
 cppstart source
 #include <string>
 #ifdef _WIN32

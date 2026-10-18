@@ -134,6 +134,7 @@ type
     procedure DoTestModuleNamedIndex();
     procedure DoTestHeaderCppstart();
     procedure DoTestPreprocHeader();
+    procedure DoTestPreprocSource();
     procedure DoTestBodyPreprocLast();
     procedure DoTestWriteFiles();
     procedure DoTestWriteFilesFail();
@@ -267,6 +268,7 @@ begin
   RegisterTest('module_named_index', DoTestModuleNamedIndex);
   RegisterTest('header_cppstart', DoTestHeaderCppstart);
   RegisterTest('preproc_header', DoTestPreprocHeader);
+  RegisterTest('preproc_source', DoTestPreprocSource);
   RegisterTest('body_preproc_last', DoTestBodyPreprocLast);
   RegisterTest('write_files', DoTestWriteFiles);
   RegisterTest('write_files_fail', DoTestWriteFilesFail);
@@ -470,6 +472,11 @@ end;
 procedure TPCEmitterTests.DoTestPreprocHeader();
 begin
   DoCheckDir('preproc_header');
+end;
+
+procedure TPCEmitterTests.DoTestPreprocSource();
+begin
+  DoCheckDir('preproc_source');
 end;
 
 procedure TPCEmitterTests.DoTestBodyPreprocLast();

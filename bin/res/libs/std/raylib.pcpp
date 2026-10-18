@@ -47,6 +47,9 @@ module unit raylib;
 
 @linklibrary "raylib";
 
+// The header goes to this unit's header, so every importer sees raylib's API
+cpp header;
+
 #include "raylib.h"
 
 end.

@@ -47,6 +47,9 @@ module unit minizip;
 // zip.h and unzip.h include zlib.h: zlib's include path, library and define
 import zlib;
 
+// The headers go to this unit's header, so every importer sees minizip's API
+cpp header;
+
 #include "zip.h"
 #include "unzip.h"
 

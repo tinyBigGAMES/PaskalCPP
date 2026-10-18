@@ -2023,9 +2023,11 @@ begin
         (LSpan.Verbatim.Range.StartByteOffset = LSpan.Range.StartByteOffset) and
         (LSpan.Verbatim.Range.EndByteOffset = LSpan.Range.EndByteOffset),
         'spans: node and verbatim range = first token .. last token');
-      Check((LHash.Verbatim.VerbatimKind = vkPreproc) and (LHash.Verbatim.EmitTarget = etHeader) and
+      // No cpp header; before it: the default placement, source (preproc_placement
+      // checks the switch)
+      Check((LHash.Verbatim.VerbatimKind = vkPreproc) and (LHash.Verbatim.EmitTarget = etSource) and
         (LHash.Verbatim.Text = '#include <cstdio>') and (LHash.Range.StartLine = 6),
-        'spans: a depth-0 # line is its own node, always the header');
+        'spans: a depth-0 # line is its own node, placement source');
       Check((LLast.Verbatim.VerbatimKind = vkCppDecl) and (LLast.Verbatim.Text = 'int g();'),
         'spans: C++ after the # line opens a new span that ends before end');
     end);
@@ -2062,9 +2064,9 @@ begin
       Check((LVector <> nil) and (DoPartsText(LVector) = 'std::vector') and
         (DoArgAt(LVector, 1, 0) <> nil) and (DoArgAt(LVector, 1, 1) = nil),
         'digraphs: std::vector<::std::string> keeps < :: (C++11), one template argument');
-      Check((LHash.Verbatim.VerbatimKind = vkPreproc) and (LHash.Verbatim.EmitTarget = etHeader) and
+      Check((LHash.Verbatim.VerbatimKind = vkPreproc) and (LHash.Verbatim.EmitTarget = etSource) and
         (LHash.Verbatim.Text = '%:include <cstdio>') and (LHash.Range.StartLine = 6),
-        'digraphs: %: first on its line is its own # line node, header');
+        'digraphs: %: first on its line is its own # line node, placement source');
       Check((LLast.Verbatim.VerbatimKind = vkCppDecl) and (LLast.Verbatim.Text = 'int g();'),
         'digraphs: C++ after the %: line is a new span');
     end);
@@ -2090,6 +2092,27 @@ begin
       Check((LA.Verbatim.EmitTarget = etSource) and (LB.Verbatim.EmitTarget = etHeader) and
         (LC.Verbatim.EmitTarget = etSource) and (LB.Verbatim.Text = 'int b;'),
         'placement: source by default, cpp header stamps the next span, cpp source back');
+    end);
+  // A module-level # line follows the same switch (user 2026-10-17)
+  DoWith('pb02_place_preproc.pcpp',
+    procedure(const AModule: TPCModule; const AAst: TPCAst; const AErrors: TErrors)
+    var
+      LA: TPCVerbatimStmt;
+      LB: TPCVerbatimStmt;
+      LC: TPCVerbatimStmt;
+    begin
+      LA := DoVerbatimAt(AModule, 0);
+      LB := DoVerbatimAt(AModule, 1);
+      LC := DoVerbatimAt(AModule, 2);
+      Check((DoCodes(AErrors) = '') and (AModule.Decls.Count = 3) and (LA <> nil) and
+        (LB <> nil) and (LC <> nil), 'placement: three # lines, no node for cpp header|source');
+      if (AModule.Decls.Count <> 3) or (LA = nil) or (LB = nil) or (LC = nil) then
+        Exit;
+      Check((LA.Verbatim.VerbatimKind = vkPreproc) and (LA.Verbatim.EmitTarget = etSource) and
+        (LB.Verbatim.VerbatimKind = vkPreproc) and (LB.Verbatim.EmitTarget = etHeader) and
+        (LC.Verbatim.VerbatimKind = vkPreproc) and (LC.Verbatim.EmitTarget = etSource) and
+        (LB.Verbatim.Text = '#include <cstdio>'),
+        'placement: a # line is source by default, header after cpp header, source again');
     end);
 end;
 

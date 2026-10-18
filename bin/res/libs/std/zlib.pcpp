@@ -42,6 +42,9 @@ module unit zlib;
 // (ZLIB-static.cmake INTERFACE_COMPILE_DEFINITIONS): the 64-bit gz* names.
 @cppdefine "_LARGEFILE64_SOURCE" "1";
 
+// The header goes to this unit's header, so every importer sees zlib's API
+cpp header;
+
 #include "zlib.h"
 
 end.
