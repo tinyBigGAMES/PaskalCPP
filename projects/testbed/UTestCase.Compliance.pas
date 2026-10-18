@@ -1040,7 +1040,7 @@ begin
   DoAdd('dbg_watch', 'dbg', cmBuild, [], [PC_CMPL_TARGET_WINDOWS], [], '');
 
   // std_: the std library units (res\libs\std), one file per unit
-  DoAdd('std_path', 'std', cmRun, [], [], [], '');
+  DoAdd('std_sysutils', 'std', cmRun, [], [], [], '');
 
   for LI := 0 to FEntries.Count - 1 do
     DoRegister(LI);

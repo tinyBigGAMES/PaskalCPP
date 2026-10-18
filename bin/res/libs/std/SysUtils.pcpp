@@ -16,17 +16,18 @@
   This file is covered by the PaskalCPP Runtime Exception
   (RUNTIME-EXCEPTION.md).
 -------------------------------------------------------------------------------
-  path.pcpp - the path unit: `import path;` turns any spelling of a path
-  into one full, normalized path (path.Resolve), with the same prefixes the
-  compiler's own directives take ($P: $D: $S:), and tells where the running
-  program lives (path.ExeDir). Every name is read qualified: path.Resolve.
+  SysUtils.pcpp - the SysUtils unit: `import SysUtils;` turns any spelling of
+  a path into one full, normalized path (ResolvePath), with the same prefixes
+  the compiler's own directives take ($P: $D: $S:), and tells where the
+  running program lives (ExeDir). A name is read bare when no other imported
+  unit exports it (ResolvePath), or qualified (SysUtils.ResolvePath).
 ==============================================================================*/
 
-module unit path;
+module unit SysUtils;
 
 // The implementation is C++ in the unit's own source file, in one block: its
 // #include lines (<windows.h> and its macros) never reach a program that
-// imports path. The PaskalCPP routines below are the interface; nothing in
+// imports SysUtils. The PaskalCPP routines below are the interface; nothing in
 // this block is visible to an importer.
 cppstart source
 #include <string>
@@ -251,7 +252,7 @@ std::string PathDoExeDir()
 
 #endif
 
-// path.Resolve's rule, once, for every overload (a nil pointer reads as "")
+// ResolvePath's rule, once, for every overload (a nil pointer reads as "")
 std::string PathResolve(const char* APath, const char* ABaseDir)
 {
   std::string LPath = PathDoTrim(APath ? std::string(APath) : std::string());
@@ -336,16 +337,16 @@ cppend;
 /// @param APath the path to resolve; empty (or only a prefix) gives ""
 /// @returns the full path, or "" for an empty path
 /// @since 0.2
-/// @see path.ExeDir
+/// @see ExeDir
 /// @example
-///   LZip := path.Resolve("$P:secret.zip");   // beside the program
-///   LCfg := path.Resolve("$D:../app.cfg");   // above the current folder
-exported routine Resolve(const APath: string): string;
+///   LZip := ResolvePath("$P:secret.zip");   // beside the program
+///   LCfg := ResolvePath("$D:../app.cfg");   // above the current folder
+exported routine ResolvePath(const APath: string): string;
 begin
   return PathResolve(APath.c_str(), nil);
 end;
 
-/// Resolves a path against a given base folder; see `path.Resolve(APath)`
+/// Resolves a path against a given base folder; see `ResolvePath(APath)`
 /// for the prefixes and the result's form.
 /// @param APath the path to resolve; `$P:` and `$D:` override ABaseDir
 /// @param ABaseDir the folder a relative path (or `$S:`) is resolved against;
@@ -353,41 +354,41 @@ end;
 /// @returns the full path, or "" for an empty path
 /// @since 0.2
 /// @example
-///   LIcon := path.Resolve("icons/app.png", LDataDir);
-exported routine Resolve(const APath: string; const ABaseDir: string): string;
+///   LIcon := ResolvePath("icons/app.png", LDataDir);
+exported routine ResolvePath(const APath: string; const ABaseDir: string): string;
 begin
   return PathResolve(APath.c_str(), ABaseDir.c_str());
 end;
 
-/// Resolves a C string path, as `path.Resolve(APath)` does for a string:
+/// Resolves a C string path, as `ResolvePath(APath)` does for a string:
 /// for a path that comes from C (an argv entry, a C library's result).
 /// @param APath a NUL-terminated UTF-8 path; nil gives ""
 /// @returns the full path, or "" for an empty or nil path
 /// @since 0.2
-exported routine Resolve(const APath: ptr to const char): string;
+exported routine ResolvePath(const APath: ptr to const char): string;
 begin
   return PathResolve(APath, nil);
 end;
 
 /// Resolves a C string path against a C string base folder, as
-/// `path.Resolve(APath, ABaseDir)` does for strings.
+/// `ResolvePath(APath, ABaseDir)` does for strings.
 /// @param APath a NUL-terminated UTF-8 path; nil gives ""
 /// @param ABaseDir a NUL-terminated UTF-8 base folder; nil or empty: the
 ///   current working directory
 /// @returns the full path, or "" for an empty or nil path
 /// @since 0.2
-exported routine Resolve(const APath: ptr to const char; const ABaseDir: ptr to const char): string;
+exported routine ResolvePath(const APath: ptr to const char; const ABaseDir: ptr to const char): string;
 begin
   return PathResolve(APath, ABaseDir);
 end;
 
 /// The folder that holds the running program's executable, in the form
-/// `path.Resolve` returns, with no trailing separator (except at a root).
+/// `ResolvePath` returns, with no trailing separator (except at a root).
 /// Asked of the OS, so it is right however the program was started (argv[0]
 /// and `paramstr(0)` may be relative or a bare name).
 /// @returns the executable's folder, or "" when the OS cannot tell
 /// @since 0.2
-/// @see path.Resolve
+/// @see ResolvePath
 exported routine ExeDir(): string;
 begin
   return PathExeDir();
