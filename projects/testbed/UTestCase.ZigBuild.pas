@@ -110,6 +110,7 @@ type
     procedure DoZb23Program(const AProgram: string; const AExpectedExit: Cardinal; const ADefine: string);
     procedure DoTestZb13CopyPublish();
     procedure DoTestZb13StaleCopy();
+    procedure DoTestZb13Levels();
     procedure DoTestZb13PublishChecks();
     procedure DoTestZb13Layout();
     procedure DoTestZb25CStringParity();
@@ -366,6 +367,7 @@ begin
   RegisterTest('zb23_runtime', DoTestZb23Runtime);
   RegisterTest('zb13_copy_publish', DoTestZb13CopyPublish);
   RegisterTest('zb13_stale_copy', DoTestZb13StaleCopy);
+  RegisterTest('zb13_levels', DoTestZb13Levels);
   RegisterTest('zb13_publish_checks', DoTestZb13PublishChecks);
   RegisterTest('zb13_layout', DoTestZb13Layout);
   RegisterTest('zb25_cstring_parity', DoTestZb25CStringParity);
@@ -1953,6 +1955,189 @@ begin
     Check((not FileExists(LLegacy)) and DoZb13RecordHas(LRecord, 'bin/zb13r.exe') and
       FileExists(LMine),
       'zb13_stale_copy: round 5 replaced the old record, kept the person''s file');
+  finally
+    LErrors.Free();
+  end;
+end;
+
+{ DoZb13LevelBuild }
+// One build of gen.cpp (project zb13) for ATarget at ALevel into AOutput;
+// AArtifact = the built file's path
+function DoZb13LevelBuild(const ABase: string; const AErrors: TErrors; const ATarget: string;
+  const ALevel: TPCOptimizeLevel; const AOutput: string; out AArtifact: string): Boolean;
+var
+  LZig: TPCZigBuild;
+begin
+  AArtifact := '';
+  LZig := TPCZigBuild.Create();
+  try
+    LZig.SetErrors(AErrors);
+    LZig.SetOutputPath(TPath.Combine(ABase, AOutput));
+    LZig.SetProjectName('zb13');
+    LZig.SetTarget(ATarget);
+    LZig.SetOptimizeLevel(ALevel);
+    LZig.AddSourceFile(TPath.Combine(ABase, 'gen.cpp'));
+    Result := LZig.Process(False);
+    AArtifact := LZig.GetArtifactPath();
+  finally
+    LZig.Free();
+  end;
+  AErrors.PrintErrors();
+end;
+
+{ DoZb13ReadLE }
+// ACount little-endian bytes at AAt (the caller checked the range)
+function DoZb13ReadLE(const ABytes: TBytes; const AAt: UInt64; const ACount: Integer): UInt64;
+var
+  LI: Integer;
+begin
+  Result := 0;
+  for LI := ACount - 1 downto 0 do
+    Result := (Result shl 8) or ABytes[NativeInt(AAt) + LI];
+end;
+
+{ DoZb13ElfSection }
+// Whether an ELF64 little-endian file holds a section named ASection:
+// 1 yes, 0 no, -1 not such a file or its tables lie outside it. Read from
+// the section header table (e_shoff +$28, e_shentsize +$3A, e_shnum +$3C,
+// e_shstrndx +$3E); each entry's sh_name (+$00) indexes the section-name
+// string table, whose sh_offset is at +$18 and sh_size at +$20
+function DoZb13ElfSection(const APath: string; const ASection: string): Integer;
+var
+  LBytes: TBytes;
+  LFileSize: UInt64;
+  LShOff: UInt64;
+  LShEntSize: UInt64;
+  LShNum: UInt64;
+  LShStrNdx: UInt64;
+  LEntry: UInt64;
+  LStrOff: UInt64;
+  LStrSize: UInt64;
+  LPos: UInt64;
+  LIndex: Integer;
+  LName: string;
+begin
+  Result := -1;
+  try
+    LBytes := TFile.ReadAllBytes(APath);
+  except
+    on Exception do
+      Exit;
+  end;
+  LFileSize := UInt64(Length(LBytes));
+
+  // The ELF magic, class 64-bit (EI_CLASS = 2), little-endian (EI_DATA = 1)
+  if (LFileSize < 64) or (LBytes[0] <> $7F) or (LBytes[1] <> Ord('E')) or
+    (LBytes[2] <> Ord('L')) or (LBytes[3] <> Ord('F')) or (LBytes[4] <> 2) or
+    (LBytes[5] <> 1) then
+    Exit;
+
+  LShOff := DoZb13ReadLE(LBytes, $28, 8);
+  LShEntSize := DoZb13ReadLE(LBytes, $3A, 2);
+  LShNum := DoZb13ReadLE(LBytes, $3C, 2);
+  LShStrNdx := DoZb13ReadLE(LBytes, $3E, 2);
+  if (LShEntSize < 64) or (LShStrNdx >= LShNum) or (LShOff > LFileSize) or
+    (LShNum * LShEntSize > LFileSize - LShOff) then
+    Exit;
+
+  // The section-name string table
+  LEntry := LShOff + LShStrNdx * LShEntSize;
+  LStrOff := DoZb13ReadLE(LBytes, LEntry + $18, 8);
+  LStrSize := DoZb13ReadLE(LBytes, LEntry + $20, 8);
+  if (LStrOff > LFileSize) or (LStrSize > LFileSize - LStrOff) then
+    Exit;
+
+  Result := 0;
+  for LIndex := 0 to Integer(LShNum) - 1 do
+  begin
+    LEntry := LShOff + UInt64(LIndex) * LShEntSize;
+    LPos := LStrOff + DoZb13ReadLE(LBytes, LEntry, 4);
+
+    // The name runs to its NUL, inside the string table
+    LName := '';
+    while (LPos < LStrOff + LStrSize) and (LBytes[NativeInt(LPos)] <> 0) do
+    begin
+      LName := LName + Char(LBytes[NativeInt(LPos)]);
+      Inc(LPos);
+    end;
+    if LName = ASection then
+      Exit(1);
+  end;
+end;
+
+procedure TPCZigBuildTests.DoTestZb13Levels();
+var
+  LBase: string;
+  LErrors: TErrors;
+  LRecord: string;
+
+  { DoWindowsStep }
+  // A Windows build at ALevel into out.levels.win: the .pdb beside the exe
+  // (and in the record) exactly when AWantPdb
+  procedure DoWindowsStep(const ALevel: TPCOptimizeLevel; const ALevelText: string;
+    const AWantPdb: Boolean);
+  var
+    LArtifact: string;
+    LPdb: string;
+    LOk: Boolean;
+  begin
+    LErrors.Clear();
+    LOk := DoZb13LevelBuild(LBase, LErrors, 'x86_64-windows-gnu', ALevel, 'out.levels.win',
+      LArtifact);
+    Check(LOk and (LErrors.Count() = 0) and FileExists(LArtifact),
+      'zb13_levels: windows %s builds (%d items)', [ALevelText, LErrors.Count()]);
+    LPdb := TPath.ChangeExtension(LArtifact, '.pdb');
+    if AWantPdb then
+      Check(FileExists(LPdb) and DoZb13RecordHas(LRecord, 'bin/zb13.pdb'),
+        'zb13_levels: windows %s: zb13.pdb beside the exe and recorded', [ALevelText])
+    else
+      Check((not FileExists(LPdb)) and (not DoZb13RecordHas(LRecord, 'bin/zb13.pdb')),
+        'zb13_levels: windows %s: no zb13.pdb beside the exe or in the record', [ALevelText]);
+  end;
+
+  { DoLinuxStep }
+  // A Linux build at ALevel into out.levels.linux: the ELF holds .debug_info
+  // exactly when AWantDebug
+  procedure DoLinuxStep(const ALevel: TPCOptimizeLevel; const ALevelText: string;
+    const AWantDebug: Boolean);
+  var
+    LArtifact: string;
+    LSection: Integer;
+    LOk: Boolean;
+  begin
+    LErrors.Clear();
+    LOk := DoZb13LevelBuild(LBase, LErrors, 'x86_64-linux-gnu', ALevel, 'out.levels.linux',
+      LArtifact);
+    Check(LOk and (LErrors.Count() = 0) and FileExists(LArtifact),
+      'zb13_levels: linux %s builds (%d items)', [ALevelText, LErrors.Count()]);
+    LSection := DoZb13ElfSection(LArtifact, '.debug_info');
+    Check(LSection >= 0, 'zb13_levels: linux %s: the artifact is an ELF64 file', [ALevelText]);
+    if AWantDebug then
+      Check(LSection = 1, 'zb13_levels: linux %s: .debug_info in the ELF', [ALevelText])
+    else
+      Check(LSection = 0, 'zb13_levels: linux %s: no .debug_info in the ELF', [ALevelText]);
+  end;
+
+begin
+  // PLAN-RELEASE-NAMES atom 6: a build carries debug info at debug only.
+  // Windows: the .pdb lies beside the exe at debug only, and the next build
+  // at another level removes the one a debug build left (fast after the
+  // first debug build, safe after the second). Linux: the ELF holds
+  // .debug_info at debug only
+  LErrors := TErrors.Create();
+  try
+    LErrors.SetMaxErrors(10);
+    Check(DoZb13Prepare(LErrors, LBase), 'zb13: fixture written');
+    LRecord := TPath.Combine(LBase, 'out.levels.win\pcpp-installed.txt');
+
+    DoWindowsStep(olDebug, 'debug', True);
+    DoWindowsStep(olFast, 'fast', False);
+    DoWindowsStep(olDebug, 'debug again', True);
+    DoWindowsStep(olSafe, 'safe', False);
+
+    DoLinuxStep(olDebug, 'debug', True);
+    DoLinuxStep(olSafe, 'safe', False);
+    DoLinuxStep(olFast, 'fast', False);
   finally
     LErrors.Free();
   end;
