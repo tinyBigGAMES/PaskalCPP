@@ -147,6 +147,8 @@ begin
   DoAdd('mod_import_err_notexported', 'mod', cmCheck, [], [], [], '');
   DoAdd('mod_import_err_transitive', 'mod', cmCheck, [], [], [], '');
   DoAdd('mod_import_err_case', 'mod', cmCheck, [], [], [], '');
+  DoAdd('mod_import_bare', 'mod', cmRun, [], [], [], '');
+  DoAdd('mod_import_bare_err_ambiguous', 'mod', cmCheck, [], [], [], '');
   DoAdd('mod_initfinal', 'mod', cmRun, [], [], [], '');
   DoAdd('mod_initfinal_err_twice', 'mod', cmCheck, [], [], [], '');
   DoAdd('mod_initfinal_err_order', 'mod', cmCheck, [], [], [], '');

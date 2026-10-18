@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_import_bare_err_ambiguous.pcpp - break step of mod_import_bare.pcpp:
+  KShared named bare, while mod_import_bare_a and mod_import_bare_b both
+  export it. No import order decides: write mod_import_bare_a.KShared or
+  mod_import_bare_b.KShared (SM0020, a note at each unit's declaration).
+
+  How to check, from repo\bin:
+    pcpp res\tests\mod_import_bare_err_ambiguous.pcpp
+    pcpp res\tests\mod_import_bare_err_ambiguous.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe mod_import_bare_err_ambiguous;
+import mod_import_bare_a, mod_import_bare_b;
+
+begin
+  println("{}", KShared); // ERROR SM0020@17
+end.

@@ -1,0 +1,27 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_import_bare_b.pcpp - a unit mod_import_bare.pcpp imports: it exports
+  KShared too, so a bare KShared names two units (only qualified works).
+
+  Nothing to check here: mod_import_bare.pcpp and its break step check it.
+*******************************************************************************/
+
+module unit mod_import_bare_b;
+
+exported const
+  KShared: int32 = 2;
+
+end.

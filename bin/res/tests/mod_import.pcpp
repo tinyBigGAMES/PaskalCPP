@@ -19,8 +19,9 @@
   prologue, naming PaskalCPP units only. A unit is found as <name>.pcpp in the
   importing file's folder first (this file's units: mod_import_a.pcpp and
   mod_import_b.pcpp), then in the module paths (dir_addmodulepath.pcpp checks
-  that part). An imported unit's exported names are reached qualified only
-  (mod_import_a.Sum, mod_import_a.TPair); imports are not transitive. A unit
+  that part). An imported unit's exported names are reached qualified
+  (mod_import_a.Sum, mod_import_a.TPair), or bare when exactly one imported
+  unit exports the name (mod_import_bare.pcpp); imports are not transitive. A unit
   imported twice (here mod_import_a, also imported by mod_import_b) is one
   unit. Every module name equals its file name, exact case.
 

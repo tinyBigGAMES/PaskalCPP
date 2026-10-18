@@ -57,6 +57,7 @@ type
     procedure DoTestBareMember();
     procedure DoTestHidden();
     procedure DoTestImportBare();
+    procedure DoTestImportExternal();
     procedure DoTestChoices();
     procedure DoTestTemplates();
     procedure DoTestSystem();
@@ -968,6 +969,7 @@ begin
   RegisterTest('core.bare_member', DoTestBareMember);
   RegisterTest('core.hidden', DoTestHidden);
   RegisterTest('core.import_bare', DoTestImportBare);
+  RegisterTest('core.import_external', DoTestImportExternal);
   RegisterTest('core.choices', DoTestChoices);
   RegisterTest('core.templates', DoTestTemplates);
   RegisterTest('core.system', DoTestSystem);
@@ -1383,6 +1385,28 @@ begin
       Check((LFor <> nil) and (LFor.ResolvedIterator is TPCVarDecl) and
         (TPCVarDecl(LFor.ResolvedIterator).DeclName = 'GI') and (LFor.ResolvedIterator.Range.StartLine = 8),
         'import bare: for GI binds to sc_ib1.GI');
+    end);
+end;
+
+procedure TPCSemanticsTests.DoTestImportExternal();
+begin
+  // PLAN-IMPORT-RESOLUTION, the external clause: KLib (one unit, sc_ib1)
+  // names the library "m"; KBoth (two units) is SM0020 at the library's name
+  // (4:39) and nothing more (no SM0326 after it)
+  DoWithSem(TPath.Combine(DoCoreDir(), 'sc20_extlib.pcpp'), 100,
+    procedure(const AModule: TPCModule; const AAst: TPCAst; const AErrors: TErrors)
+    var
+      LStmt: TPCStmt;
+      LLib: string;
+    begin
+      Check(DoReportsText(AErrors) = 'SM0020/esError@4:39', 'import external: reports ' + DoReportsText(AErrors));
+      LLib := '?';
+      for LStmt in AModule.Decls do
+      begin
+        if (LStmt is TPCRoutine) and (TPCRoutine(LStmt).DeclName = 'ExtA') then
+          LLib := TPCRoutine(LStmt).ExternalClause.ResolvedLib;
+      end;
+      Check(LLib = 'm', 'import external: ExtA''s library is sc_ib1.KLib''s "m" (got "' + LLib + '")');
     end);
 end;
 
