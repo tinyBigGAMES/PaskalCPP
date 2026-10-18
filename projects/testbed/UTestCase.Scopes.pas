@@ -51,6 +51,7 @@ type
     procedure DoCheckFind(const AType: TPCTypeExpr; const AName: string; const AFound: TList<TPCNode>;
       const ACount: Integer; const AHops: Integer; const ALabel: string);
     procedure DoTestModuleMembers();
+    procedure DoTestImported();
     procedure DoTestChoicesRoutine();
     procedure DoTestSystem();
   protected
@@ -71,6 +72,48 @@ uses
 const
   { SCOPES_MAX_ERRORS }
   SCOPES_MAX_ERRORS = 100;
+
+type
+  { TPCImportRow }
+  // One FindImported lookup over sk04_imp and what it must give: the holders'
+  // module names and the found declarations' names, space separated
+  TPCImportRow = record
+    LookupName: string;
+    HolderNames: string;
+    FoundNames: string;
+  end;
+
+const
+  { IMPORT_ROWS }
+  IMPORT_ROWS: array[0..8] of TPCImportRow = (
+    (LookupName: 'OnlyA'; HolderNames: 'sk04_a'; FoundNames: 'OnlyA'),
+    (LookupName: 'OnlyB'; HolderNames: 'sk04_b'; FoundNames: 'OnlyB'),
+    // Two units export it: both are holders, nothing decides between them
+    (LookupName: 'Both'; HolderNames: 'sk04_a sk04_b'; FoundNames: 'Both Both'),
+    // Other parameter types in each unit: still two holders (no merging)
+    (LookupName: 'Two'; HolderNames: 'sk04_a sk04_b'; FoundNames: 'Two Two'),
+    // One unit's overload set: one holder, the whole set
+    (LookupName: 'Over'; HolderNames: 'sk04_a'; FoundNames: 'Over Over'),
+    // Declared but not exported; a unit's own import; the lib's own name; none
+    (LookupName: 'Hid'; HolderNames: ''; FoundNames: ''),
+    (LookupName: 'Deep'; HolderNames: ''; FoundNames: ''),
+    (LookupName: 'KA'; HolderNames: ''; FoundNames: ''),
+    (LookupName: 'Nope'; HolderNames: ''; FoundNames: '')
+  );
+
+function DoHoldersText(const AHolders: TList<TPCImport>): string;
+var
+  LHolder: TPCImport;
+begin
+  // The holders' module names in order, space separated
+  Result := '';
+  for LHolder in AHolders do
+  begin
+    if Result <> '' then
+      Result := Result + ' ';
+    Result := Result + LHolder.ModuleName;
+  end;
+end;
 
 function DoFixture(): string;
 begin
@@ -171,6 +214,7 @@ begin
   RegisterTest('hidden', DoTestHidden);
   RegisterTest('hops', DoTestHops);
   RegisterTest('module_members', DoTestModuleMembers);
+  RegisterTest('imported', DoTestImported);
   RegisterTest('choices_routine', DoTestChoicesRoutine);
   RegisterTest('system', DoTestSystem);
 end;
@@ -463,6 +507,42 @@ begin
           'V1 declared, not exported: %d', [LFound.Count]);
         Check(not TPCScopes.ModuleMember(AModule, 'Nope', LFound), 'Nope is not declared');
       finally
+        LFound.Free();
+      end;
+    end);
+end;
+
+procedure TPCScopesTests.DoTestImported();
+begin
+  // PLAN-IMPORT-RESOLUTION atom 1: FindImported over sk04_imp's own imports
+  // (sk04_a, sk04_b; sk04_a's own import sk04_c is not followed)
+  DoWithSem(TPath.Combine(DoProbeDir('lsp\scopes'), 'sk04_imp.pcpp'), SCOPES_MAX_ERRORS,
+    procedure(const AModule: TPCModule; const AAst: TPCAst; const AErrors: TErrors)
+    var
+      LFound: TList<TPCNode>;
+      LHolders: TList<TPCImport>;
+      LRow: TPCImportRow;
+    begin
+      Check(not AErrors.HasErrors(), 'sk04 analyzes clean: %d errors', [AErrors.ErrorCount()]);
+      LFound := TList<TPCNode>.Create();
+      LHolders := TList<TPCImport>.Create();
+      try
+        for LRow in IMPORT_ROWS do
+        begin
+          LFound.Clear();
+          LHolders.Clear();
+          TPCScopes.FindImported(AModule.Imports, LRow.LookupName, LFound, LHolders);
+          Check((DoHoldersText(LHolders) = LRow.HolderNames) and (DoNamesText(LFound) = LRow.FoundNames),
+            '%s: holders [%s] found [%s], expected [%s] [%s]',
+            [LRow.LookupName, DoHoldersText(LHolders), DoNamesText(LFound), LRow.HolderNames, LRow.FoundNames]);
+        end;
+        LFound.Clear();
+        LHolders.Clear();
+        TPCScopes.FindImported(nil, 'OnlyA', LFound, LHolders);
+        Check((LFound.Count = 0) and (LHolders.Count = 0), 'nil imports: found %d holders %d',
+          [LFound.Count, LHolders.Count]);
+      finally
+        LHolders.Free();
         LFound.Free();
       end;
     end);

@@ -214,6 +214,15 @@ type
       const AFound: TList<TPCNode>): Boolean; static;
     // Every exported declaration of AModule, list order, forwards collapsed
     class procedure ModuleMembers(const AModule: TPCModule; const AFound: TList<TPCNode>); static;
+    // A bare AName through a module's own imports (PLAN-IMPORT-RESOLUTION;
+    // never transitive: ModuleMember reads each unit's own declarations).
+    // AHolders gets every import whose unit exports AName, once per unit, in
+    // the clause's order (that order only lists them: it decides nothing);
+    // AFound gets the exported declarations of every holder, forwards
+    // collapsed. One holder = the name is that unit's (its overload set stays
+    // that set); several = ambiguous, never merged
+    class procedure FindImported(const AImports: TList<TPCImport>; const AName: string;
+      const AFound: TList<TPCNode>; const AHolders: TList<TPCImport>); static;
 
     // What the head of a qualified name (ABase '.' Name) names, as SEM
     // resolved ABase: the import a one-part name resolved to (a module head),
@@ -1206,6 +1215,45 @@ begin
       AFound.Add(LStmt);
   end;
   CollapseForwards(AFound);
+end;
+
+class procedure TPCScopes.FindImported(const AImports: TList<TPCImport>; const AName: string;
+  const AFound: TList<TPCNode>; const AHolders: TList<TPCImport>);
+var
+  LImport: TPCImport;
+  LHolder: TPCImport;
+  LHit: TList<TPCNode>;
+  LNode: TPCNode;
+  LSeen: Boolean;
+begin
+  if (AImports = nil) or (AName = '') then
+    Exit;
+  LHit := TList<TPCNode>.Create();
+  try
+    for LImport in AImports do
+    begin
+      if (LImport = nil) or (LImport.ImportedModule = nil) or (LImport.ImportedModule.Decls = nil) then
+        Continue;
+      // One unit is one holder, however the clause reaches it
+      LSeen := False;
+      for LHolder in AHolders do
+      begin
+        if LHolder.ImportedModule = LImport.ImportedModule then
+          LSeen := True;
+      end;
+      if LSeen then
+        Continue;
+      LHit.Clear();
+      ModuleMember(LImport.ImportedModule, AName, LHit);
+      if LHit.Count = 0 then
+        Continue;
+      AHolders.Add(LImport);
+      for LNode in LHit do
+        AFound.Add(LNode);
+    end;
+  finally
+    LHit.Free();
+  end;
 end;
 
 class function TPCScopes.HeadImport(const ABase: TPCExpr): TPCImport;
