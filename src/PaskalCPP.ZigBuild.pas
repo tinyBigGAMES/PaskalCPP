@@ -215,6 +215,13 @@ const
   { PC_ZIG_FORM_OPTIMIZE_PRE }
   PC_ZIG_FORM_OPTIMIZE_PRE = 'const optimize: std.builtin.OptimizeMode = ';
 
+  { PC_ZIG_FORM_STRIP }
+  // Debug info only in a debug build (user 2026-10-18): every release level is
+  // stripped, so no .pdb (Windows) or DWARF (Linux) is written; the debugger
+  // works on debug builds. zig 0.17's mode names (debug safe fast tiny);
+  // without this line zig strips only ReleaseSmall
+  PC_ZIG_FORM_STRIP        = '.strip = optimize != .debug,';
+
   { PC_ZIG_FORM_EXE }
   PC_ZIG_FORM_EXE          = 'const exe = b.addExecutable(.{';
 
@@ -741,7 +748,7 @@ uses
 const
   { PC_ZIG_STRUCTURE_LINES }
   // The lines build.zig carries that hold nothing to read back
-  PC_ZIG_STRUCTURE_LINES: array[0..22] of string = (
+  PC_ZIG_STRUCTURE_LINES: array[0..23] of string = (
     '',
     'const std = @import("std");',
     'pub fn build(b: *std.Build) void {',
@@ -749,6 +756,7 @@ const
     '.root_module = b.createModule(.{',
     '.target = target,',
     '.optimize = optimize,',
+    PC_ZIG_FORM_STRIP,
     '.link_libc = true,',
     '.link_libcpp = true,',
     '}),',
@@ -2351,6 +2359,7 @@ begin
   ABuilder.AppendLine('        .root_module = b.createModule(.{');
   ABuilder.AppendLine('            .target = target,');
   ABuilder.AppendLine('            .optimize = optimize,');
+  ABuilder.AppendLine('            ' + PC_ZIG_FORM_STRIP);
   ABuilder.AppendLine('            .link_libc = true,');
   ABuilder.AppendLine('            .link_libcpp = true,');
   ABuilder.AppendLine('        }),');
