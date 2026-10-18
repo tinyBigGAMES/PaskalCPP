@@ -80,15 +80,14 @@
         <UWP_DelphiLogo150>$(BDS)\bin\Artwork\Windows\UWP\delphi_UwpDefault_150.png</UWP_DelphiLogo150>
         <DCC_Namespace>Winapi;System.Win;Data.Win;Datasnap.Win;Web.Win;Soap.Win;Xml.Win;$(DCC_Namespace)</DCC_Namespace>
         <BT_BuildType>Debug</BT_BuildType>
-        <VerInfo_Keys>CompanyName=tinyBigGAMES™ LLC;FileDescription=PaskalCPP™ CLI;FileVersion=0.1.0.0;InternalName=PaskalCPP™ CLI;LegalCopyright=Copyright © 2026-present tinyBigGAMES™ LLC;LegalTrademarks=All Rights Reserved.;OriginalFilename=pcpp.exe;ProgramID=com.tinybiggames.pcpp;ProductName=PaskalCPP™ CLI;ProductVersion=1.0.0.0;Comments=https://paskalcpp.org</VerInfo_Keys>
+        <VerInfo_Keys>CompanyName=tinyBigGAMES™ LLC;FileDescription=PaskalCPP™ CLI;FileVersion=0.2.0.0;InternalName=PaskalCPP™ CLI;LegalCopyright=Copyright © 2026-present tinyBigGAMES™ LLC;LegalTrademarks=All Rights Reserved.;OriginalFilename=pcpp.exe;ProgramID=com.tinybiggames.pcpp;ProductName=PaskalCPP™ CLI;ProductVersion=1.0.0.0;Comments=https://paskalcpp.org</VerInfo_Keys>
         <VerInfo_Locale>1033</VerInfo_Locale>
         <DCC_ExeOutput>..\..\bin</DCC_ExeOutput>
         <DCC_UnitSearchPath>..\..\src;..\..\src\vendor\StdApp;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
         <Manifest_File>$(BDS)\bin\default_app.manifest</Manifest_File>
         <AppDPIAwarenessMode>PerMonitorV2</AppDPIAwarenessMode>
-        <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <VerInfo_MajorVer>0</VerInfo_MajorVer>
-        <VerInfo_MinorVer>1</VerInfo_MinorVer>
+        <VerInfo_MinorVer>2</VerInfo_MinorVer>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1)'!=''">
         <DCC_Define>DEBUG;$(DCC_Define)</DCC_Define>
@@ -99,16 +98,16 @@
         <DCC_RemoteDebug>true</DCC_RemoteDebug>
         <DCC_IntegerOverflowCheck>true</DCC_IntegerOverflowCheck>
         <DCC_RangeChecking>true</DCC_RangeChecking>
+        <VerInfo_Locale>1033</VerInfo_Locale>
+        <VerInfo_Keys>CompanyName=tinyBigGAMES™ LLC;FileDescription=PaskalCPP™ CLI;FileVersion=0.2.0.0;InternalName=PaskalCPP™ CLI;LegalCopyright=Copyright © 2026-present tinyBigGAMES™ LLC;LegalTrademarks=All Rights Reserved.;OriginalFilename=pcpp.exe;ProgramID=com.tinybiggames.pcpp;ProductName=PaskalCPP™ CLI;ProductVersion=1.0.0.0;Comments=https://paskalcpp.org</VerInfo_Keys>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1_Win32)'!=''">
         <DCC_RemoteDebug>false</DCC_RemoteDebug>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1_Win64)'!=''">
-        <VerInfo_Locale>1033</VerInfo_Locale>
         <AppDPIAwarenessMode>none</AppDPIAwarenessMode>
-        <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <VerInfo_MajorVer>0</VerInfo_MajorVer>
-        <VerInfo_MinorVer>1</VerInfo_MinorVer>
+        <VerInfo_MinorVer>2</VerInfo_MinorVer>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2)'!=''">
         <DCC_LocalDebugSymbols>false</DCC_LocalDebugSymbols>
@@ -118,9 +117,8 @@
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2_Win64)'!=''">
         <VerInfo_Locale>1033</VerInfo_Locale>
-        <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <VerInfo_MajorVer>0</VerInfo_MajorVer>
-        <VerInfo_MinorVer>1</VerInfo_MinorVer>
+        <VerInfo_MinorVer>2</VerInfo_MinorVer>
     </PropertyGroup>
     <ItemGroup>
         <DelphiCompile Include="$(MainSource)">
