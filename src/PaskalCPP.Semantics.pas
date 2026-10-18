@@ -991,6 +991,10 @@ type
     function DoConstTakes(const AArg: TPCExpr; const ATo: TPCTypeExpr): Boolean;
     function DoUpcastHops(const AFrom: TPCTypeExpr; const ATo: TPCTypeExpr): Integer;
     procedure DoNoteUpcast(const AValue: TPCExpr; const ATo: TPCTypeExpr);
+    // PLAN-VENDOR 1e: a string literal read as a string / wstring object
+    // (TPCLiteral.ResolvedToString: the emitter keeps its whole length)
+    procedure DoNoteToString(const AValue: TPCExpr; const ATo: TPCTypeExpr);
+    procedure DoNoteToStringArgs(const ACall: TPCCall; const ATargets: TList<TPCCallTarget>);
     procedure DoNoteComparedUpcast(const ALeft: TPCExpr; const ARight: TPCExpr);
     function DoTernaryBaseType(const ATernary: TPCTernary): TPCTypeExpr;
     function DoIsNilAndPointer(const ANil: TPCTypeExpr; const APointer: TPCTypeExpr): Boolean;
@@ -2966,6 +2970,8 @@ begin
     Exit;
   if DoConvertsImplicitly(AValue, ATo) then
   begin
+    // PLAN-VENDOR 1e: a string literal that becomes a string / wstring object
+    DoNoteToString(AValue, ATo);
     // PLAN-RECORDS M12 (1): an accepted pointer upcast is written by the emitter
     DoNoteUpcast(AValue, ATo);
     DoBindRoutineValue(AValue, ATo);
@@ -3406,6 +3412,15 @@ begin
     begin
       DoReportOperands(ANode, PC_SEM_BINARY_TEXT[AOp], ALeft, ARight);
       Exit;
+    end;
+    // PLAN-VENDOR 1e: beside a string, a string literal operand of + or a
+    // comparison becomes a string / wstring object (C++'s operator takes one)
+    if AOp <> boIn then
+    begin
+      if LLeftString then
+        DoNoteToString(ARight, ALeft.ResolvedType);
+      if LRightString then
+        DoNoteToString(ALeft, ARight.ResolvedType);
     end;
   end;
   LHasTokens := DoTokenOf(ALeft, LLeftToken) and DoTokenOf(ARight, LRightToken);
@@ -5349,6 +5364,20 @@ begin
     Exit;
   if (LBase is TPCMember) and (TPCMember(LBase).ResolvedKind = rkModule) then
     Exit;
+  // A module's own name before '.' (`M.K` inside M): no PaskalCPP form (a
+  // qualifier names an imported unit, BNF sec 1). Left C++'s, it reached
+  // clang as an undeclared identifier. Only before '.': a C/C++ function
+  // spelled as the module (glibc's index in a module index) stays callable;
+  // a C/C++ struct value so spelled is reported too (the module's name wins)
+  if (LBase is TPCName) and (TPCName(LBase).ResolvedKind = rkOpaque) and
+    not TPCName(LBase).HasLeadingScope and (TPCName(LBase).Parts.Count = 1) and
+    (TPCName(LBase).Parts[0] <> nil) and (FModule <> nil) and
+    (TPCName(LBase).Parts[0].PartText = FModule.ModuleName) and (AMember.Access = maDot) then
+  begin
+    DoError(LBase, PC_ERR_SEM_007, RSSemCoreOwnModule, [FModule.ModuleName, AMember.Member.PartText]);
+    DoPoison(AMember);
+    Exit;
+  end;
   LBaseType := LBase.ResolvedType;
   if LBaseType = nil then
     Exit;
@@ -12553,7 +12582,11 @@ begin
     // PLAN-RECORDS M12 (1): the pointer upcast this argument needs (a C/C++
     // parameter type too, r4d O4c); a var parameter takes no upcast
     if LParam.ParamMode <> pmVar then
+    begin
       DoNoteUpcast(LArg, LTo);
+      // PLAN-VENDOR 1e: a string literal for a string / wstring parameter
+      DoNoteToString(LArg, LTo);
+    end;
     if DoIsOpaqueTier(LArg.ResolvedType) or DoIsOpaqueTier(LTo) then
       Continue;
     if LParam.ParamMode = pmVar then
@@ -13047,6 +13080,21 @@ begin
     Result := LHops;
 end;
 
+procedure TPCSemantics.DoNoteToString(const AValue: TPCExpr; const ATo: TPCTypeExpr);
+var
+  LCanon: TPCTypeExpr;
+begin
+  // A string literal whose target is the string or wstring builtin (any
+  // alias of it); a parenthesized literal is the same node (the parser keeps
+  // no paren node)
+  if (ATo = nil) or not (AValue is TPCLiteral) or (TPCLiteral(AValue).LiteralKind <> lkString) then
+    Exit;
+  LCanon := ATo.Canon();
+  if (LCanon is TPCBuiltinType) and ((TPCBuiltinType(LCanon).BuiltinToken = tkKwString) or
+    (TPCBuiltinType(LCanon).BuiltinToken = tkKwWstring)) then
+    TPCLiteral(AValue).ResolvedToString := True;
+end;
+
 procedure TPCSemantics.DoNoteUpcast(const AValue: TPCExpr; const ATo: TPCTypeExpr);
 begin
   // The one writer of TPCExpr.ResolvedUpcastHops: a value that goes into
@@ -13517,9 +13565,59 @@ begin
     end;
     // PLAN-RECORDS M8: every accepted member binds as its parameters do
     DoNoteMisalignedArgs(ACall, LTaken);
+    // PLAN-VENDOR 1e: a string literal every accepted member takes as a string
+    DoNoteToStringArgs(ACall, LTaken);
     DoOverloadSetType(ACall, LTaken);
   finally
     LTaken.Free();
+  end;
+end;
+
+procedure TPCSemantics.DoNoteToStringArgs(const ACall: TPCCall; const ATargets: TList<TPCCallTarget>);
+var
+  LIndex: Integer;
+  LTarget: TPCCallTarget;
+  LParam: TPCParam;
+  LTo: TPCTypeExpr;
+  LCanon: TPCTypeExpr;
+  LAll: Boolean;
+begin
+  // Clang ranks the accepted members: an argument becomes a string / wstring
+  // object only when every one of them takes it as one (a value or const
+  // parameter of that builtin type)
+  for LIndex := 0 to ACall.Args.Count - 1 do
+  begin
+    LAll := True;
+    LTo := nil;
+    for LTarget in ATargets do
+    begin
+      if LIndex >= LTarget.Params.Count then
+      begin
+        LAll := False;
+        Break;
+      end;
+      LParam := LTarget.Params[LIndex];
+      if (LParam = nil) or (LParam.ParamMode = pmVar) or (LParam.TypeExpr = nil) then
+      begin
+        LAll := False;
+        Break;
+      end;
+      LTo := DoValueTypeOf(LParam.TypeExpr);
+      if LTo = nil then
+      begin
+        LAll := False;
+        Break;
+      end;
+      LCanon := LTo.Canon();
+      if not ((LCanon is TPCBuiltinType) and ((TPCBuiltinType(LCanon).BuiltinToken = tkKwString) or
+        (TPCBuiltinType(LCanon).BuiltinToken = tkKwWstring))) then
+      begin
+        LAll := False;
+        Break;
+      end;
+    end;
+    if LAll and (LTo <> nil) then
+      DoNoteToString(ACall.Args[LIndex], LTo);
   end;
 end;
 
@@ -13698,7 +13796,7 @@ procedure TPCSemantics.DoIntrinsic(const ACall: TPCCall);
 var
   LSig: TPCIntrinsicSig;
   LIndex: Integer;
-  LText: string;
+  LForm: TPCPrintForm;
   LTarget: TPCTypeExpr;
   LLocked: TPCOwnerType;
 begin
@@ -13732,9 +13830,15 @@ begin
     begin
       if DoIsPoisoned(ACall.Args[LIndex]) then
         Continue;
-      LText := UnprintableArgText(ACall.Args[LIndex]);
-      if LText <> '' then
-        DoError(ACall.Args[LIndex], PC_ERR_SEM_425, '%s', [LText]);
+      // The same decision as UnprintableArgText (the Compiler's report for a
+      // C++ routine's argument): PrintFormOfArg, one RS string per form
+      LForm := TPCTypeExpr.PrintFormOfArg(ACall.Args[LIndex]);
+      if (LForm = pfUnprintable) and (ACall.Args[LIndex].ResolvedType <> nil) then
+        DoError(ACall.Args[LIndex], PC_ERR_SEM_425, RSSemCallUnprintable,
+          [ACall.Args[LIndex].ResolvedType.TypeText()])
+      else if LForm = pfNoAddress then
+        DoError(ACall.Args[LIndex], PC_ERR_SEM_425, RSSemCallNoAddress,
+          [ACall.Args[LIndex].ExprText()]);
     end;
     // PLAN-RECORDS M8: std::format takes its arguments by reference
     DoNoteMisalignedPrint(ACall);

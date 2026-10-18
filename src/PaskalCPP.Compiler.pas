@@ -687,13 +687,15 @@ var
   LCall: TPCCall;
   LArgIndex: Integer;
   LArg: TPCExpr;
+  LDecl: TPCNode;
+  LWide: Boolean;
 begin
   // clang's location is the format string argument (println's, a C++
-  // routine's: TPCAst.CallAt). A string literal does not fit the arguments
-  // after it (SM0502); any other value is no text the build can check: a
-  // string value never is a C++ constant, a pointer constant only when its
-  // text fits, so its fix is the literal itself (SM0500). A location in
-  // verbatim C++ (no PaskalCPP call's argument) stays clang's
+  // routine's: TPCAst.CallAt). A string literal, or a string const holding
+  // one, does not fit the arguments after it (SM0502); any other value is no
+  // text the build can check: a string variable never is a C++ constant
+  // (SM0500). A location in verbatim C++ (no PaskalCPP call's argument)
+  // stays clang's
   Result := False;
   ACode := '';
   AText := '';
@@ -706,7 +708,15 @@ begin
     Exit;
 
   LArg := LCall.Args[LArgIndex];
-  if (LArg is TPCLiteral) and (TPCLiteral(LArg).LiteralKind = lkString) then
+  // A string const holding a literal is read as its constant text there
+  // (TPCConstDecl.HasConstText): its text is checked, as a literal's is
+  LDecl := nil;
+  if LArg is TPCName then
+    LDecl := TPCName(LArg).ResolvedDecl
+  else if LArg is TPCMember then
+    LDecl := TPCMember(LArg).ResolvedDecl;
+  if ((LArg is TPCLiteral) and (TPCLiteral(LArg).LiteralKind = lkString)) or
+    ((LDecl is TPCConstDecl) and TPCConstDecl(LDecl).HasConstText(LWide)) then
   begin
     ACode := PC_ERR_SEM_502;
     AText := TPCSemantics.FormatMismatchText(LArg.ExprText(), LCall.Args.Count - LArgIndex - 1);

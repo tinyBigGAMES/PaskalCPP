@@ -739,6 +739,9 @@ resourcestring
   RSSemCoreImportHolder = '''%s'' is declared in ''%s'' here';
   { RSSemCoreNotModule }
   RSSemCoreNotModule = '''%s'' is not an imported module';
+  { RSSemCoreOwnModule }
+  // the module's name, the member written after it (PLAN-VENDOR 1e: `M.K` inside M)
+  RSSemCoreOwnModule = '''%s'' is this module''s own name, not an imported module: its declarations are reached without it, write ''%s''';
   { RSSemCoreQualifiedParts }
   RSSemCoreQualifiedParts = 'a qualified type has exactly two parts: Module.Type';
   { RSSemCoreNoMember }
@@ -1231,7 +1234,7 @@ resourcestring
   RSSemCallFormatMismatch = 'format string %s does not fit the %d argument(s) after it: each {} takes the next argument, and its format spec must suit that argument''s type';
   { RSSemCallFormatNotLiteral }
   // the format value as written (PLAN-VENDOR 1e)
-  RSSemCallFormatNotLiteral = 'format string ''%s'' is not a string literal: a format string is checked against its arguments when the program is built, so write the text itself';
+  RSSemCallFormatNotLiteral = 'format string ''%s'' is not a string literal or a string const holding one: a format string is checked against its arguments when the program is built';
   { RSSemCallOverloadNone }
   RSSemCallOverloadNone = 'no overload of ''%s'' takes (%s)';
   { RSSemCallOverloadMember }

@@ -126,6 +126,11 @@ const
   // pcpp_op_<name> of its type, called T::pcpp_op_<name>(a, b) (C++'s own
   // operator lookup never decides; div / mod / in have no C++ operator)
   PC_EMT_OP_PREFIX = 'pcpp_op_';
+  { PC_EMT_CONST_TEXT_PREFIX }
+  // PLAN-VENDOR 1e: a string / wstring const holding a literal
+  // (TPCConstDecl.HasConstText) is also pcpp_text_<name>, its constant text
+  // (::pcpp::ConstText / ConstWText); the object is built from it
+  PC_EMT_CONST_TEXT_PREFIX = 'pcpp_text_';
   { PC_EMT_PROP_VALUE }
   PC_EMT_PROP_VALUE = 'pcpp_pv';
   { PC_EMT_PROP_OBJECT }
@@ -202,6 +207,8 @@ type
     FRoutine: TPCRoutine;                        // the routine whose body is written; nil = module / test body
     FOpen: TList<TPCOpenStmt>;                   // the walk context (A7), innermost last
     FRecord: TPCRecordType;                      // the object whose methods are written (parent.M, H6); nil = none
+    FConstTextArg: TPCExpr;                      // PLAN-VENDOR 1e: the argument read as a string const's constant text (DoWriteConstTextArg); nil = none
+    FConstTextValue: TPCExpr;                    // PLAN-VENDOR 1e: the literal a const's constant text is written from (DoEmitConst: the bare array); nil = none
     FRecordName: string;                         // FRecord's struct name (an init's / done's C++ name); '' = none
     FSetterTarget: TPCMember;                    // O9: the property member being written as pcpp_set_X( (nil = none)
     FOpenGetTarget: TPCMember;                   // O10: the indexed property member written as pcpp_get_X( (nil = none)
@@ -343,6 +350,8 @@ type
     procedure DoWriteAssign(const AFile: TPCOutFile; const AAssign: TPCAssign; const AIsStmt: Boolean);
     procedure DoWriteChoicesStore(const AFile: TPCOutFile; const AField: TPCField; const AValue: TPCExpr);
     procedure DoWriteCall(const AFile: TPCOutFile; const ACall: TPCCall);
+    procedure DoWriteConstTextArg(const AFile: TPCOutFile; const AArg: TPCExpr);
+    function DoReadName(const ADecl: TPCDecl; const ANode: TPCExpr): string;
     procedure DoWriteCandidates(const AFile: TPCOutFile; const ACall: TPCCall);
     procedure DoWriteArgs(const AFile: TPCOutFile; const AArgs: TList<TPCExpr>; const AFirst: Integer;
       const ALast: Integer);
@@ -1597,16 +1606,46 @@ end;
 procedure TPCEmitter.DoEmitConst(const AFile: TPCOutFile; const AConst: TPCConstDecl; const AModuleLevel: Boolean);
 var
   LMark: TPCWriterMark;
+  LWide: Boolean;
 begin
   // A6: constexpr T N = (v); const for a type holding a string or a dynamic
   // array (no constexpr std::string object); an exported one lives in the
   // header only, inline (one object for every module)
   DoBeginItem(AFile, AConst.Range.StartLine);
   LMark := FWriters[AFile].Mark();
-  if AModuleLevel and (AFile = ofHeader) then
-    DoText(AFile, 'inline ');
   if AConst.TypeExpr = nil then
     DoMissing(AFile, 'const type');
+  // PLAN-VENDOR 1e: a string const holding a literal is first its constant
+  // text (a local one static, so a reference to it is a constant too), then
+  // the object built from it: `constexpr ::pcpp::ConstText pcpp_text_N{(v)};
+  // const std::string N = (pcpp_text_N);` on the same line
+  if AConst.HasConstText(LWide) then
+  begin
+    if AModuleLevel and (AFile = ofHeader) then
+      DoText(AFile, 'inline ')
+    else if not AModuleLevel then
+      DoText(AFile, 'static ');
+    if LWide then
+      DoText(AFile, 'constexpr ::pcpp::ConstWText ' + PC_EMT_CONST_TEXT_PREFIX + AConst.DeclName + '{(')
+    else
+      DoText(AFile, 'constexpr ::pcpp::ConstText ' + PC_EMT_CONST_TEXT_PREFIX + AConst.DeclName + '{(');
+    FConstTextValue := AConst.ValueExpr;
+    try
+      DoWriteExpr(AFile, AConst.ValueExpr);
+    finally
+      FConstTextValue := nil;
+    end;
+    DoText(AFile, ')}; ');
+    if AModuleLevel and (AFile = ofHeader) then
+      DoText(AFile, 'inline ');
+    DoText(AFile, 'const ');
+    DoWriteType(AFile, AConst.TypeExpr);
+    DoText(AFile, ' ' + AConst.DeclName + ' = (' + PC_EMT_CONST_TEXT_PREFIX + AConst.DeclName + ');');
+    FWriters[AFile].CloseSpan(LMark, AConst);
+    Exit;
+  end;
+  if AModuleLevel and (AFile = ofHeader) then
+    DoText(AFile, 'inline ');
   if AConst.TypeExpr.HoldsStringOrDynamicArray() then
     DoText(AFile, 'const ')
   else
@@ -2582,6 +2621,7 @@ procedure TPCEmitter.DoWriteLiteral(const AFile: TPCOutFile; const ALiteral: TPC
 var
   LIndex: Integer;
   LPart: TPCLiteralPart;
+  LWhole: Boolean;
 begin
   // CppText (F65: the parser's spelling for C++, E17, no O1 wrap); nil =
   // nullptr. A string on one line whose parts all keep their text is its
@@ -2597,19 +2637,36 @@ begin
     DoText(AFile, 'static_cast<int>(' + UIntToStr(ALiteral.IntValue) + 'u)')
   else if ALiteral.LiteralKind <> lkString then
     DoWriteLiteralToken(AFile, ALiteral.CppText, ALiteral.Range, ALiteral)
-  else if not (ALiteral.Text.Contains(#10) or ALiteral.Text.Contains(#13) or
-    DoPartsRespelled(ALiteral)) then
-    DoText(AFile, ALiteral.Text)
   else
   begin
-    for LIndex := 0 to High(ALiteral.Parts) do
+    // PLAN-VENDOR 1e: a literal holding a NUL that becomes a string / wstring
+    // object is built at its whole length (C++ builds a std::string from a
+    // char pointer and stopped at the NUL): std::string(::pcpp::ConstText{(v)})
+    // (not the literal a const's constant text is made of: that is the array)
+    LWhole := ALiteral.ResolvedToString and (ALiteral <> FConstTextValue) and ALiteral.HoldsNul();
+    if LWhole then
     begin
-      LPart := ALiteral.Parts[LIndex];
-      DoAt(AFile, LPart.Range.StartLine);
-      if (LIndex > 0) and DoHasText(AFile) then
-        DoText(AFile, ' ');
-      DoWriteLiteralToken(AFile, LPart.CppText, LPart.Range, ALiteral);
+      if (Length(ALiteral.Parts) > 0) and (ALiteral.Parts[0].LiteralPrefix = lpUpperL) then
+        DoText(AFile, 'std::wstring(::pcpp::ConstWText{(')
+      else
+        DoText(AFile, 'std::string(::pcpp::ConstText{(');
     end;
+    if not (ALiteral.Text.Contains(#10) or ALiteral.Text.Contains(#13) or
+      DoPartsRespelled(ALiteral)) then
+      DoText(AFile, ALiteral.Text)
+    else
+    begin
+      for LIndex := 0 to High(ALiteral.Parts) do
+      begin
+        LPart := ALiteral.Parts[LIndex];
+        DoAt(AFile, LPart.Range.StartLine);
+        if (LIndex > 0) and DoHasText(AFile) then
+          DoText(AFile, ' ');
+        DoWriteLiteralToken(AFile, LPart.CppText, LPart.Range, ALiteral);
+      end;
+    end;
+    if LWhole then
+      DoText(AFile, ')})');
   end;
 end;
 
@@ -2703,7 +2760,7 @@ begin
     ((AName.ResolvedSetMember <> nil) and (AName.ResolvedSetMember.RoutineKind = rnMethod)) then
     DoNoRule(AName)
   else if AName.ResolvedDecl is TPCDecl then
-    DoText(AFile, DoDeclName(TPCDecl(AName.ResolvedDecl)))
+    DoText(AFile, DoReadName(TPCDecl(AName.ResolvedDecl), AName))
   else if AName.ResolvedDecl is TPCParam then
     DoText(AFile, TPCParam(AName.ResolvedDecl).ParamName)
   else if AName.ResolvedKind = rkChoiceValue then
@@ -2757,7 +2814,7 @@ begin
   else if (LBase is TPCName) and (TPCName(LBase).ResolvedKind = rkModule) then
   begin
     if AMember.ResolvedDecl is TPCDecl then
-      DoText(AFile, DoDeclName(TPCDecl(AMember.ResolvedDecl)))
+      DoText(AFile, DoReadName(TPCDecl(AMember.ResolvedDecl), AMember))
     else
     begin
       // An overload set or a C++ name of the module: ::M:: + the name
@@ -3577,7 +3634,7 @@ begin
     if LIndex > 0 then
       DoText(AFile, ', ');
     if LIndex = 0 then
-      DoWriteExpr(AFile, ACall.Args[LIndex])
+      DoWriteConstTextArg(AFile, ACall.Args[LIndex])
     else
       DoWritePrintArg(AFile, ACall.Args[LIndex]);
   end;
@@ -3780,6 +3837,7 @@ procedure TPCEmitter.DoWriteCall(const AFile: TPCOutFile; const ACall: TPCCall);
 var
   LTarget: TPCRoutine;
   LFixed: Integer;
+  LIndex: Integer;
 begin
   // callee(args); a type conversion; an intrinsic (A9); a varargs local's
   // member call (DoWriteVarargsLocalCall); a cpplink variadic packs its extra
@@ -3826,9 +3884,55 @@ begin
       DoText(AFile, ', ');
     DoWritePack(AFile, ACall, LFixed);
   end
+  else if ACall.ResolvedKind = rkOpaque then
+  begin
+    // PLAN-VENDOR 1e: a C/C++ callee may need a constant (a std::format_string
+    // parameter: SysUtils.FormatStr): a string const argument is its constant
+    // text, which converts to the string a parameter takes
+    for LIndex := 0 to ACall.Args.Count - 1 do
+    begin
+      if LIndex > 0 then
+        DoText(AFile, ', ');
+      DoWriteConstTextArg(AFile, ACall.Args[LIndex]);
+    end;
+  end
   else
     DoWriteArgs(AFile, ACall.Args, 0, ACall.Args.Count - 1);
   DoText(AFile, ')');
+end;
+
+procedure TPCEmitter.DoWriteConstTextArg(const AFile: TPCOutFile; const AArg: TPCExpr);
+var
+  LPrevious: TPCExpr;
+begin
+  // The argument as DoWriteExpr writes it, except that a name (bare or
+  // unit-qualified) of a string const holding a literal is its constant
+  // text (DoReadName): only the argument itself, never a const inside a
+  // larger expression (K + "x" stays the std::string)
+  LPrevious := FConstTextArg;
+  FConstTextArg := AArg;
+  try
+    DoWriteExpr(AFile, AArg);
+  finally
+    FConstTextArg := LPrevious;
+  end;
+end;
+
+function TPCEmitter.DoReadName(const ADecl: TPCDecl; const ANode: TPCExpr): string;
+var
+  LWide: Boolean;
+begin
+  // DoDeclName, or pcpp_text_<name> where DoWriteConstTextArg asks for the
+  // constant text of a string const (PLAN-VENDOR 1e)
+  if (ANode = FConstTextArg) and (ADecl is TPCConstDecl) and TPCConstDecl(ADecl).HasConstText(LWide) then
+  begin
+    if ADecl.DeclModule <> nil then
+      Result := '::' + DoNamespaceName(ADecl.DeclModule) + '::' + PC_EMT_CONST_TEXT_PREFIX + ADecl.DeclName
+    else
+      Result := PC_EMT_CONST_TEXT_PREFIX + ADecl.DeclName;
+  end
+  else
+    Result := DoDeclName(ADecl);
 end;
 
 procedure TPCEmitter.DoWriteCandidates(const AFile: TPCOutFile; const ACall: TPCCall);

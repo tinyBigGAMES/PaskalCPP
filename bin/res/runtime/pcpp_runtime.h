@@ -608,6 +608,29 @@ inline std::string quote_as_char(const std::string& debug) {
 } // namespace detail
 
 /*******************************************************************************
+ * Constant text (PLAN-VENDOR 1e): a PaskalCPP string / wstring const whose
+ * value is a literal is also emitted as BasicConstText (pcpp_text_<name>),
+ * since a std::string is never a C++ constant. It is a string_view of the
+ * whole literal (an embedded NUL kept) that converts to the std::basic_string
+ * wherever one is taken; the emitter reads it where C++ may need a constant
+ * (print / println's format, a C/C++ call's argument) and builds the const's
+ * object from it
+ ******************************************************************************/
+
+template <class C>
+struct BasicConstText : std::basic_string_view<C> {
+    template <std::size_t N>
+    consteval BasicConstText(const C (&text)[N]) : std::basic_string_view<C>(text, N - 1) {}
+
+    operator std::basic_string<C>() const {
+        return std::basic_string<C>(this->data(), this->size());
+    }
+};
+
+using ConstText = BasicConstText<char>;
+using ConstWText = BasicConstText<wchar_t>;
+
+/*******************************************************************************
  * Format arguments by C++ type (PLAN-VENDOR 1d: SysUtils.FormatStr, a C++
  * variadic template). print / println decide each argument's form from the
  * AST (TPCTypeExpr.PrintFormOfArg, the emitter writes it); a C++ routine sees
@@ -690,6 +713,9 @@ decltype(auto) format_arg(const T& value) {
         return utf8(static_cast<wchar_t>(value));
     } else if constexpr (std::is_same_v<V, std::wstring>) {
         return utf8(value);
+    } else if constexpr (std::is_same_v<V, ConstWText>) {
+        // A wstring const's constant text (PLAN-VENDOR 1e): as its wstring
+        return utf8(std::wstring(value));
     } else if constexpr (std::is_array_v<V> &&
                          std::is_same_v<std::remove_cv_t<std::remove_extent_t<V>>, wchar_t>) {
         // A wide string literal (L"..."): its text up to the terminator
@@ -1938,6 +1964,10 @@ void assert_assert_equal_ptr(const void* expected, const void* actual, const cha
  * the context (a range formats its elements through another context);
  * set_debug_format is how a range asks for the quoted form
  ******************************************************************************/
+
+// A string const's constant text (PLAN-VENDOR 1e) formats as its string_view
+template <>
+struct std::formatter<pcpp::ConstText, char> : std::formatter<std::string_view, char> {};
 
 template <>
 struct std::formatter<pcpp::PrintWChar, char> {

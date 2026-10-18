@@ -147,6 +147,7 @@ begin
   DoAdd('mod_import_err_notexported', 'mod', cmCheck, [], [], [], '');
   DoAdd('mod_import_err_transitive', 'mod', cmCheck, [], [], [], '');
   DoAdd('mod_import_err_case', 'mod', cmCheck, [], [], [], '');
+  DoAdd('mod_import_err_own_module', 'mod', cmCheck, [], [], [], '');
   DoAdd('mod_import_bare', 'mod', cmRun, [], [], [], '');
   DoAdd('mod_import_bare_err_ambiguous', 'mod', cmCheck, [], [], [], '');
   DoAdd('mod_initfinal', 'mod', cmRun, [], [], [], '');
@@ -646,6 +647,7 @@ begin
   DoAdd('lex_floats_err_overflow', 'lex', cmCheck, [], [], [], '');
   DoAdd('lex_floats_err_suffix', 'lex', cmCheck, [], [], [], '');
   DoAdd('lex_strings', 'lex', cmRun, [], [], [], '');
+  DoAdd('lex_strings_nul', 'lex', cmRun, [], [], [], '');
   DoAdd('lex_strings_err_unterminated', 'lex', cmCheck, [], [], [], '');
   DoAdd('lex_strings_err_raw', 'lex', cmCheck, [], [], [], '');
   DoAdd('lex_strings_err_delimiter', 'lex', cmCheck, [], [], [], '');
@@ -1045,6 +1047,7 @@ begin
   DoAdd('std_sysutils', 'std', cmRun, [], [], [], '');
   DoAdd('std_sysutils_format', 'std', cmRun, [], [], [], '');
   DoAdd('std_sysutils_format_err_count', 'std', cmBuild, [], [], [], '');
+  DoAdd('std_sysutils_format_err_const_count', 'std', cmBuild, [], [], [], '');
   DoAdd('std_sysutils_format_err_not_literal', 'std', cmBuild, [], [], [], '');
   DoAdd('std_sysutils_format_err_record', 'std', cmBuild, [], [], [], '');
   DoAdd('std_sysutils_format_err_cpp_value', 'std', cmBuild, [], [], [], '');

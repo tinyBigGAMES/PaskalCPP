@@ -1389,6 +1389,12 @@ begin
     Check(DoTextOf(LValues, 'LTwice') = '0', 'runtime_vars: Inner''s local LTwice = 0 (%s)', [DoValuesText(LValues)]);
     LValues := LRuntime.Variables(LStack[0].FrameId, dskGlobals);
     Check(DoTextOf(LValues, 'GTotal') = '103', 'runtime_vars: the global GTotal = 103 (%s)', [DoValuesText(LValues)]);
+    // PLAN-VENDOR 1e: module consts are globals: a string from its object, an
+    // int the compiler kept no storage for from the AST (SEM's folded 3 * 4)
+    Check(DoTextOf(LValues, 'KName') = '"syms"', 'runtime_vars: the const KName = "syms" (%s)', [DoValuesText(LValues)]);
+    Check(DoTextOf(LValues, 'KLimit') = '12', 'runtime_vars: the const KLimit = 12 (%s)', [DoValuesText(LValues)]);
+    Check((DoEvalText(LRuntime, LStack[0].FrameId, 'KLimit', LOk) = '12') and LOk,
+      'runtime_vars: evaluate KLimit');
 
     // Frame 1 (Outer at M_CALL), read with its own registers
     LValues := LRuntime.Variables(LStack[1].FrameId, dskLocals);

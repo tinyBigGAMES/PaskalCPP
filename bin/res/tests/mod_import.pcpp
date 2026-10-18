@@ -48,6 +48,7 @@
     mod_import_err_transitive.pcpp    a unit's own import used through it
     mod_import_err_case.pcpp          a module name spelled with other case than
                                       its file name
+    mod_import_err_own_module.pcpp    the module's own name as a qualifier
 *******************************************************************************/
 
 module exe mod_import;

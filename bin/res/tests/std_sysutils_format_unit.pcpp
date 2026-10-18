@@ -1,0 +1,27 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_sysutils_format_unit.pcpp - a unit std_sysutils_format.pcpp imports:
+  an exported string const it uses, unit-qualified, as a format string.
+
+  Nothing to check here: std_sysutils_format.pcpp checks it.
+*******************************************************************************/
+
+module unit std_sysutils_format_unit;
+
+exported const
+  UFormat: string = "unit {} of {}";
+
+end.

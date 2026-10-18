@@ -785,8 +785,18 @@ type
     IntValue: UInt64;                // a plain / L char: the parser's TPCCString.DecodeChar value (P-CHAR)
     FloatValue: Double;
     IsMultiChar: Boolean;            // a plain char literal of several elements ('ab'): C++ int
+    // Semantics (PLAN-VENDOR 1e): this string literal becomes a string /
+    // wstring object (a conversion SEM accepted: :=, an initializer, an
+    // argument, a return; an operand of + or a comparison beside a string).
+    // With HoldsNul the emitter writes it at its full length (C++ builds a
+    // std::string from a char pointer: it stopped at the first NUL)
+    ResolvedToString: Boolean;
     constructor Create(); override;
     function ExprText(): string; override;
+    // A string literal holds an element of value 0 (PLAN-VENDOR 1e): a plain
+    // part's decoded value has a #0; an L part (no decoded value) a zero
+    // escape (\0, \x0, \u0000, \U00000000, \o{0}, \x{0}); a raw part none
+    function HoldsNul(): Boolean;
     // A plain string literal's value: its parts' Values joined (C++ phase 6)
     // when it has a part and every part HasValue; else False and ''
     // (sem\module.md :80, D-A2-10)
@@ -1004,6 +1014,14 @@ type
     ValueExpr: TPCExpr;
     constructor Create(); override;
     procedure EnumChildren(const AVisit: TPCNodeVisitor); override;
+    // PLAN-VENDOR 1e: a string const whose value is a plain string literal
+    // (a wstring const: an L literal; no prefix, no suffix on any part) also
+    // exists as constant text in C++ (::pcpp::ConstText / ConstWText,
+    // pcpp_text_<name>): a std::string is never a C++ constant, so the
+    // emitter reads the twin where C++ may need one (print / println's
+    // format, a C/C++ call's argument) and builds the object from it (an
+    // embedded NUL is kept). AWide = the wstring form
+    function HasConstText(out AWide: Boolean): Boolean;
   end;
 
   { TPCTypeDecl }
@@ -3575,6 +3593,114 @@ begin
   Result := True;
 end;
 
+{ Zero escapes }
+// HoldsNul's test for a part with no decoded value (an L part): an escape in
+// its quoted text whose value is 0. C++'s escapes: \ooo (1-3 octal digits),
+// \o{...}, \xhh..., \x{...}, \uhhhh, \Uhhhhhhhh; any other \c is one element
+
+function DoTextHoldsZeroEscape(const AText: string): Boolean;
+var
+  LFirst: Integer;
+  LLast: Integer;
+  LIndex: Integer;
+  LCount: Integer;
+  LZero: Boolean;
+  LChar: Char;
+
+  // The digits from LIndex while ADigits holds them (at most AMax; 0 = any):
+  // True when there is at least one and every one is '0'
+  function DoZeroRun(const ADigits: TSysCharSet; const AMax: Integer): Boolean;
+  begin
+    LCount := 0;
+    LZero := True;
+    while (LIndex <= LLast) and CharInSet(AText[LIndex], ADigits) and ((AMax = 0) or (LCount < AMax)) do
+    begin
+      if AText[LIndex] <> '0' then
+        LZero := False;
+      Inc(LCount);
+      Inc(LIndex);
+    end;
+    Result := (LCount > 0) and LZero;
+  end;
+
+begin
+  Result := False;
+  LFirst := Pos('"', AText);
+  LLast := AText.LastIndexOf('"');
+  if (LFirst = 0) or (LLast + 1 <= LFirst) then
+    Exit;
+  // AText is 1-based for the scan: the content is LFirst + 1 .. LLast
+  LIndex := LFirst + 1;
+  while LIndex <= LLast do
+  begin
+    if AText[LIndex] <> '\' then
+    begin
+      Inc(LIndex);
+      Continue;
+    end;
+    Inc(LIndex);
+    if LIndex > LLast then
+      Exit;
+    LChar := AText[LIndex];
+    if CharInSet(LChar, ['0'..'7']) then
+    begin
+      if DoZeroRun(['0'..'7'], 3) then
+        Exit(True);
+      Continue;
+    end;
+    Inc(LIndex);
+    if CharInSet(LChar, ['x', 'o']) and (LIndex <= LLast) and (AText[LIndex] = '{') then
+    begin
+      Inc(LIndex);
+      if CharInSet(LChar, ['o']) then
+      begin
+        if DoZeroRun(['0'..'7'], 0) and (LIndex <= LLast) and (AText[LIndex] = '}') then
+          Exit(True);
+      end
+      else if DoZeroRun(['0'..'9', 'a'..'f', 'A'..'F'], 0) and (LIndex <= LLast) and (AText[LIndex] = '}') then
+        Exit(True);
+    end
+    else if LChar = 'x' then
+    begin
+      if DoZeroRun(['0'..'9', 'a'..'f', 'A'..'F'], 0) then
+        Exit(True);
+    end
+    else if LChar = 'u' then
+    begin
+      if DoZeroRun(['0'..'9', 'a'..'f', 'A'..'F'], 4) and (LCount = 4) then
+        Exit(True);
+    end
+    else if LChar = 'U' then
+    begin
+      if DoZeroRun(['0'..'9', 'a'..'f', 'A'..'F'], 8) and (LCount = 8) then
+        Exit(True);
+    end;
+  end;
+end;
+
+function TPCLiteral.HoldsNul(): Boolean;
+var
+  LPart: TPCLiteralPart;
+begin
+  // Every part: a plain one by its decoded value, an L one by its escapes;
+  // a raw part has no escapes (a NUL cannot be written in one)
+  Result := False;
+  if LiteralKind <> lkString then
+    Exit;
+  for LPart in Parts do
+  begin
+    if LPart.IsRawString then
+      Continue;
+    if LPart.HasValue then
+    begin
+      if Pos(#0, LPart.Value) > 0 then
+        Exit(True);
+    end
+    else if DoTextHoldsZeroEscape(LPart.Text) then
+      Exit(True);
+  end;
+end;
+
 { TPCTest }
 
 constructor TPCTest.Create();
@@ -4184,6 +4310,41 @@ procedure TPCConstDecl.EnumChildren(const AVisit: TPCNodeVisitor);
 begin
   VisitNode(TypeExpr, AVisit);
   VisitNode(ValueExpr, AVisit);
+end;
+
+function TPCConstDecl.HasConstText(out AWide: Boolean): Boolean;
+var
+  LCanon: TPCTypeExpr;
+  LLiteral: TPCLiteral;
+  LPrefix: TPCLiteralPrefix;
+  LPart: TPCLiteralPart;
+begin
+  // The const's type decides the form (string or wstring); every part of the
+  // literal must be that form's array (no u8 / u / U part: another character
+  // type; no suffix: "x"s is already a std::string)
+  Result := False;
+  AWide := False;
+  if (TypeExpr = nil) or not (ValueExpr is TPCLiteral) then
+    Exit;
+  LLiteral := TPCLiteral(ValueExpr);
+  if (LLiteral.LiteralKind <> lkString) or (Length(LLiteral.Parts) = 0) then
+    Exit;
+  LCanon := TypeExpr.Canon();
+  if not (LCanon is TPCBuiltinType) then
+    Exit;
+  if TPCBuiltinType(LCanon).BuiltinToken = tkKwString then
+    LPrefix := lpNone
+  else if TPCBuiltinType(LCanon).BuiltinToken = tkKwWstring then
+    LPrefix := lpUpperL
+  else
+    Exit;
+  for LPart in LLiteral.Parts do
+  begin
+    if (LPart.LiteralPrefix <> LPrefix) or (LPart.Suffix <> '') then
+      Exit;
+  end;
+  AWide := LPrefix = lpUpperL;
+  Result := True;
 end;
 
 { TPCTypeDecl }
@@ -6520,6 +6681,7 @@ end;
 class function TPCAst.DoNodeNamesRuntime(const ANode: TPCNode): Boolean;
 var
   LRoutine: TPCRoutine;
+  LWide: Boolean;
 begin
   // One row per emitter site that writes ::pcpp:: for the node itself
   // (r10-runtime-use.md); the hooked witness (UTestCase.Emitter DoCheckDir)
@@ -6564,6 +6726,10 @@ begin
     Result := True                    // PLAN-OBJECT O6: Own / Ref / Weak; make_own / make_ref
   else if ANode is TPCTypeTest then
     Result := True                    // PLAN-OBJECT O12: is_a / as_a
+  else if ANode is TPCConstDecl then
+    Result := TPCConstDecl(ANode).HasConstText(LWide)                             // ConstText (PLAN-VENDOR 1e)
+  else if ANode is TPCLiteral then
+    Result := TPCLiteral(ANode).ResolvedToString and TPCLiteral(ANode).HoldsNul() // ConstText, whole length (1e)
   else if ANode is TPCMember then
     Result := TPCMember.ReadsOwner(TPCMember(ANode))                              // deref (O6)
   else if ANode is TPCArrayType then

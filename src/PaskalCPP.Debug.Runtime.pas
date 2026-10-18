@@ -295,6 +295,10 @@ type
     IsBitfield: Boolean;
     BitPosition: Cardinal;
     BitWidth: Cardinal;
+    // PLAN-VENDOR 1e: a const the compiler kept no storage for shows the
+    // value the AST holds (SEM's folded value, else the literal as written)
+    HasConstValue: Boolean;
+    ConstValue: string;
   end;
 
   { TPCDebugFrameInfo }
@@ -438,6 +442,8 @@ type
     function DoParamSlots(const AFrameId: Integer): TArray<TPCDebugSlot>;
     function DoLocalSlots(const AFrameId: Integer): TArray<TPCDebugSlot>;
     function DoGlobalSlots(const AFrameId: Integer): TArray<TPCDebugSlot>;
+    // PLAN-VENDOR 1e: a const with no storage, as the value the AST holds
+    class function DoConstValueSlot(const ADecl: TPCConstDecl; out ASlot: TPCDebugSlot): Boolean; static;
     function DoRawSlots(const AFrameId: Integer; const AParams: Boolean;
       const AKnown: TList<string>): TArray<TPCDebugSlot>;
     function DoIsHiddenName(const ACppName: string): Boolean;
@@ -2528,8 +2534,11 @@ begin
           LSlot.AstType := LAstType;
           LSlot.Problem := RSDbgValueUnreadable;
           Result := Result + [LSlot];
-        end;
-        // A const the compiler kept no storage for is not listed
+        end
+        // A const the compiler kept no storage for: the value the AST holds
+        // (PLAN-VENDOR 1e; it was not listed); with none it is not listed
+        else if DoConstValueSlot(TPCConstDecl(LNode), LSlot) then
+          Result := Result + [LSlot];
       end;
     end;
     // C++ locals with no PaskalCPP declaration (verbatim C++), raw (W3)
@@ -2539,6 +2548,30 @@ begin
     LFound.Free();
     LFrames.Free();
   end;
+end;
+
+class function TPCDebugRuntime.DoConstValueSlot(const ADecl: TPCConstDecl; out ASlot: TPCDebugSlot): Boolean;
+var
+  LText: string;
+begin
+  // The value SEM folded (an integer constant, an expression of them), else
+  // a literal as written (a string, a char, a float, a bool); anything else
+  // (a C++ value) has no value the AST holds: False
+  ASlot := Default(TPCDebugSlot);
+  Result := False;
+  if (ADecl = nil) or (ADecl.ValueExpr = nil) then
+    Exit;
+  if not TPCAst.FoldedText(ADecl.ValueExpr, LText) then
+  begin
+    if not (ADecl.ValueExpr is TPCLiteral) then
+      Exit;
+    LText := ADecl.ValueExpr.ExprText();
+  end;
+  ASlot.DisplayName := ADecl.DeclName;
+  ASlot.AstType := ADecl.TypeExpr;
+  ASlot.HasConstValue := True;
+  ASlot.ConstValue := LText;
+  Result := True;
 end;
 
 function TPCDebugRuntime.DoGlobalSlots(const AFrameId: Integer): TArray<TPCDebugSlot>;
@@ -2558,6 +2591,20 @@ begin
     Exit;
   for LStmt in LInfo.Module.Decls do
   begin
+    // PLAN-VENDOR 1e: a module const too, from its storage when the PDB has
+    // it, else the value the AST holds; one with neither is not listed
+    if LStmt is TPCConstDecl then
+    begin
+      LCppName := TPCEmitter.DoDeclName(TPCConstDecl(LStmt));
+      if LCppName.StartsWith('::') then
+        LCppName := LCppName.Substring(2);
+      if FSymbols.GlobalSymbol(LCppName, LSymbol) then
+        Result := Result + [DoSymbolSlot(LInfo, LSymbol, TPCConstDecl(LStmt).DeclName,
+          TPCConstDecl(LStmt).TypeExpr, False)]
+      else if DoConstValueSlot(TPCConstDecl(LStmt), LSlot) then
+        Result := Result + [LSlot];
+      Continue;
+    end;
     if not (LStmt is TPCVarDecl) then
       Continue;
     LDecl := TPCVarDecl(LStmt);
@@ -2906,6 +2953,12 @@ begin
     Result.TypeText := ASlot.AstType.TypeText()
   else
     Result.TypeText := DoPdbTypeName(ASlot.ModuleBase, ASlot.TypeIndex);
+  if ASlot.HasConstValue then
+  begin
+    Result.ValueText := ASlot.ConstValue;
+    Result.IsReadable := True;
+    Exit;
+  end;
   if not ASlot.HasAddress then
   begin
     Result.ValueText := ASlot.Problem;
@@ -2927,6 +2980,8 @@ begin
   // By the PaskalCPP type when there is one; a C / C++ type (opaque, verbatim)
   // or no AST at all: the PDB's own reading
   AHasChildren := False;
+  if ASlot.HasConstValue then
+    Exit(ASlot.ConstValue);
   if not ASlot.HasAddress then
     Exit(RSDbgValueUnreadable);
   if ASlot.IsBitfield then
