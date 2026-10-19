@@ -1,0 +1,96 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  VorbisInfo.pcpp - stb example: opens every Ogg Vorbis file in
+  res\assets\audio with stb_vorbis, prints its channels, sample rate and
+  length, then decodes the whole file and prints the loudest sample. No
+  sound is played: the same output on every target.
+==============================================================================*/
+
+module exe VorbisInfo;
+
+// The program lands in repo\bin\output\VorbisInfo\bin, so the assets are
+// three folders up from it
+@ifdef TARGET_X86_64_LINUX_GNU
+@outputpath "$P:output/VorbisInfo_linux";
+@else
+@outputpath "$P:output/VorbisInfo";
+@endif
+
+import
+  SysUtils,
+  stb_vorbis;
+
+// Opens one file, prints what it holds, decodes it to the end
+routine ShowFile(const AName: string);
+var
+  LPath: string;
+  LError: int32;
+  LVorbis: ptr to stb_vorbis;
+  LInfo: stb_vorbis_info;
+  LSamples: uint32;
+  LOutput: ptr to ptr to float32;
+  LChannels: int32;
+  LFrame: int32;
+  LDecoded: int64;
+  LPeak: float32;
+  LValue: float32;
+  LC: int32;
+  LI: int32;
+begin
+  LPath := ResolvePath("$P:../../../res/assets/audio/" + AName);
+  LVorbis := stb_vorbis_open_filename(LPath.c_str(), address of LError, nil);
+  if LVorbis = nil then
+    println("{}: cannot open (stb_vorbis error {})", AName, LError);
+    return;
+  end;
+  LInfo := stb_vorbis_get_info(LVorbis);
+  LSamples := stb_vorbis_stream_length_in_samples(LVorbis);
+  println("{}: {} channel(s), {} Hz, {} samples ({:.2f} s)", AName, LInfo.channels,
+    LInfo.sample_rate, LSamples, float64(LSamples) / float64(LInfo.sample_rate));
+
+  // Decode frame by frame: each frame is LFrame samples per channel
+  LDecoded := 0;
+  LPeak := 0.0;
+  LFrame := stb_vorbis_get_frame_float(LVorbis, address of LChannels, address of LOutput);
+  while LFrame > 0 do
+    LDecoded := LDecoded + LFrame;
+    for LC := 0 to LChannels - 1 do
+      for LI := 0 to LFrame - 1 do
+        // the loudest sample either way: its absolute value
+        LValue := LOutput[LC][LI];
+        if LValue < 0.0 then
+          LValue := -LValue;
+        end;
+        if LValue > LPeak then
+          LPeak := LValue;
+        end;
+      end;
+    end;
+    LFrame := stb_vorbis_get_frame_float(LVorbis, address of LChannels, address of LOutput);
+  end;
+  println("  decoded {} samples, loudest sample {:.4f}", LDecoded, LPeak);
+  stb_vorbis_close(LVorbis);
+end;
+
+begin
+  ShowFile("music/song01.ogg");
+  ShowFile("music/song02.ogg");
+  ShowFile("sfx/digthis.ogg");
+  ShowFile("sfx/engine_player.ogg");
+  ShowFile("sfx/explo_enemy.ogg");
+  ShowFile("sfx/explo_rock.ogg");
+  ShowFile("sfx/samp0.ogg");
+end.

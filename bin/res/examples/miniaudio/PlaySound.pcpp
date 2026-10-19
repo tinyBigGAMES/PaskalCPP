@@ -1,0 +1,76 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  PlaySound.pcpp - miniaudio example: opens the default playback device with
+  ma_engine, streams res\assets\audio\music\song01.ogg for five seconds at
+  half volume and prints the play position once a second. Listen to it: the
+  output only shows that the engine started and the position advanced.
+==============================================================================*/
+
+module exe PlaySound;
+
+// The program lands in repo\bin\output\PlaySound\bin, so the assets are
+// three folders up from it
+@ifdef TARGET_X86_64_LINUX_GNU
+@outputpath "$P:output/PlaySound_linux";
+@else
+@outputpath "$P:output/PlaySound";
+@endif
+
+import
+  SysUtils,
+  miniaudio;
+
+#include <chrono>
+#include <thread>
+
+const
+  CSeconds: int32 = 5;
+  CVolume: float32 = 0.5;
+
+var
+  LPath: string;
+  LEngine: ma_engine;
+  LSound: ma_sound;
+  LCursor: float32;
+  LSecond: int32;
+
+begin
+  LPath := ResolvePath("$P:../../../res/assets/audio/music/song01.ogg");
+  // nil config = the default playback device at its own format
+  if ma_engine_init(nil, address of LEngine) <> MA_SUCCESS then
+    println("no playback device could be opened");
+    return;
+  end;
+  // STREAM decodes while playing instead of loading the whole song first
+  if ma_sound_init_from_file(address of LEngine, LPath.c_str(), MA_SOUND_FLAG_STREAM, nil, nil,
+    address of LSound) <> MA_SUCCESS then
+    println("cannot open song01.ogg");
+    ma_engine_uninit(address of LEngine);
+    return;
+  end;
+  ma_sound_set_volume(address of LSound, CVolume);
+  ma_sound_start(address of LSound);
+  println("playing song01.ogg for {} seconds", CSeconds);
+  for LSecond := 1 to CSeconds do
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    LCursor := 0.0;
+    ma_sound_get_cursor_in_seconds(address of LSound, address of LCursor);
+    println("  {} s: at {:.1f} s", LSecond, LCursor);
+  end;
+  ma_sound_uninit(address of LSound);
+  ma_engine_uninit(address of LEngine);
+  println("done");
+end.

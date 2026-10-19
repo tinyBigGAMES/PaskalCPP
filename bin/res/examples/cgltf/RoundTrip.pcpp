@@ -1,0 +1,103 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  RoundTrip.pcpp - cgltf example: parses a small glTF 2.0 document held in
+  memory (one triangle, its vertex data in a base64 data URI), validates it,
+  prints what it holds, writes it back to text with cgltf_write and parses
+  that text again. The document is a C++ raw string, mixed in directly. No
+  files, no window: the same output on every target.
+==============================================================================*/
+
+module exe RoundTrip;
+
+@ifdef TARGET_X86_64_LINUX_GNU
+@outputpath "$P:output/RoundTrip_linux";
+@else
+@outputpath "$P:output/RoundTrip";
+@endif
+
+import
+  cgltf;
+
+#include <string.h>
+
+// One triangle: three float32 VEC3 positions (36 bytes) in one buffer
+static const char* const CTriangle = R"json({
+  "asset": { "version": "2.0", "generator": "PaskalCPP RoundTrip" },
+  "scene": 0,
+  "scenes": [ { "nodes": [ 0 ] } ],
+  "nodes": [ { "mesh": 0, "name": "Triangle" } ],
+  "meshes": [ { "primitives": [ { "attributes": { "POSITION": 0 } } ] } ],
+  "buffers": [ { "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAA", "byteLength": 36 } ],
+  "bufferViews": [ { "buffer": 0, "byteOffset": 0, "byteLength": 36, "target": 34962 } ],
+  "accessors": [ { "bufferView": 0, "byteOffset": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+    "max": [ 1.0, 1.0, 0.0 ], "min": [ 0.0, 0.0, 0.0 ] } ]
+})json";
+
+// Parses and validates AText; nil when either fails (the reason printed)
+routine ParseText(const AText: ptr to const char; const ALabel: string): ptr to cgltf_data;
+var
+  LOptions: cgltf_options;
+  LData: ptr to cgltf_data;
+begin
+  LData := nil;
+  if cgltf_parse(address of LOptions, AText, strlen(AText), address of LData) <> cgltf_result_success then
+    println("{}: not a glTF document cgltf can parse", ALabel);
+    return nil;
+  end;
+  if cgltf_validate(LData) <> cgltf_result_success then
+    println("{}: the document does not validate", ALabel);
+    cgltf_free(LData);
+    return nil;
+  end;
+  return LData;
+end;
+
+// Prints the counts of what a parsed document holds
+routine Show(const AData: ptr to cgltf_data; const ALabel: string);
+begin
+  println("{}: glTF {}, {} scene(s), {} node(s) (first '{}'), {} mesh(es) with {} primitive(s), "
+    "{} accessor(s), {} buffer(s)", ALabel, AData^.asset.version, uint64(AData^.scenes_count),
+    uint64(AData^.nodes_count), AData^.nodes[0].name, uint64(AData^.meshes_count),
+    uint64(AData^.meshes[0].primitives_count), uint64(AData^.accessors_count),
+    uint64(AData^.buffers_count));
+end;
+
+var
+  LOptions: cgltf_options;
+  LData: ptr to cgltf_data;
+  LAgain: ptr to cgltf_data;
+  LSize: uint64;
+  LText: array of char;
+
+begin
+  LData := ParseText(CTriangle, "parsed");
+  if LData = nil then
+    return;
+  end;
+  Show(LData, "parsed");
+  // A nil buffer asks for the size, the NUL terminator included
+  LSize := uint64(cgltf_write(address of LOptions, nil, 0, LData));
+  setlength(LText, int64(LSize));
+  cgltf_write(address of LOptions, address of LText[0], LSize, LData);
+  println("written: {} bytes", LSize - 1);
+  println("{}", address of LText[0]);
+  LAgain := ParseText(address of LText[0], "parsed again");
+  if LAgain <> nil then
+    Show(LAgain, "parsed again");
+    cgltf_free(LAgain);
+  end;
+  cgltf_free(LData);
+end.

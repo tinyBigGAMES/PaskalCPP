@@ -1,0 +1,106 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  FontGlyph.pcpp - stb example: loads res\assets\fonts\JetBrainsMonoRegular.ttf,
+  rasterizes the letters "Pa" with stb_truetype at 20 pixels high, and draws
+  each glyph's coverage as text shades. No window: the same output on every
+  target. The font file is read with C's stdio, mixed in directly.
+==============================================================================*/
+
+module exe FontGlyph;
+
+// The program lands in repo\bin\output\FontGlyph\bin, so the assets are
+// three folders up from it
+@ifdef TARGET_X86_64_LINUX_GNU
+@outputpath "$P:output/FontGlyph_linux";
+@else
+@outputpath "$P:output/FontGlyph";
+@endif
+
+import
+  SysUtils,
+  stb_truetype;
+
+#include <stdio.h>
+
+const
+  CPixels: float32 = 20.0;
+  CShades: string = " .:-=+*#%@";
+
+// Reads a whole file into AData; False when it cannot be opened or read
+routine LoadFile(const APath: string; var AData: array of uint8): bool;
+var
+  LFile: ptr to FILE;
+  LSize: int64;
+begin
+  LFile := fopen(APath.c_str(), "rb");
+  if LFile = nil then
+    return false;
+  end;
+  fseek(LFile, 0, SEEK_END);
+  LSize := ftell(LFile);
+  fseek(LFile, 0, SEEK_SET);
+  setlength(AData, LSize);
+  LSize := int64(fread(address of AData[0], 1, uint64(LSize), LFile));
+  fclose(LFile);
+  return LSize = len(AData);
+end;
+
+// Rasterizes one character and prints it, one text shade per pixel
+routine DrawGlyph(const AFont: stbtt_fontinfo; const AScale: float32; const ACode: int32);
+var
+  LBitmap: ptr to uint8;
+  LW: int32;
+  LH: int32;
+  LXOff: int32;
+  LYOff: int32;
+  LX: int32;
+  LY: int32;
+  LShade: int32;
+begin
+  LBitmap := stbtt_GetCodepointBitmap(address of AFont, AScale, AScale, ACode,
+    address of LW, address of LH, address of LXOff, address of LYOff);
+  println("glyph U+{:04X}: {} x {} pixels", ACode, LW, LH);
+  for LY := 0 to LH - 1 do
+    for LX := 0 to LW - 1 do
+      // coverage 0..255 -> one of the 10 shades
+      LShade := int32(LBitmap[LY * LW + LX]) * 10 div 256;
+      print("{}", CShades[LShade]);
+    end;
+    println("");
+  end;
+  stbtt_FreeBitmap(LBitmap, nil);
+end;
+
+var
+  LData: array of uint8;
+  LFont: stbtt_fontinfo;
+  LScale: float32;
+
+begin
+  if not LoadFile(ResolvePath("$P:../../../res/assets/fonts/JetBrainsMonoRegular.ttf"), LData) then
+    println("cannot read JetBrainsMonoRegular.ttf");
+    return;
+  end;
+  println("font file: {} bytes", len(LData));
+  if stbtt_InitFont(address of LFont, address of LData[0],
+    stbtt_GetFontOffsetForIndex(address of LData[0], 0)) = 0 then
+    println("not a font stb_truetype can read");
+    return;
+  end;
+  LScale := stbtt_ScaleForPixelHeight(address of LFont, CPixels);
+  DrawGlyph(LFont, LScale, int32('P'));
+  DrawGlyph(LFont, LScale, int32('a'));
+end.

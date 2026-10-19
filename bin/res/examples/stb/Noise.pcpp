@@ -1,0 +1,83 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  Noise.pcpp - stb example: samples stb_perlin's fractal noise (fbm) over a
+  64 x 24 grid and prints it as a map of text shades, low to high. No window:
+  the same output on every target.
+==============================================================================*/
+
+module exe Noise;
+
+@ifdef TARGET_X86_64_LINUX_GNU
+@outputpath "$P:output/Noise_linux";
+@else
+@outputpath "$P:output/Noise";
+@endif
+
+import
+  stb_perlin;
+
+const
+  CWidth: int32 = 64;
+  CHeight: int32 = 24;
+  // Grid step in noise space: one cell = 1/16 of a noise period
+  CStep: float32 = 0.0625;
+  CLacunarity: float32 = 2.0;
+  CGain: float32 = 0.5;
+  COctaves: int32 = 5;
+  CShades: string = " .:-=+*#%@";
+
+// Maps a noise value (about -1 .. 1) to one of the 10 shades
+routine ShadeOf(const AValue: float32): int32;
+var
+  LShade: int32;
+begin
+  LShade := int32((AValue + 1.0) * 5.0);
+  if LShade < 0 then
+    LShade := 0;
+  end;
+  if LShade > 9 then
+    LShade := 9;
+  end;
+  return LShade;
+end;
+
+var
+  LX: int32;
+  LY: int32;
+  LValue: float32;
+  LLow: float32;
+  LHigh: float32;
+
+begin
+  println("stb_perlin fbm noise, {} x {}, {} octaves", CWidth, CHeight, COctaves);
+  LLow := 1.0;
+  LHigh := -1.0;
+  for LY := 0 to CHeight - 1 do
+    for LX := 0 to CWidth - 1 do
+      LValue := stb_perlin_fbm_noise3(float32(LX) * CStep, float32(LY) * CStep, 0.5,
+        CLacunarity, CGain, COctaves);
+      if LValue < LLow then
+        LLow := LValue;
+      end;
+      if LValue > LHigh then
+        LHigh := LValue;
+      end;
+      print("{}", CShades[ShadeOf(LValue)]);
+    end;
+    println("");
+  end;
+  println("lowest {:.3f}, highest {:.3f}", LLow, LHigh);
+end.

@@ -1,0 +1,41 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  stb_easy_font.pcpp - the stb_easy_font unit (stb, header-only): `import
+  stb_easy_font;` uses quick-and-dirty bitmap text as quads (all static
+  functions: nothing to compile) from PaskalCPP. A self-describing vendor
+  module: it owns every path it needs. The library has no implementation to
+  compile: the header is all of it.
+==============================================================================*/
+
+module unit stb_easy_font;
+
+@addincludepath "$P:res/libs/vendor/stb/include";
+
+@ifndef TARGET_X86_64_WINDOWS_GNU
+  @ifndef TARGET_X86_64_LINUX_GNU
+    @message error "stb_easy_font: unsupported target";
+  @endif
+@endif
+
+// The declarations go to this unit's header, so every importer sees the API
+cpp header;
+
+#include <stb_easy_font.h>
+
+end.

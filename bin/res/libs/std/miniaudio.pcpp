@@ -1,0 +1,60 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  miniaudio.pcpp - the miniaudio unit (miniaudio, header-only): `import
+  miniaudio;` uses audio playback and capture, decoding (WAV, FLAC, MP3,
+  Vorbis), mixing and effects from PaskalCPP. A self-describing vendor module:
+  it owns every path it needs. The implementation is a static library of its
+  own, libminiaudio.a (one per target, built from its C source by PaskalCPP-
+  Libs' build-miniaudio.cmd), linked by @linklibrary: every module of the
+  program shares the one copy, and a program links only the libraries it
+  imports.
+
+  Not yet usable together with raylib in one program: raylib's private
+  miniaudio copy still defines one public variable, ma_atomic_global_lock
+  (miniaudio.h:14576, outside MA_API: an upstream bug), so the link reports
+  duplicate symbols. Use it on its own.
+==============================================================================*/
+
+module unit miniaudio;
+
+@addincludepath "$P:res/libs/vendor/miniaudio/include";
+
+// The library of each target; Windows needs only mingw's CRT (linked by
+// default), Linux also links dl, pthread, m.
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/miniaudio/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/miniaudio/lib/x86_64-linux-gnu";
+  @linklibrary "dl";
+  @linklibrary "pthread";
+  @linklibrary "m";
+@else
+  @message error "miniaudio: unsupported target";
+@endif
+
+@linklibrary "miniaudio";
+
+import stb_vorbis;
+
+// The declarations go to this unit's header, so every importer sees the API
+cpp header;
+
+#include <miniaudio/miniaudio.h>
+
+end.

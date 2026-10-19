@@ -1,0 +1,113 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  Decode.pcpp - miniaudio example: decodes every sound effect in
+  res\assets\audio\sfx with ma_decoder (Ogg Vorbis, through stb_vorbis) to
+  32-bit float samples and prints each file's format, length, peak and RMS
+  level. No audio device is opened: it runs headless, the same output on
+  every target.
+==============================================================================*/
+
+module exe Decode;
+
+// The program lands in repo\bin\output\Decode\bin, so the assets are three
+// folders up from it
+@ifdef TARGET_X86_64_LINUX_GNU
+@outputpath "$P:output/Decode_linux";
+@else
+@outputpath "$P:output/Decode";
+@endif
+
+import
+  SysUtils,
+  miniaudio;
+
+#include <math.h>
+
+const
+  // Frames read per ma_decoder_read_pcm_frames call
+  CChunkFrames: uint64 = 4096;
+
+// Decodes one file and prints what it holds; False when it cannot be decoded
+routine DecodeFile(const AName: string): bool;
+var
+  LPath: string;
+  LConfig: ma_decoder_config;
+  LDecoder: ma_decoder;
+  LFormat: ma_format;
+  LChannels: ma_uint32;
+  LRate: ma_uint32;
+  LLength: ma_uint64;
+  LRead: ma_uint64;
+  LBuffer: array of float32;
+  LSample: float32;
+  LPeak: float32;
+  LSquares: float64;
+  LTotal: uint64;
+  LCount: uint64;
+  LI: uint64;
+begin
+  LPath := ResolvePath("$P:../../../res/assets/audio/sfx/" + AName);
+  // 0 channels / 0 rate = the file's own; samples as 32-bit float
+  LConfig := ma_decoder_config_init(ma_format_f32, 0, 0);
+  if ma_decoder_init_file(LPath.c_str(), address of LConfig, address of LDecoder) <> MA_SUCCESS then
+    println("{}: cannot decode", AName);
+    return false;
+  end;
+  ma_decoder_get_data_format(address of LDecoder, address of LFormat, address of LChannels,
+    address of LRate, nil, 0);
+  ma_decoder_get_length_in_pcm_frames(address of LDecoder, address of LLength);
+  setlength(LBuffer, int64(CChunkFrames) * int64(LChannels));
+  LPeak := 0.0;
+  LSquares := 0.0;
+  LTotal := 0;
+  // Read the whole file chunk by chunk; the last chunk may be short
+  while true do
+    LRead := 0;
+    ma_decoder_read_pcm_frames(address of LDecoder, address of LBuffer[0], CChunkFrames, address of LRead);
+    if uint64(LRead) = 0 then
+      leave;
+    end;
+    LCount := uint64(LRead) * uint64(LChannels);
+    for LI := 0 to LCount - 1 do
+      LSample := LBuffer[LI];
+      if LSample < 0.0 then
+        LSample := -LSample;
+      end;
+      if LSample > LPeak then
+        LPeak := LSample;
+      end;
+      LSquares := LSquares + float64(LBuffer[LI]) * float64(LBuffer[LI]);
+    end;
+    LTotal := LTotal + uint64(LRead);
+  end;
+  ma_decoder_uninit(address of LDecoder);
+  println("{}: {} channel(s), {} Hz, {} frames ({:.3f} s), peak {:.4f}, rms {:.4f}",
+    AName, uint32(LChannels), uint32(LRate), LTotal, float64(LTotal) / float64(uint32(LRate)),
+    LPeak, sqrt(LSquares / float64(LTotal * uint64(LChannels))));
+  if LTotal <> uint64(LLength) then
+    println("  (the decoder reported {} frames)", uint64(LLength));
+  end;
+  return true;
+end;
+
+begin
+  println("miniaudio decoder, 32-bit float output");
+  DecodeFile("digthis.ogg");
+  DecodeFile("engine_player.ogg");
+  DecodeFile("explo_enemy.ogg");
+  DecodeFile("explo_rock.ogg");
+  DecodeFile("samp0.ogg");
+end.
