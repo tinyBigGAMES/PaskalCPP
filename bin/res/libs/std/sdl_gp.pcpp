@@ -1,0 +1,51 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  sdl_gp.pcpp - the SDL_gp unit (SDL_gp, header-only): `import sdl_gp;` uses
+  an immediate-mode 2D painter over SDL3's GPU API (rectangles, lines,
+  triangles, textured rectangles, transforms, blend modes) from PaskalCPP.
+  A self-describing vendor module: it owns every path it needs and imports
+  sdl3 for SDL's own. The implementation is a static library of its own,
+  libsdl_gp.a (one per target, built from its C source by PaskalCPP-Libs'
+  build-sdl_gp.cmd), linked by @linklibrary: every module of the program
+  shares the one copy.
+==============================================================================*/
+
+module unit sdl_gp;
+
+@addincludepath "$P:res/libs/vendor/sdl_gp/include";
+
+// The library of each target; everything it calls is SDL3's (import sdl3)
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/sdl_gp/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/sdl_gp/lib/x86_64-linux-gnu";
+@else
+  @message error "sdl_gp: unsupported target";
+@endif
+
+@linklibrary "sdl_gp";
+
+import sdl3;
+
+// The declarations go to this unit's header, so every importer sees the API
+cpp header;
+
+#include <SDL_gp.h>
+
+end.

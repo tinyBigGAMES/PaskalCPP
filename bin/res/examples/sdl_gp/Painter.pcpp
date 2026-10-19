@@ -1,0 +1,320 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  Painter.pcpp - SDL_gp example: 2D drawing over SDL3's GPU API. A row of
+  coloured rectangles, one spinning, a turning fan of lines, a triangle and
+  bouncing sprites from a texture made in code (a checker board, no image
+  file). Everything is drawn at a logical 800 x 450, scaled to fit the
+  window at any size and DPI (bars fill the rest). The window opens scaled
+  to its monitor's DPI and follows a move to a monitor with another one.
+  Escape or closing the window quits.
+==============================================================================*/
+
+module exe Painter;
+
+import
+  sdl3,
+  sdl_gp;
+
+const
+  CWidth: int32 = 800;
+  CHeight: int32 = 450;
+  CSpriteSize: int32 = 32;
+  CCells: int32 = 4;
+
+var
+  GWindow: ptr to SDL_Window;
+  GDevice: ptr to SDL_GPUDevice;
+  GSprite: SDL_GPImage;
+
+// SDL_gp's current colour from its four parts
+routine SetColor(const AR: uint8; const AG: uint8; const AB: uint8; const AA: uint8);
+var
+  LColor: SDL_Color;
+begin
+  LColor.r := AR;
+  LColor.g := AG;
+  LColor.b := AB;
+  LColor.a := AA;
+  SDL_GPSetColor(LColor);
+end;
+
+// An SDL_gp rectangle from its position and size
+routine Rect(const AX: float32; const AY: float32; const AW: float32; const AH: float32): SDL_GPRect;
+var
+  LResult: SDL_GPRect;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  LResult.w := AW;
+  LResult.h := AH;
+  return LResult;
+end;
+
+// An SDL_gp point
+routine Point(const AX: float32; const AY: float32): SDL_GPPoint;
+var
+  LResult: SDL_GPPoint;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  return LResult;
+end;
+
+// The sprite's texture: a CCells x CCells checker board of two colours,
+// drawn into an SDL surface and handed to SDL_gp as an image
+routine MakeSprite(): SDL_GPImage;
+var
+  LSurface: ptr to SDL_Surface;
+  LCell: SDL_Rect;
+  LCellSize: int32;
+  LX: int32;
+  LY: int32;
+  LResult: SDL_GPImage;
+begin
+  LSurface := SDL_CreateSurface(CSpriteSize, CSpriteSize, SDL_PIXELFORMAT_RGBA32);
+  if LSurface = nil then
+    println("SDL_CreateSurface failed: {}", SDL_GetError());
+    raise("SDL could not create the sprite surface");
+  end;
+  LCellSize := CSpriteSize div CCells;
+  LY := 0;
+  while LY < CCells do
+    LX := 0;
+    while LX < CCells do
+      LCell.x := LX * LCellSize;
+      LCell.y := LY * LCellSize;
+      LCell.w := LCellSize;
+      LCell.h := LCellSize;
+      if (LX + LY) mod 2 = 0 then
+        SDL_FillSurfaceRect(LSurface, address of LCell,
+          SDL_MapSurfaceRGBA(LSurface, 255, 200, 40, 255));
+      else
+        SDL_FillSurfaceRect(LSurface, address of LCell,
+          SDL_MapSurfaceRGBA(LSurface, 230, 70, 110, 255));
+      end;
+      LX := LX + 1;
+    end;
+    LY := LY + 1;
+  end;
+  LResult := SDL_GPCreateImage(LSurface);
+  SDL_DestroySurface(LSurface);
+  return LResult;
+end;
+
+// One frame in logical 800 x 450 coordinates; ATime = seconds since start
+routine DrawScene(const ATime: float32);
+var
+  LI: int32;
+  LAngle: float32;
+  LLine: SDL_GPLine;
+  LTriangle: SDL_GPTriangle;
+  LSprite: SDL_GPTexturedRect;
+begin
+  // A row of rectangles, one colour each
+  LI := 0;
+  while LI < 6 do
+    SetColor(uint8(40 + LI * 40), uint8(220 - LI * 30), 200, 255);
+    SDL_GPDrawFilledRect(Rect(40.0f + float32(LI) * 70.0f, 40.0, 56.0, 56.0));
+    LI := LI + 1;
+  end;
+
+  // A rectangle spinning around its own centre
+  SDL_GPPushTransform();
+  SDL_GPRotateAt(ATime, 640.0, 120.0);
+  SetColor(255, 255, 255, 255);
+  SDL_GPDrawFilledRect(Rect(590.0, 70.0, 100.0, 100.0));
+  SDL_GPPopTransform();
+
+  // A fan of lines turning slowly around a centre
+  LI := 0;
+  while LI < 24 do
+    LAngle := ATime * 0.5f + float32(LI) * 0.2618f;
+    LLine.a := Point(180.0, 300.0);
+    LLine.b := Point(180.0f + SDL_cosf(LAngle) * 110.0f, 300.0f + SDL_sinf(LAngle) * 110.0f);
+    SetColor(uint8(80 + LI * 7), 180, 255, 255);
+    SDL_GPDrawLine(LLine);
+    LI := LI + 1;
+  end;
+
+  // One triangle
+  LTriangle.a := Point(360.0, 400.0);
+  LTriangle.b := Point(460.0, 220.0);
+  LTriangle.c := Point(560.0, 400.0);
+  SetColor(120, 230, 120, 255);
+  SDL_GPDrawFilledTriangle(LTriangle);
+
+  // Sprites bouncing over the right side, blended so the texture's colours
+  // show as they are (white = no tint)
+  SDL_GPSetBlendMode(SDL_GP_BLENDMODE_BLEND);
+  SDL_GPSetImage(0, GSprite);
+  SetColor(255, 255, 255, 255);
+  LI := 0;
+  while LI < 3 do
+    LSprite.dst := Rect(600.0f + float32(LI) * 60.0f,
+      300.0f + SDL_sinf(ATime * 3.0f + float32(LI)) * 40.0f, 48.0, 48.0);
+    LSprite.src := Rect(0.0, 0.0, float32(CSpriteSize), float32(CSpriteSize));
+    SDL_GPDrawTexturedRect(0, LSprite);
+    LI := LI + 1;
+  end;
+  SDL_GPResetImage(0);
+  SDL_GPResetBlendMode();
+end;
+
+var
+  LDesc: SDL_GPDesc;
+  LEvent: SDL_Event;
+  LCmd: ptr to SDL_GPUCommandBuffer;
+  LTexture: ptr to SDL_GPUTexture;
+  LPixelW: uint32;
+  LPixelH: uint32;
+  LRunning: bool;
+  LScale: float32;
+  LNewScale: float32;
+  LWidth: int32;
+  LHeight: int32;
+  LFit: float32;
+  LFitH: float32;
+  LTime: float32;
+
+begin
+  if not SDL_Init(SDL_INIT_VIDEO) then
+    println("SDL_Init failed: {}", SDL_GetError());
+    raise("SDL could not start");
+  end;
+
+  // The GPU device takes the shader formats SDL_gp embeds: SDL picks the
+  // backend the system has (Vulkan, Direct3D 12, Metal)
+  GDevice := SDL_CreateGPUDevice(
+    SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL,
+    false, nil);
+  if GDevice = nil then
+    println("SDL_CreateGPUDevice failed: {}", SDL_GetError());
+    SDL_Quit();
+    raise("SDL could not create a GPU device");
+  end;
+
+  // DPI scaling as in examples\sdl3\Window: all the pixels, a window sized to
+  // 800 x 450 times its display scale, shown once it has that size
+  GWindow := SDL_CreateWindow("SDL_gp Painter", CWidth, CHeight,
+    SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+  if GWindow = nil then
+    println("SDL_CreateWindow failed: {}", SDL_GetError());
+    SDL_DestroyGPUDevice(GDevice);
+    SDL_Quit();
+    raise("SDL could not open a window");
+  end;
+  LScale := SDL_GetWindowDisplayScale(GWindow);
+  if LScale <= 0.0 then
+    LScale := 1.0;
+  end;
+  SDL_SetWindowSize(GWindow, int32(float32(CWidth) * LScale),
+    int32(float32(CHeight) * LScale));
+  SDL_ShowWindow(GWindow);
+  if not SDL_ClaimWindowForGPUDevice(GDevice, GWindow) then
+    println("SDL_ClaimWindowForGPUDevice failed: {}", SDL_GetError());
+    SDL_DestroyWindow(GWindow);
+    SDL_DestroyGPUDevice(GDevice);
+    SDL_Quit();
+    raise("SDL could not claim the window");
+  end;
+
+  // SDL_gp on that device and window; 0 = SDL_gp's default buffer sizes
+  LDesc.window := GWindow;
+  LDesc.gpu_device := GDevice;
+  if not SDL_GPSetup(address of LDesc) then
+    println("SDL_GPSetup failed: {}", SDL_GPGetErrorMessage(SDL_GPGetLastError()));
+    SDL_ReleaseWindowFromGPUDevice(GDevice, GWindow);
+    SDL_DestroyWindow(GWindow);
+    SDL_DestroyGPUDevice(GDevice);
+    SDL_Quit();
+    raise("SDL_gp could not start");
+  end;
+  GSprite := MakeSprite();
+
+  println("SDL_gp on {}: Escape closes", SDL_GetGPUDeviceDriver(GDevice));
+  println("window display scale {}", LScale);
+
+  LRunning := true;
+  while LRunning do
+    while SDL_PollEvent(address of LEvent) do
+      if LEvent.type = SDL_EVENT_QUIT then
+        LRunning := false;
+      else
+        if (LEvent.type = SDL_EVENT_KEY_DOWN) and (LEvent.key.key = SDLK_ESCAPE) then
+          LRunning := false;
+        else
+          if LEvent.type = SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED then
+            // A new display scale: the window's size follows by new / old
+            LNewScale := SDL_GetWindowDisplayScale(GWindow);
+            if (LNewScale > 0.0) and (LNewScale <> LScale) then
+              SDL_GetWindowSize(GWindow, address of LWidth, address of LHeight);
+              SDL_SetWindowSize(GWindow,
+                int32(float32(LWidth) * LNewScale / LScale),
+                int32(float32(LHeight) * LNewScale / LScale));
+              println("window display scale {} -> {}", LScale, LNewScale);
+              LScale := LNewScale;
+            end;
+          end;
+        end;
+      end;
+    end;
+
+    LTime := float32(float64(SDL_GetTicks()) / 1000.0);
+    LCmd := SDL_AcquireGPUCommandBuffer(GDevice);
+    if LCmd = nil then
+      println("SDL_AcquireGPUCommandBuffer failed: {}", SDL_GetError());
+      LRunning := false;
+    else
+      LTexture := nil;
+      if not SDL_WaitAndAcquireGPUSwapchainTexture(LCmd, GWindow, address of LTexture,
+        address of LPixelW, address of LPixelH) then
+        println("SDL_WaitAndAcquireGPUSwapchainTexture failed: {}", SDL_GetError());
+        LRunning := false;
+      end;
+      // No texture while the window is minimized: nothing to draw this frame
+      if (LTexture <> nil) and SDL_GPBegin(int32(LPixelW), int32(LPixelH)) then
+        // The whole window black, then the logical 800 x 450 fitted into it,
+        // centred: the smaller of the two scales keeps the aspect ratio
+        SetColor(0, 0, 0, 255);
+        SDL_GPClear();
+        LFit := float32(LPixelW) / float32(CWidth);
+        LFitH := float32(LPixelH) / float32(CHeight);
+        if LFitH < LFit then
+          LFit := LFitH;
+        end;
+        SDL_GPTranslate((float32(LPixelW) - float32(CWidth) * LFit) / 2.0f,
+          (float32(LPixelH) - float32(CHeight) * LFit) / 2.0f);
+        SDL_GPScale(LFit, LFit);
+        SetColor(24, 26, 34, 255);
+        SDL_GPDrawFilledRect(Rect(0.0, 0.0, float32(CWidth), float32(CHeight)));
+        DrawScene(LTime);
+        if not SDL_GPFlush(LCmd, LTexture) then
+          println("SDL_GPFlush failed: {}", SDL_GPGetErrorMessage(SDL_GPGetLastError()));
+          LRunning := false;
+        end;
+        SDL_GPEnd();
+      end;
+      SDL_SubmitGPUCommandBuffer(LCmd);
+    end;
+  end;
+
+  SDL_GPDestroyImage(GSprite);
+  SDL_GPShutdown();
+  SDL_ReleaseWindowFromGPUDevice(GDevice, GWindow);
+  SDL_DestroyWindow(GWindow);
+  SDL_DestroyGPUDevice(GDevice);
+  SDL_Quit();
+end.
