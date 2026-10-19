@@ -21,14 +21,6 @@
 
 module exe VorbisInfo;
 
-// The program lands in repo\bin\output\VorbisInfo\bin, so the assets are
-// three folders up from it
-@ifdef TARGET_X86_64_LINUX_GNU
-@outputpath "$P:output/VorbisInfo_linux";
-@else
-@outputpath "$P:output/VorbisInfo";
-@endif
-
 import
   SysUtils,
   stb_vorbis;
@@ -50,7 +42,7 @@ var
   LC: int32;
   LI: int32;
 begin
-  LPath := ResolvePath("$P:../../../res/assets/audio/" + AName);
+  LPath := ResolvePath("$P:../../res/assets/audio/" + AName);
   LVorbis := stb_vorbis_open_filename(LPath.c_str(), address of LError, nil);
   if LVorbis = nil then
     println("{}: cannot open (stb_vorbis error {})", AName, LError);

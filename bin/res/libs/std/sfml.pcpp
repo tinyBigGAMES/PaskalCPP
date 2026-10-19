@@ -1,0 +1,95 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  sfml.pcpp - the SFML unit: `import sfml;` uses SFML 3 (system, window,
+  graphics, audio, network) from PaskalCPP, called as C++ (sf::...). A
+  self-describing vendor module: it owns every include path, library path
+  and link library it needs, per official target.
+==============================================================================*/
+
+module unit sfml;
+
+// Self-describing vendor module: it owns every path it needs.
+
+@addincludepath "$P:res/libs/vendor/sfml/include";
+
+// SFML is built static: every includer must see SFML_STATIC (no dllimport).
+@cppdefine "SFML_STATIC";
+
+// SFML's own exported link lists (SFML*StaticTargets.cmake) and those of the
+// libraries it built (mbedtls adds bcrypt on Windows), static. Its modules in
+// dependency order, then those libraries, then the system libraries. On
+// Windows without sfml-main: console or GUI is the program's own @subsystem
+// choice. Linux links X11, Xrandr, Xcursor, Xi, udev and GL directly, from
+// vendor/linux64.
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/sfml/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/sfml/lib/x86_64-linux-gnu";
+  @addlibrarypath "$P:res/libs/vendor/linux64/lib";
+@else
+  @message error "sfml_import: unsupported target";
+@endif
+
+@linklibrary "sfml-graphics-s";
+@linklibrary "sfml-window-s";
+@linklibrary "sfml-audio-s";
+@linklibrary "sfml-network-s";
+@linklibrary "sfml-system-s";
+@linklibrary "freetype";
+@linklibrary "harfbuzz";
+@linklibrary "vorbisenc";
+@linklibrary "vorbisfile";
+@linklibrary "vorbis";
+@linklibrary "ogg";
+@linklibrary "FLAC";
+@linklibrary "ssh2";
+@linklibrary "mbedtls";
+@linklibrary "mbedx509";
+@linklibrary "mbedcrypto";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @linklibrary "opengl32";
+  @linklibrary "winmm";
+  @linklibrary "gdi32";
+  @linklibrary "ws2_32";
+  @linklibrary "crypt32";
+  @linklibrary "dnsapi";
+  @linklibrary "bcrypt";
+@elseif TARGET_X86_64_LINUX_GNU
+  @linklibrary "X11";
+  @linklibrary "Xrandr";
+  @linklibrary "Xcursor";
+  @linklibrary "Xi";
+  @linklibrary "udev";
+  @linklibrary "GL";
+  @linklibrary "resolv";
+  @linklibrary "m";
+  @linklibrary "pthread";
+  @linklibrary "dl";
+  @linklibrary "rt";
+@endif
+
+// Public: every importer calls SFML's C++ API.
+cpp header;
+
+#include <SFML/Graphics.hpp>
+#include <SFML/Audio.hpp>
+#include <SFML/Network.hpp>
+
+end.

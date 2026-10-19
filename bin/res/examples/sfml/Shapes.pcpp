@@ -1,0 +1,91 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  Shapes.pcpp - SFML's window and graphics modules: a window with a circle,
+  a spinning rectangle, a triangle and a line of text in
+  res\assets\fonts\JetBrainsMonoRegular.ttf. Escape or the close button ends
+  it.
+==============================================================================*/
+
+module exe Shapes;
+
+import
+  sfml,
+  SysUtils;
+
+routine Run();
+var
+  LWin: sf::RenderWindow(sf::VideoMode(sf::Vector2u(800, 450)), "PaskalCPP + SFML");
+  LFont: sf::Font;
+  LText: sf::Text(LFont, "PaskalCPP + SFML 3: Escape to quit", 22);
+  LCircle: sf::CircleShape(80.0f);
+  LRect: sf::RectangleShape(sf::Vector2f(160.0f, 60.0f));
+  LTriangle: sf::CircleShape(70.0f, 3);
+  LClock: sf::Clock;
+  LEvent: std::optional<sf::Event>;
+  LKey: ptr to const sf::Event::KeyPressed;
+  LAngle: float32;
+begin
+  LWin.setFramerateLimit(60);
+
+  if not LFont.openFromFile(ResolvePath("$P:../../res/assets/fonts/JetBrainsMonoRegular.ttf")) then
+    println("font not found");
+    return;
+  end;
+  LText.setFillColor(sf::Color(230, 230, 230));
+  LText.setPosition(sf::Vector2f(20.0f, 20.0f));
+
+  LCircle.setFillColor(sf::Color(40, 160, 220));
+  LCircle.setOutlineColor(sf::Color::White);
+  LCircle.setOutlineThickness(4.0f);
+  LCircle.setPosition(sf::Vector2f(80.0f, 160.0f));
+
+  // The rectangle turns around its own centre.
+  LRect.setFillColor(sf::Color(255, 140, 0));
+  LRect.setOrigin(sf::Vector2f(80.0f, 30.0f));
+  LRect.setPosition(sf::Vector2f(400.0f, 240.0f));
+
+  LTriangle.setFillColor(sf::Color(120, 200, 80));
+  LTriangle.setPosition(sf::Vector2f(560.0f, 170.0f));
+
+  while LWin.isOpen() do
+    LEvent := LWin.pollEvent();
+    while LEvent.has_value() do
+      if LEvent->is<sf::Event::Closed>() then
+        LWin.close();
+      end;
+      LKey := LEvent->getIf<sf::Event::KeyPressed>();
+      if (LKey <> nil) and (LKey^.scancode = sf::Keyboard::Scancode::Escape) then
+        LWin.close();
+      end;
+      LEvent := LWin.pollEvent();
+    end;
+
+    // 90 degrees a second, from the time since the start.
+    LAngle := LClock.getElapsedTime().asSeconds() * 90.0f;
+    LRect.setRotation(sf::degrees(LAngle));
+
+    LWin.clear(sf::Color(24, 24, 32));
+    LWin.draw(LCircle);
+    LWin.draw(LRect);
+    LWin.draw(LTriangle);
+    LWin.draw(LText);
+    LWin.display();
+  end;
+end;
+
+begin
+  Run();
+end.

@@ -21,14 +21,6 @@
 
 module exe PlaySound;
 
-// The program lands in repo\bin\output\PlaySound\bin, so the assets are
-// three folders up from it
-@ifdef TARGET_X86_64_LINUX_GNU
-@outputpath "$P:output/PlaySound_linux";
-@else
-@outputpath "$P:output/PlaySound";
-@endif
-
 import
   SysUtils,
   miniaudio;
@@ -48,7 +40,7 @@ var
   LSecond: int32;
 
 begin
-  LPath := ResolvePath("$P:../../../res/assets/audio/music/song01.ogg");
+  LPath := ResolvePath("$P:../../res/assets/audio/music/song01.ogg");
   // nil config = the default playback device at its own format
   if ma_engine_init(nil, address of LEngine) <> MA_SUCCESS then
     println("no playback device could be opened");

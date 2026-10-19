@@ -21,14 +21,6 @@
 
 module exe FontGlyph;
 
-// The program lands in repo\bin\output\FontGlyph\bin, so the assets are
-// three folders up from it
-@ifdef TARGET_X86_64_LINUX_GNU
-@outputpath "$P:output/FontGlyph_linux";
-@else
-@outputpath "$P:output/FontGlyph";
-@endif
-
 import
   SysUtils,
   stb_truetype;
@@ -90,7 +82,7 @@ var
   LScale: float32;
 
 begin
-  if not LoadFile(ResolvePath("$P:../../../res/assets/fonts/JetBrainsMonoRegular.ttf"), LData) then
+  if not LoadFile(ResolvePath("$P:../../res/assets/fonts/JetBrainsMonoRegular.ttf"), LData) then
     println("cannot read JetBrainsMonoRegular.ttf");
     return;
   end;

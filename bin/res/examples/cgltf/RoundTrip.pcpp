@@ -22,12 +22,6 @@
 
 module exe RoundTrip;
 
-@ifdef TARGET_X86_64_LINUX_GNU
-@outputpath "$P:output/RoundTrip_linux";
-@else
-@outputpath "$P:output/RoundTrip";
-@endif
-
 import
   cgltf;
 

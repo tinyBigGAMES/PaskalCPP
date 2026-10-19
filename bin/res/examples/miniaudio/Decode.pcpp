@@ -22,14 +22,6 @@
 
 module exe Decode;
 
-// The program lands in repo\bin\output\Decode\bin, so the assets are three
-// folders up from it
-@ifdef TARGET_X86_64_LINUX_GNU
-@outputpath "$P:output/Decode_linux";
-@else
-@outputpath "$P:output/Decode";
-@endif
-
 import
   SysUtils,
   miniaudio;
@@ -59,7 +51,7 @@ var
   LCount: uint64;
   LI: uint64;
 begin
-  LPath := ResolvePath("$P:../../../res/assets/audio/sfx/" + AName);
+  LPath := ResolvePath("$P:../../res/assets/audio/sfx/" + AName);
   // 0 channels / 0 rate = the file's own; samples as 32-bit float
   LConfig := ma_decoder_config_init(ma_format_f32, 0, 0);
   if ma_decoder_init_file(LPath.c_str(), address of LConfig, address of LDecoder) <> MA_SUCCESS then

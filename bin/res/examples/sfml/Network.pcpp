@@ -1,0 +1,91 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  Network.pcpp - SFML's system and network modules, no window: a TCP
+  listener on a free local port, a client connected to it, one sf::Packet
+  sent and read back on the other side. Runs headless and prints the same
+  on every target.
+==============================================================================*/
+
+module exe Network;
+
+import
+  sfml;
+
+routine Run(): bool;
+var
+  LListener: sf::TcpListener;
+  LClient: sf::TcpSocket;
+  LServer: sf::TcpSocket;
+  LOut: sf::Packet;
+  LIn: sf::Packet;
+  LPort: uint16;
+  LText: std::string;
+  LNumber: int32;
+  LValue: float32;
+  LFlag: bool;
+begin
+  // Any free port on this machine: the number itself differs per run.
+  if LListener.listen(sf::Socket::AnyPort) <> sf::Socket::Status::Done then
+    println("listen failed");
+    return false;
+  end;
+  LPort := LListener.getLocalPort();
+  println("listening: {}", LPort <> 0);
+
+  // A loopback connect completes in the kernel, so accept() after it does not block.
+  if LClient.connect(sf::IpAddress::LocalHost, LPort) <> sf::Socket::Status::Done then
+    println("connect failed");
+    return false;
+  end;
+  if LListener.accept(LServer) <> sf::Socket::Status::Done then
+    println("accept failed");
+    return false;
+  end;
+  println("connected from: {}", LServer.getRemoteAddress().value().toString());
+
+  // Packed in order, read back in the same order.
+  LText := "hello from PaskalCPP";
+  LNumber := 42;
+  LValue := 2.5f;
+  LFlag := true;
+  LOut << LText << LNumber << LValue << LFlag;
+  println("packet bytes: {}", LOut.getDataSize());
+  if LClient.send(LOut) <> sf::Socket::Status::Done then
+    println("send failed");
+    return false;
+  end;
+
+  if LServer.receive(LIn) <> sf::Socket::Status::Done then
+    println("receive failed");
+    return false;
+  end;
+  LText := "";
+  LNumber := 0;
+  LValue := 0.0f;
+  LFlag := false;
+  LIn >> LText >> LNumber >> LValue >> LFlag;
+  println("received: '{}' {} {} {}", LText, LNumber, LValue, LFlag);
+  println("whole packet read: {}", LIn.endOfPacket());
+  return true;
+end;
+
+begin
+  if Run() then
+    println("done");
+  else
+    println("failed");
+  end;
+end.

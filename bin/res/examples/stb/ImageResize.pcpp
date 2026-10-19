@@ -22,14 +22,6 @@
 
 module exe ImageResize;
 
-// The program lands in repo\bin\output\ImageResize\bin, so the assets are
-// three folders up from it
-@ifdef TARGET_X86_64_LINUX_GNU
-@outputpath "$P:output/ImageResize_linux";
-@else
-@outputpath "$P:output/ImageResize";
-@endif
-
 import
   SysUtils,
   stb_image,
@@ -52,7 +44,7 @@ var
   LI: int64;
 
 begin
-  LInPath := ResolvePath("$P:../../../res/assets/images/paskalcpp.png");
+  LInPath := ResolvePath("$P:../../res/assets/images/paskalcpp.png");
   LOutPath := ResolvePath("$P:paskalcpp_64.png");
 
   // Load as RGBA whatever the file holds; LN is what the file holds

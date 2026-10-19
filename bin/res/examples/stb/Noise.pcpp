@@ -20,12 +20,6 @@
 
 module exe Noise;
 
-@ifdef TARGET_X86_64_LINUX_GNU
-@outputpath "$P:output/Noise_linux";
-@else
-@outputpath "$P:output/Noise";
-@endif
-
 import
   stb_perlin;
 
