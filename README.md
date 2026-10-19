@@ -154,7 +154,7 @@ To fix it:
 
 The first build for a target also compiles the libraries every program links (the C runtime, libc++, libc++abi, libunwind, compiler_rt and the system import libraries) and keeps them in zig's cache, `bin\res\zig\.zig-cache`. That build can take a few minutes.
 
-Later builds for that target reuse them, at another optimize level too, and take seconds. The first build for the other target (x86_64-linux-gnu) compiles its own libraries once in the same way. Deleting `bin\res\zig\.zig-cache` makes the next build of each target slow again.
+Later builds for that target reuse them, at another optimize level too, and take seconds. The first build for the other target (x86_64-linux-gnu) compiles its own libraries once in the same way. Deleting `bin\res\zig\.zig-cache` makes the next build of each target slow again. How a build works is in [Building](https://paskalcpp.org/docs/build.html).
 
 </details>
 
