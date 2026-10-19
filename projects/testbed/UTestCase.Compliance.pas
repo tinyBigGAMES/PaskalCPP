@@ -150,6 +150,7 @@ begin
   DoAdd('mod_import_err_own_module', 'mod', cmCheck, [], [], [], '');
   DoAdd('mod_import_bare', 'mod', cmRun, [], [], [], '');
   DoAdd('mod_import_bare_err_ambiguous', 'mod', cmCheck, [], [], [], '');
+  DoAdd('mod_import_cpp_type', 'mod', cmRun, [], [], [], '');
   DoAdd('mod_initfinal', 'mod', cmRun, [], [], [], '');
   DoAdd('mod_initfinal_err_twice', 'mod', cmCheck, [], [], [], '');
   DoAdd('mod_initfinal_err_order', 'mod', cmCheck, [], [], [], '');

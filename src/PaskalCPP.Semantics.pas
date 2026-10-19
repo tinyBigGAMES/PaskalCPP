@@ -12146,6 +12146,7 @@ var
   LDecl: TPCTypeDecl;
   LFound: TList<TPCNode>;
   LSpelling: string;
+  LIndex: Integer;
 begin
   if Length(AType.Parts) <> 1 then
   begin
@@ -12175,6 +12176,14 @@ begin
   try
     // DoResolveName's order, without the intrinsics (none is a type)
     DoLookup(LName, LFound);
+    // A unit's name is a unit only before '.' (Module.Type above); in a type
+    // position it is never a candidate, so a C/C++ type spelled as an imported
+    // unit (stb_vorbis in the stb_vorbis unit) is reached as C/C++
+    for LIndex := LFound.Count - 1 downto 0 do
+    begin
+      if LFound[LIndex] is TPCImport then
+        LFound.Delete(LIndex);
+    end;
     if LFound.Count > 0 then
       DoBindFoundType(AType, LName, LFound)
     else if DoUsedLater(LName) <> nil then
