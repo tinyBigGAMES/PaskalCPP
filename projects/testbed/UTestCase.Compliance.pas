@@ -521,6 +521,9 @@ begin
   DoAdd('expr_arithmetic_err_compound', 'expr', cmCheck, [], [], [], '');
   DoAdd('expr_arithmetic_err_div_assign', 'expr', cmCheck, [], [], [], '');
   DoAdd('expr_arithmetic_err_char', 'expr', cmCheck, [], [], [], '');
+  DoAdd('expr_float_const', 'expr', cmRun, [], [], [], '');
+  DoAdd('expr_float_const_err_inexact', 'expr', cmCheck, [], [], [], '');
+  DoAdd('expr_float_const_err_lost_bit', 'expr', cmCheck, [], [], [], '');
   DoAdd('expr_bitwise', 'expr', cmRun, [], [], [], '');
   DoAdd('expr_bitwise_err_float', 'expr', cmCheck, [], [], [], '');
   DoAdd('expr_bitwise_err_shift_count', 'expr', cmCheck, [], [], [], '');

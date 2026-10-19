@@ -768,6 +768,10 @@ type
     function DoFoldUnary(const AUnary: TPCUnary; const AOperand: TPCExpr): Boolean;
     procedure DoFoldConversion(const AExpr: TPCExpr; const AOperand: TPCExpr; const ATarget: TPCTypeExpr);
     procedure DoFoldTernary(const ATernary: TPCTernary);
+    function DoFloatOperand(const AExpr: TPCExpr; out AValue: Double): Boolean;
+    function DoStoreFloat(const AExpr: TPCExpr; const AToken: TPCTokenKind; const AValue: Double): Boolean;
+    procedure DoFoldFloatBinary(const ABinary: TPCBinary);
+    procedure DoFoldFloatUnary(const AUnary: TPCUnary; const AOperand: TPCExpr);
     procedure DoBinary(const ABinary: TPCBinary);
     function DoIsAssignable(const AExpr: TPCExpr): Boolean;
     function DoIsAddressable(const AExpr: TPCExpr; out AIsConst: Boolean): Boolean;
@@ -4316,7 +4320,16 @@ var
   LBits: Integer;
   LIsUnsigned: Boolean;
   LFromChoice: Boolean;
+  LValue: Double;
 begin
+  // A cast of a folded number to float32 / float64 holds the converted
+  // value (float32(0.1) is the float32 nearest 0.1, as C++ converts it)
+  if (ATarget <> nil) and DoBuiltinOf(ATarget, LTarget) and ((LTarget = tkKwFloat32) or (LTarget = tkKwFloat64)) then
+  begin
+    if DoFloatOperand(AOperand, LValue) then
+      DoStoreFloat(AExpr, LTarget, LValue);
+    Exit;
+  end;
   // A cast of a folded integer-family constant to a PaskalCPP integer, bool,
   // char or wchar type: the C++23 conversion (modulo 2^N; to bool <> 0).
   // The node keeps the type it names (an alias stays the alias). F38: a
@@ -4345,6 +4358,8 @@ end;
 procedure TPCSemantics.DoFoldTernary(const ATernary: TPCTernary);
 var
   LChosen: TPCExpr;
+  LToken: TPCTokenKind;
+  LValue: Double;
 begin
   // ?: with a folded condition and branches of one type: the chosen
   // branch's value (C++ evaluates only that one; the other need not fold)
@@ -4354,12 +4369,160 @@ begin
     LChosen := ATernary.ThenExpr
   else
     LChosen := ATernary.ElseExpr;
+  // A float ?: holds the chosen branch as a float value, converted to the
+  // ?:'s type as C++ converts it (an integer branch included)
+  if DoBuiltinOf(ATernary.ResolvedType, LToken) and ((LToken = tkKwFloat32) or (LToken = tkKwFloat64)) then
+  begin
+    if DoFloatOperand(LChosen, LValue) then
+      DoStoreFloat(ATernary, LToken, LValue);
+    Exit;
+  end;
   if not LChosen.HasConstValue then
     Exit;
   ATernary.HasConstValue := True;
   ATernary.ConstIsUnsigned := LChosen.ConstIsUnsigned;
   ATernary.ConstInt := LChosen.ConstInt;
   ATernary.ConstUInt := LChosen.ConstUInt;
+end;
+
+function TPCSemantics.DoFloatOperand(const AExpr: TPCExpr; out AValue: Double): Boolean;
+var
+  LToken: TPCTokenKind;
+  LBits: Integer;
+  LIsUnsigned: Boolean;
+begin
+  // The value of a folded float constant, or of a folded integer constant
+  // a double holds exactly (|v| <= 2^53: C++'s conversion then rounds once,
+  // where the value meets a float32 or float64). bool, char, wchar and a
+  // choice are no arithmetic operand (SM0250) and never one here
+  Result := False;
+  AValue := 0.0;
+  if (AExpr = nil) or DoIsPoisoned(AExpr) then
+    Exit;
+  if AExpr.HasConstFloat then
+  begin
+    AValue := AExpr.ConstFloat;
+    Exit(True);
+  end;
+  if not AExpr.HasConstValue or not DoTokenOf(AExpr, LToken) or not DoIntTypeInfo(LToken, LBits, LIsUnsigned) then
+    Exit;
+  if AExpr.ConstIsUnsigned then
+  begin
+    if AExpr.ConstUInt > UInt64(9007199254740992) then
+      Exit;
+    AValue := DoUIntToDouble(AExpr.ConstUInt);
+  end
+  else
+  begin
+    if (AExpr.ConstInt > 9007199254740992) or (AExpr.ConstInt < -9007199254740992) then
+      Exit;
+    AValue := AExpr.ConstInt;
+  end;
+  Result := True;
+end;
+
+function TPCSemantics.DoStoreFloat(const AExpr: TPCExpr; const AToken: TPCTokenKind; const AValue: Double): Boolean;
+var
+  LMask: TArithmeticExceptionMask;
+  LSingle: Single;
+  LValue: Double;
+begin
+  // Stores a folded float value on AExpr in its type: a float32 one rounded
+  // to float32 (C++'s float arithmetic and conversion). A value that is no
+  // finite number (an overflow, a division by zero) or past float32's range
+  // is not stored: the expression stays unfolded, C++'s as before
+  Result := False;
+  if IsNan(AValue) or IsInfinite(AValue) then
+    Exit;
+  LValue := AValue;
+  if AToken = tkKwFloat32 then
+  begin
+    if Abs(LValue) > MaxSingle then
+      Exit;
+    // A float32 below its normal range rounds to a denormal or 0, as clang:
+    // the RTL's underflow exception stays masked for the conversion
+    LMask := GetExceptionMask();
+    SetExceptionMask(exAllArithmeticExceptions);
+    try
+      LSingle := LValue;
+      LValue := LSingle;
+    finally
+      SetExceptionMask(LMask);
+    end;
+  end
+  else if AToken <> tkKwFloat64 then
+    Exit;
+  AExpr.HasConstFloat := True;
+  AExpr.ConstFloat := LValue;
+  Result := True;
+end;
+
+procedure TPCSemantics.DoFoldFloatBinary(const ABinary: TPCBinary);
+var
+  LToken: TPCTokenKind;
+  LLeft: Double;
+  LRight: Double;
+  LResult: Double;
+  LSingle: Single;
+  LMask: TArithmeticExceptionMask;
+begin
+  // + - * / of two folded constants with a float result (BNF sec 6 "a
+  // constant that fits": -1.0, 1.0 + 0.5 into a float32), computed as C++
+  // computes it: in the result type, each operand converted to it first.
+  // Called after DoBinaryType typed the node; a comparison is not folded
+  if not (ABinary.Op in [boAdd, boSub, boMul, boDiv]) then
+    Exit;
+  if not DoBuiltinOf(ABinary.ResolvedType, LToken) or not ((LToken = tkKwFloat32) or (LToken = tkKwFloat64)) then
+    Exit;
+  if not DoFloatOperand(ABinary.Left, LLeft) or not DoFloatOperand(ABinary.Right, LRight) then
+    Exit;
+  LMask := GetExceptionMask();
+  SetExceptionMask(exAllArithmeticExceptions);
+  try
+    // A float32 result: an integer operand becomes a float32 first (one
+    // rounding); the float32 operation's exact result fits a double, so the
+    // double operation rounded once to float32 below gives C++'s value
+    if LToken = tkKwFloat32 then
+    begin
+      if (Abs(LLeft) > MaxSingle) or (Abs(LRight) > MaxSingle) then
+        Exit;
+      LSingle := LLeft;
+      LLeft := LSingle;
+      LSingle := LRight;
+      LRight := LSingle;
+    end;
+    case ABinary.Op of
+      boAdd:
+        LResult := LLeft + LRight;
+      boSub:
+        LResult := LLeft - LRight;
+      boMul:
+        LResult := LLeft * LRight;
+    else
+      LResult := LLeft / LRight;
+    end;
+  finally
+    SetExceptionMask(LMask);
+  end;
+  DoStoreFloat(ABinary, LToken, LResult);
+end;
+
+procedure TPCSemantics.DoFoldFloatUnary(const AUnary: TPCUnary; const AOperand: TPCExpr);
+var
+  LToken: TPCTokenKind;
+  LValue: Double;
+begin
+  // - / + of a folded constant with a float result: -1.0 is a constant
+  // (BNF sec 6 "a constant that fits"); called after the node is typed
+  if not (AUnary.Op in [uoNegate, uoPlus]) then
+    Exit;
+  if not DoBuiltinOf(AUnary.ResolvedType, LToken) or not ((LToken = tkKwFloat32) or (LToken = tkKwFloat64)) then
+    Exit;
+  if not DoFloatOperand(AOperand, LValue) then
+    Exit;
+  if AUnary.Op = uoNegate then
+    LValue := -LValue;
+  DoStoreFloat(AUnary, LToken, LValue);
 end;
 
 {$IFDEF PC_SEM_FOLD_Q}
@@ -4399,6 +4562,7 @@ begin
   DoNoteMisalignedOperand(ABinary.Left);
   DoNoteMisalignedOperand(ABinary.Right);
   DoFoldBinary(ABinary);
+  DoFoldFloatBinary(ABinary);
 end;
 
 function TPCSemantics.DoIsAssignable(const AExpr: TPCExpr): Boolean;
@@ -4585,6 +4749,8 @@ begin
           AUnary.ResolvedType := FAst.BuiltinType(LNumeric)
         else
           AUnary.ResolvedType := FAst.OpaqueType();
+        // -C of a folded float constant is a constant too (-1.0)
+        DoFoldFloatUnary(AUnary, LOperand);
       end;
     uoAddressOf:
       begin
@@ -4699,6 +4865,8 @@ begin
       end
       else
         AUnary.ResolvedType := FAst.OpaqueType();
+      // +C of a folded float constant is a constant too
+      DoFoldFloatUnary(AUnary, LOperand);
     end;
   end;
 end;

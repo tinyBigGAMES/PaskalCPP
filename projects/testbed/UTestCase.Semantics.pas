@@ -1864,7 +1864,7 @@ begin
       // would convert hiddenly is SM0200 (E05 E07 E21 E34 E75 E85 E109-E111 E113-E115), a bool /
       // char operand of arithmetic / bitwise SM0250 (E103 E120-E126)
       Check(DoInitsText(AModule) =
-        'E01=int32=5 | E02=int32 | E03=int64 | E04=uint32 | E05=error | E06=float64 | E07=error | E08=int32=3' +
+        'E01=int32=5 | E02=int32 | E03=int64 | E04=uint32 | E05=error | E06=float64~3.5 | E07=error | E08=int32=3' +
         ' | E09=int32=-1 | E10=error | E11=uint32=0 | E12=error | E13=error | E14=int32=-2147483648 | E15=error' +
         ' | E16=int32=-4 | E17=int8=44 | E18=uint8=255 | E19=bool=0 | E20=bool=1 | E21=error | E22=int32 | E23=int32=10' +
         ' | E24=int32 | E25=char | E26=int32 | E27=error | E28=ptr to int32 | E29=int32 | E30=error | E31=string' +

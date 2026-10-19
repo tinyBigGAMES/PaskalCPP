@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_float_const_err_inexact.pcpp - break step of expr_float_const.pcpp:
+  the constant 1.0 / 3.0 stored into a float32 (SM0200): float32 cannot
+  hold one third exactly; write float32(1.0 / 3.0)
+
+  How to check, from repo\bin:
+    pcpp res\tests\expr_float_const_err_inexact.pcpp
+    pcpp res\tests\expr_float_const_err_inexact.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe expr_float_const_err_inexact;
+
+var
+  LF: float32;
+
+begin
+  LF := 1.0 / 3.0; // ERROR SM0200@9: 'float64' does not convert implicitly to 'float32'
+end.
