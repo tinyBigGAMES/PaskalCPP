@@ -158,6 +158,25 @@ Later builds for that target reuse them, at another optimize level too, and take
 
 </details>
 
+<details>
+<summary><b>A Linux window opens small under WSL2, and the program reads a display scale of 1</b></summary>
+
+A Linux build run on Windows (`-t x86_64-linux-gnu -r`) runs under WSL2, and its window is shown by WSLg, whose compositor (Weston) gives every Linux program a display scale of 1 by default. A program that sizes its window by that scale (the SDL3 examples call `SDL_GetWindowDisplayScale`) opens at 1x on a 150% monitor, smaller than the same program built for Windows.
+
+To make WSLg follow each monitor's Windows scale, create the file `.wslgconfig` in your Windows user folder (`C:\Users\<you>\.wslgconfig` for WSL from the Microsoft Store; `C:\ProgramData\Microsoft\WSL\.wslgconfig` for the WSL built into Windows) holding:
+
+```text
+[system-distro-env]
+WESTON_RDP_HI_DPI_SCALING=true
+WESTON_RDP_FRACTIONAL_HI_DPI_SCALING=true
+```
+
+then run `wsl --shutdown` (WSLg reads the file when it starts). The Linux window then opens at the size Windows scales it to on that monitor. The program itself still reads a scale of 1: Windows enlarges the window, the program does not draw at the higher resolution.
+
+Leave out `WESTON_RDP_DEBUG_DESKTOP_SCALING_FACTOR`: it forces one factor on every monitor instead of each monitor's own.
+
+</details>
+
 More answers are in the [FAQ](https://paskalcpp.org/docs/faq.html).
 
 ## 🤝 Contributing

@@ -74,8 +74,10 @@ begin
 end;
 
 // The sprite's texture: a CCells x CCells checker board of two colours,
-// drawn into an SDL surface and handed to SDL_gp as an image
-routine MakeSprite(): SDL_GPImage;
+// drawn into an SDL surface and handed to SDL_gp as an image. The surface is
+// made in AFormat, the swapchain's pixel format: SDL_gp converts (and warns
+// about) a surface in any other format
+routine MakeSprite(const AFormat: SDL_PixelFormat): SDL_GPImage;
 var
   LSurface: ptr to SDL_Surface;
   LCell: SDL_Rect;
@@ -84,7 +86,7 @@ var
   LY: int32;
   LResult: SDL_GPImage;
 begin
-  LSurface := SDL_CreateSurface(CSpriteSize, CSpriteSize, SDL_PIXELFORMAT_RGBA32);
+  LSurface := SDL_CreateSurface(CSpriteSize, CSpriteSize, AFormat);
   if LSurface = nil then
     println("SDL_CreateSurface failed: {}", SDL_GetError());
     raise("SDL could not create the sprite surface");
@@ -188,6 +190,7 @@ var
   LFit: float32;
   LFitH: float32;
   LTime: float32;
+  LPriority: SDL_LogPriority;
 
 begin
   if not SDL_Init(SDL_INIT_VIDEO) then
@@ -231,10 +234,16 @@ begin
     raise("SDL could not claim the window");
   end;
 
-  // SDL_gp on that device and window; 0 = SDL_gp's default buffer sizes
+  // SDL_gp on that device and window; 0 = SDL_gp's default buffer sizes.
+  // SDL_GPSetup makes its internal white texture as RGBA32 and logs a
+  // conversion warning wherever the swapchain is not RGBA: application
+  // warnings are muted for that one call only, then the level is restored
   LDesc.window := GWindow;
   LDesc.gpu_device := GDevice;
+  LPriority := SDL_GetLogPriority(SDL_LOG_CATEGORY_APPLICATION);
+  SDL_SetLogPriority(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_ERROR);
   if not SDL_GPSetup(address of LDesc) then
+    SDL_SetLogPriority(SDL_LOG_CATEGORY_APPLICATION, LPriority);
     println("SDL_GPSetup failed: {}", SDL_GPGetErrorMessage(SDL_GPGetLastError()));
     SDL_ReleaseWindowFromGPUDevice(GDevice, GWindow);
     SDL_DestroyWindow(GWindow);
@@ -242,7 +251,11 @@ begin
     SDL_Quit();
     raise("SDL_gp could not start");
   end;
-  GSprite := MakeSprite();
+  SDL_SetLogPriority(SDL_LOG_CATEGORY_APPLICATION, LPriority);
+  // The swapchain's pixel format, read at run time: it differs per backend
+  // and changes with the swapchain's parameters
+  GSprite := MakeSprite(SDL_GetPixelFormatFromGPUTextureFormat(
+    SDL_GetGPUSwapchainTextureFormat(GDevice, GWindow)));
 
   println("SDL_gp on {}: Escape closes", SDL_GetGPUDeviceDriver(GDevice));
   println("window display scale {}", LScale);
