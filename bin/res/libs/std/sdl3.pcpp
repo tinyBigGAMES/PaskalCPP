@@ -1,0 +1,67 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  sdl3.pcpp - the SDL3 unit: `import sdl3;` uses SDL 3 (windows, rendering,
+  GPU, input, audio, gamepads, ...) from PaskalCPP. A self-describing vendor
+  module: it owns every include path, library path and link library it
+  needs, per official target.
+==============================================================================*/
+
+module unit sdl3;
+
+// Self-describing vendor module: it owns every path it needs.
+
+@addincludepath "$P:res/libs/vendor/sdl3/include";
+
+// SDL's own link list (its sdl3.pc), static. On Windows without SDL's
+// -mwindows: console or GUI is the program's own @subsystem choice. On Linux
+// SDL loads X11, OpenGL, Vulkan and the audio libraries itself at run time
+// (dlopen), so only the C runtime's libraries are linked.
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/sdl3/lib/x86_64-windows-gnu";
+  @linklibrary "kernel32";
+  @linklibrary "user32";
+  @linklibrary "gdi32";
+  @linklibrary "winmm";
+  @linklibrary "imm32";
+  @linklibrary "ole32";
+  @linklibrary "oleaut32";
+  @linklibrary "version";
+  @linklibrary "uuid";
+  @linklibrary "advapi32";
+  @linklibrary "setupapi";
+  @linklibrary "shell32";
+  @linklibrary "dinput8";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/sdl3/lib/x86_64-linux-gnu";
+  @linklibrary "m";
+  @linklibrary "pthread";
+  @linklibrary "dl";
+  @linklibrary "rt";
+@else
+  @message error "sdl3_import: unsupported target";
+@endif
+
+@linklibrary "SDL3";
+
+// The header goes to this unit's header, so every importer sees SDL's API
+cpp header;
+
+#include <SDL3/SDL.h>
+
+end.
