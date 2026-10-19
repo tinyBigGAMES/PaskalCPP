@@ -1,0 +1,104 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  Simple.pcpp - rlImGui example (after rlImGui's examples/simple.cpp): Dear
+  ImGui's demo window and a window of our own on a raylib window. ImGui's
+  API is called as written in C++ (ImGui::Begin, ImGui::Text, ...): it is
+  plain mixed C++ inside PaskalCPP code. The window shows a raylib texture
+  through rlImGuiImage and a Font Awesome icon (the font rlImGui loads).
+==============================================================================*/
+
+module exe Simple;
+
+import
+  raylib,
+  rlimgui;
+
+const
+  CScreenWidth: int32 = 1280;
+  CScreenHeight: int32 = 800;
+
+var
+  LImage: Image;
+  LTexture: Texture2D;
+  LShowDemo: bool;
+  LShowOwn: bool;
+  LClicks: int32;
+
+begin
+  // HighDPI: raylib sizes the window for the monitor's DPI scale (and follows
+  // it to another monitor) and works in logical pixels; rlImGui hands ImGui
+  // that scale, so ImGui's text and widgets grow with it and its fonts are
+  // drawn at the full resolution. Without the flag raylib 6.2 reports a DPI
+  // scale of 1 and ImGui stays at its 1x size on a high DPI monitor.
+  SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT | FLAG_WINDOW_RESIZABLE |
+    FLAG_WINDOW_HIGHDPI);
+  InitWindow(CScreenWidth, CScreenHeight, "PaskalCPP - rlImGui simple");
+  SetTargetFPS(144);
+  // true = the dark style
+  rlImGuiSetup(true);
+
+  // A texture made in code, so the example needs no file beside it
+  LImage := GenImageChecked(128, 128, 16, 16, ORANGE, DARKBLUE);
+  LTexture := LoadTextureFromImage(LImage);
+  UnloadImage(LImage);
+
+  LShowDemo := true;
+  LShowOwn := true;
+  LClicks := 0;
+
+  while not WindowShouldClose() do
+    BeginDrawing();
+    ClearBackground(DARKGRAY);
+
+    rlImGuiBegin();
+
+    if LShowDemo then
+      ImGui::ShowDemoWindow(address of LShowDemo);
+    end;
+
+    if LShowOwn then
+      if ImGui::Begin("PaskalCPP window", address of LShowOwn) then
+        ImGui::TextUnformatted(ICON_FA_JEDI);
+        ImGui::SameLine();
+        ImGui::TextUnformatted("Dear ImGui from PaskalCPP");
+        ImGui::Checkbox("Show the demo window", address of LShowDemo);
+        if ImGui::Button("Click me") then
+          LClicks := LClicks + 1;
+        end;
+        ImGui::SameLine();
+        ImGui::Text("clicked %d times", LClicks);
+        ImGui::Text("%.1f frames a second", float64(GetFPS()));
+        rlImGuiImage(address of LTexture);
+      end;
+      ImGui::End();
+    end;
+
+    rlImGuiEnd();
+
+    if IsMouseButtonDown(MOUSE_BUTTON_LEFT) then
+      DrawText("Down", 10, 10, 20, GREEN);
+    end;
+    if IsWindowFocused() then
+      DrawText("Focused", 100, 10, 20, WHITE);
+    end;
+
+    EndDrawing();
+  end;
+
+  rlImGuiShutdown();
+  UnloadTexture(LTexture);
+  CloseWindow();
+end.

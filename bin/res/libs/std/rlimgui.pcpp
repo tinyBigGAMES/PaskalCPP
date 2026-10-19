@@ -1,0 +1,57 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  rlimgui.pcpp - the rlImGui unit: `import rlimgui;` uses Dear ImGui on
+  raylib from PaskalCPP (rlImGuiSetup / rlImGuiBegin / rlImGuiEnd around
+  ImGui:: calls, raylib textures in ImGui windows). Dear ImGui is built into
+  the same library. Built on raylib, which it imports. A self-describing
+  vendor module: it owns every include path, library path and link library
+  it needs, per official target.
+==============================================================================*/
+
+module unit rlimgui;
+
+// Self-describing vendor module: it owns every path it needs.
+
+@addincludepath "$P:res/libs/vendor/rlimgui/include";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/rlimgui/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/rlimgui/lib/x86_64-linux-gnu";
+@else
+  @message error "rlimgui_import: unsupported target";
+@endif
+
+@linklibrary "rlImGui";
+
+// The library was built with these two: they change imgui.h's declarations,
+// so every translation unit that includes it must see them too.
+@cppdefine "IMGUI_DISABLE_OBSOLETE_FUNCTIONS";
+@cppdefine "IMGUI_DISABLE_OBSOLETE_KEYIO";
+
+import raylib;
+
+// The headers go to this unit's header, so every importer sees rlImGui's and
+// Dear ImGui's API
+cpp header;
+
+#include "rlImGui.h"
+#include "imgui.h"
+
+end.

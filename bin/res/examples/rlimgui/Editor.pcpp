@@ -1,0 +1,367 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  Editor.pcpp - rlImGui example (after rlImGui's examples/editor.cpp): raylib
+  draws a 2D and a 3D scene into render textures, Dear ImGui shows them in
+  windows of an editor.
+    Image Viewer  a 2D view; with the Move tool, drag it with the left button
+    3D View       a camera swinging over a field of little trees
+    menu bar      File > Exit, Window > show / hide each window and the demo
+==============================================================================*/
+
+module exe Editor;
+
+import
+  raylib,
+  rlimgui;
+
+// std::sin for the swinging camera
+#include <cmath>
+
+const
+  CScreenWidth: int32 = 1600;
+  CScreenHeight: int32 = 900;
+  CHalf: float32 = 0.5;
+  CMinWindow: float32 = 400.0;
+  CToolbarHeight: float32 = 25.0;
+  // The 3D field: trees CSpacing apart, CTreeRows on each side of the middle
+  CSpacing: float32 = 4.0;
+  CTreeRows: int32 = 5;
+  CSwingPeriod: float64 = 10.0;
+  CSwingSize: float64 = 25.0;
+
+type
+  // The 2D view: an image drawn by a 2D camera into ViewTexture
+  TImageViewer = record
+    Open: bool;
+    Focused: bool;
+    MoveTool: bool;
+    Dragging: bool;
+    DirtyScene: bool;
+    ViewTexture: RenderTexture2D;
+    ImageTexture: Texture2D;
+    Camera: Camera2D;
+    // The window's content area on the screen: where a drag may start
+    ContentRect: Rectangle;
+    LastMousePos: Vector2;
+    LastTarget: Vector2;
+  end;
+
+  // The 3D view: a world drawn by a 3D camera into ViewTexture
+  TSceneView = record
+    Open: bool;
+    Focused: bool;
+    ViewTexture: RenderTexture2D;
+    Camera: Camera3D;
+  end;
+
+var
+  GImage: TImageViewer;
+  GScene: TSceneView;
+  GDemoOpen: bool;
+  GQuit: bool;
+
+// A raylib Vector3 from its three parts
+routine V3(const AX: float32; const AY: float32; const AZ: float32): Vector3;
+var
+  LResult: Vector3;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  LResult.z := AZ;
+  return LResult;
+end;
+
+// A raylib Vector2 from its two parts
+routine V2(const AX: float32; const AY: float32): Vector2;
+var
+  LResult: Vector2;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  return LResult;
+end;
+
+// The image, centered at the 2D camera's origin, into the viewer's texture
+routine DrawImageScene();
+var
+  LWidth: int32;
+  LHeight: int32;
+begin
+  LWidth := GImage.ImageTexture.width;
+  LHeight := GImage.ImageTexture.height;
+  BeginTextureMode(GImage.ViewTexture);
+  ClearBackground(BLUE);
+  BeginMode2D(GImage.Camera);
+  DrawTexture(GImage.ImageTexture, -(LWidth div 2), -(LHeight div 2), WHITE);
+  DrawText("Pick Move, then drag the view", -(LWidth div 2), LHeight div 2 + 10, 20,
+    RAYWHITE);
+  EndMode2D();
+  EndTextureMode();
+end;
+
+routine SetupImageViewer();
+var
+  LImage: Image;
+begin
+  GImage.Camera.zoom := 1.0;
+  GImage.Camera.offset.x := float32(GetScreenWidth()) * CHalf;
+  GImage.Camera.offset.y := float32(GetScreenHeight()) * CHalf;
+  GImage.ViewTexture := LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
+  // An image made in code, so the example needs no file beside it
+  LImage := GenImageChecked(320, 240, 40, 40, ORANGE, MAROON);
+  GImage.ImageTexture := LoadTextureFromImage(LImage);
+  UnloadImage(LImage);
+  GImage.Open := true;
+  DrawImageScene();
+end;
+
+routine ShowImageViewer();
+var
+  LCursor: ImVec2;
+  LAvail: ImVec2;
+  LView: Rectangle;
+begin
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0, 0.0));
+  ImGui::SetNextWindowSizeConstraints(ImVec2(CMinWindow, CMinWindow),
+    ImVec2(float32(GetScreenWidth()), float32(GetScreenHeight())));
+  GImage.Focused := false;
+
+  if ImGui::Begin("Image Viewer", address of GImage.Open, ImGuiWindowFlags_NoScrollbar) then
+    // The content area on the screen, saved for the drag in UpdateImageViewer
+    LCursor := ImGui::GetCursorScreenPos();
+    LAvail := ImGui::GetContentRegionAvail();
+    GImage.ContentRect.x := LCursor.x;
+    GImage.ContentRect.y := LCursor.y;
+    GImage.ContentRect.width := LAvail.x;
+    GImage.ContentRect.height := LAvail.y;
+    GImage.Focused := ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+
+    // The part of the texture under the window, centered; a render texture
+    // is upside down, hence the negative height
+    LView.x := float32(GImage.ViewTexture.texture.width) * CHalf - LAvail.x * CHalf;
+    LView.y := float32(GImage.ViewTexture.texture.height) * CHalf - LAvail.y * CHalf;
+    LView.width := LAvail.x;
+    LView.height := -LAvail.y;
+
+    if ImGui::BeginChild("Toolbar", ImVec2(LAvail.x, CToolbarHeight)) then
+      ImGui::SetCursorPosX(2.0);
+      ImGui::SetCursorPosY(3.0);
+      if ImGui::Button("None") then
+        GImage.MoveTool := false;
+      end;
+      ImGui::SameLine();
+      if ImGui::Button("Move") then
+        GImage.MoveTool := true;
+      end;
+      ImGui::SameLine();
+      if GImage.MoveTool then
+        ImGui::TextUnformatted("Move Tool");
+      else
+        ImGui::TextUnformatted("No Tool");
+      end;
+      ImGui::SameLine();
+      ImGui::TextUnformatted(TextFormat("camera target X%f Y%f",
+        float64(GImage.Camera.target.x), float64(GImage.Camera.target.y)));
+    end;
+    ImGui::EndChild();
+
+    rlImGuiImageRect(address of GImage.ViewTexture.texture, int32(LAvail.x), int32(LAvail.y),
+      LView);
+  end;
+  ImGui::End();
+  ImGui::PopStyleVar();
+end;
+
+routine UpdateImageViewer();
+var
+  LMouse: Vector2;
+begin
+  if not GImage.Open then
+    return;
+  end;
+
+  if IsWindowResized() then
+    UnloadRenderTexture(GImage.ViewTexture);
+    GImage.ViewTexture := LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
+    GImage.Camera.offset.x := float32(GetScreenWidth()) * CHalf;
+    GImage.Camera.offset.y := float32(GetScreenHeight()) * CHalf;
+    GImage.DirtyScene := true;
+  end;
+
+  // The Move tool drags the camera while the left button is held, starting
+  // only inside the window's content area
+  LMouse := GetMousePosition();
+  if GImage.Focused and GImage.MoveTool and IsMouseButtonDown(MOUSE_BUTTON_LEFT) and
+    CheckCollisionPointRec(LMouse, GImage.ContentRect) then
+    if not GImage.Dragging then
+      GImage.LastMousePos := LMouse;
+      GImage.LastTarget := GImage.Camera.target;
+    end;
+    GImage.Dragging := true;
+    GImage.Camera.target.x := GImage.LastTarget.x +
+      (GImage.LastMousePos.x - LMouse.x) / GImage.Camera.zoom;
+    GImage.Camera.target.y := GImage.LastTarget.y +
+      (GImage.LastMousePos.y - LMouse.y) / GImage.Camera.zoom;
+    GImage.DirtyScene := true;
+  else
+    GImage.Dragging := false;
+  end;
+
+  if GImage.DirtyScene then
+    GImage.DirtyScene := false;
+    DrawImageScene();
+  end;
+end;
+
+routine ShutdownImageViewer();
+begin
+  UnloadRenderTexture(GImage.ViewTexture);
+  UnloadTexture(GImage.ImageTexture);
+end;
+
+routine SetupSceneView();
+begin
+  // At the framebuffer's full resolution (physical pixels on a high DPI
+  // monitor): the 3D view is scaled to fit its window, so it stays sharp
+  GScene.ViewTexture := LoadRenderTexture(GetRenderWidth(), GetRenderHeight());
+  GScene.Camera.fovy := 45.0;
+  GScene.Camera.up.y := 1.0;
+  GScene.Camera.position.y := 3.0;
+  GScene.Camera.position.z := -25.0;
+  GScene.Camera.projection := CAMERA_PERSPECTIVE;
+  GScene.Open := true;
+end;
+
+routine ShowSceneView();
+begin
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0, 0.0));
+  ImGui::SetNextWindowSizeConstraints(ImVec2(CMinWindow, CMinWindow),
+    ImVec2(float32(GetScreenWidth()), float32(GetScreenHeight())));
+
+  if ImGui::Begin("3D View", address of GScene.Open, ImGuiWindowFlags_NoScrollbar) then
+    GScene.Focused := ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
+    // The whole texture, scaled to fit the window
+    rlImGuiImageRenderTextureFit(address of GScene.ViewTexture, true);
+  end;
+  ImGui::End();
+  ImGui::PopStyleVar();
+end;
+
+routine UpdateSceneView();
+var
+  LX: int32;
+  LZ: int32;
+  LPosX: float32;
+  LPosZ: float32;
+begin
+  if not GScene.Open then
+    return;
+  end;
+
+  if IsWindowResized() then
+    UnloadRenderTexture(GScene.ViewTexture);
+    GScene.ViewTexture := LoadRenderTexture(GetRenderWidth(), GetRenderHeight());
+  end;
+
+  GScene.Camera.position.x := float32(std::sin(GetTime() / CSwingPeriod) * CSwingSize);
+
+  BeginTextureMode(GScene.ViewTexture);
+  ClearBackground(SKYBLUE);
+  BeginMode3D(GScene.Camera);
+
+  // A field of cube trees on a plane, a small world to look at
+  DrawPlane(V3(0.0, 0.0, 0.0), V2(50.0, 50.0), BEIGE);
+  for LX := -CTreeRows to CTreeRows do
+    for LZ := -CTreeRows to CTreeRows do
+      LPosX := float32(LX) * CSpacing;
+      LPosZ := float32(LZ) * CSpacing;
+      DrawCube(V3(LPosX, 1.5, LPosZ), 1.0, 1.0, 1.0, GREEN);
+      DrawCube(V3(LPosX, 0.5, LPosZ), 0.25, 1.0, 0.25, BROWN);
+    end;
+  end;
+
+  EndMode3D();
+  EndTextureMode();
+end;
+
+routine ShutdownSceneView();
+begin
+  UnloadRenderTexture(GScene.ViewTexture);
+end;
+
+routine DoMainMenu();
+begin
+  if ImGui::BeginMainMenuBar() then
+    if ImGui::BeginMenu("File") then
+      if ImGui::MenuItem("Exit") then
+        GQuit := true;
+      end;
+      ImGui::EndMenu();
+    end;
+    if ImGui::BeginMenu("Window") then
+      ImGui::MenuItem("ImGui Demo", nil, address of GDemoOpen);
+      ImGui::MenuItem("Image Viewer", nil, address of GImage.Open);
+      ImGui::MenuItem("3D View", nil, address of GScene.Open);
+      ImGui::EndMenu();
+    end;
+    ImGui::EndMainMenuBar();
+  end;
+end;
+
+begin
+  // HighDPI: raylib sizes the window for the monitor's DPI scale (and follows
+  // it to another monitor) and works in logical pixels; rlImGui hands ImGui
+  // that scale, so ImGui's text and widgets grow with it and its fonts are
+  // drawn at the full resolution. Without the flag raylib 6.2 reports a DPI
+  // scale of 1 and ImGui stays at its 1x size on a high DPI monitor.
+  SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT | FLAG_WINDOW_HIGHDPI);
+  InitWindow(CScreenWidth, CScreenHeight, "PaskalCPP - rlImGui editor");
+  SetTargetFPS(144);
+  rlImGuiSetup(true);
+  // Windows move only by their title bar, so a drag inside a view is the tool's
+  ImGui::GetIO().ConfigWindowsMoveFromTitleBarOnly := true;
+
+  SetupImageViewer();
+  SetupSceneView();
+
+  while not WindowShouldClose() and not GQuit do
+    UpdateImageViewer();
+    UpdateSceneView();
+
+    BeginDrawing();
+    ClearBackground(DARKGRAY);
+
+    rlImGuiBegin();
+    DoMainMenu();
+    if GDemoOpen then
+      ImGui::ShowDemoWindow(address of GDemoOpen);
+    end;
+    if GImage.Open then
+      ShowImageViewer();
+    end;
+    if GScene.Open then
+      ShowSceneView();
+    end;
+    rlImGuiEnd();
+
+    EndDrawing();
+  end;
+
+  rlImGuiShutdown();
+  ShutdownImageViewer();
+  ShutdownSceneView();
+  CloseWindow();
+end.
