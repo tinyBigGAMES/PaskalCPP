@@ -28,13 +28,16 @@ module unit box2d;
 
 @addincludepath "$P:res/libs/vendor/box2d/include";
 
-// Box2D needs only the C runtime: on Windows mingw's CRT (linked by default),
-// on Linux libc and libm (sqrtf, remainderf).
+// Box2D needs the C runtime and its own task threads: on Windows mingw's CRT
+// and kernel32 (CreateThread, semaphores; both linked by default), on Linux
+// libc, libm (sqrtf) and libpthread (pthread_*, sem_*: box2d.pc lists only
+// -lm, the archive's undefined symbols name the rest).
 @ifdef TARGET_X86_64_WINDOWS_GNU
   @addlibrarypath "$P:res/libs/vendor/box2d/lib/x86_64-windows-gnu";
 @elseif TARGET_X86_64_LINUX_GNU
   @addlibrarypath "$P:res/libs/vendor/box2d/lib/x86_64-linux-gnu";
   @linklibrary "m";
+  @linklibrary "pthread";
 @else
   @message error "box2d_import: unsupported target";
 @endif
