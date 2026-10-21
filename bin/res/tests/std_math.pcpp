@@ -31,7 +31,10 @@
   [min, max)); SameSign and SameValue (the default tolerance scales past 1);
   Lerp; AngleDifference in [-180, 180); SmoothMove; every Easing curve at 0,
   0.25, 0.5, 0.75 and 1 (exactly 0 and 1 at the ends) and EaseBetween; and
-  Random: a seed's sequence, the same on both targets. The Easing and Random
+  Random: a seed's sequence, the same on both targets, and Randomize (the
+  object's and the free one: a fresh system seed that SetSeed(Seed()) /
+  SetRandomSeed(RandomSeed()) repeats; its rows print only true / false,
+  the seeds themselves differ every run). The Easing and Random
   rows are scripts\vendor\math\math_expected.py's (the prior art's Penner
   forms; an MT19937 of its own, checked against the C++ standard's value),
   the other rows were computed by hand.
@@ -121,6 +124,10 @@
     int64 full -9135132322789028815
     free seed 7 16 93 22
     free same true
+    randomize new seed true
+    randomize repeat true
+    free randomize new seed true
+    free randomize repeat true
     vector 5 25 6 4 true false
     vector unit 0.6 0.8 0 0
     vector dot 3 -4
@@ -266,6 +273,14 @@ var
   LFreeB: int32;
   LFreeC: int32;
   LSame: bool;
+  LFresh: RandomGenerator;
+  LOldSeed: uint32;
+  LNewSeed: uint32;
+  LTries: int32;
+  LDrawA: int32;
+  LDrawB: int32;
+  LDrawC: int32;
+  LRepeat: bool;
   LVA: Vector2;
   LVB: Vector2;
   LVC: Vector2;
@@ -399,6 +414,46 @@ begin
   LSame := LSame and (LCheck.NextInt(1, 100) = LFreeB);
   LSame := LSame and (LCheck.NextInt(1, 100) = LFreeC);
   println("free same {}", LSame);
+  // Randomize: a fresh seed from the system (LFresh was built without one,
+  // so its init already randomized it). A new seed equal to the old one is a
+  // 1 in 2^32 chance, so a few tries make a false failure out of reach.
+  LOldSeed := LFresh.Seed();
+  LFresh.Randomize();
+  LTries := 1;
+  while (LFresh.Seed() = LOldSeed) and (LTries < 4) do
+    LFresh.Randomize();
+    LTries := LTries + 1;
+  end;
+  println("randomize new seed {}", LFresh.Seed() <> LOldSeed);
+  // SetSeed(Seed()) after Randomize repeats its sequence
+  LNewSeed := LFresh.Seed();
+  LDrawA := LFresh.NextInt(1, 1000000);
+  LDrawB := LFresh.NextInt(1, 1000000);
+  LDrawC := LFresh.NextInt(1, 1000000);
+  LFresh.SetSeed(LNewSeed);
+  LRepeat := LFresh.NextInt(1, 1000000) = LDrawA;
+  LRepeat := LRepeat and (LFresh.NextInt(1, 1000000) = LDrawB);
+  LRepeat := LRepeat and (LFresh.NextInt(1, 1000000) = LDrawC);
+  println("randomize repeat {}", LRepeat);
+  // The free Randomize reseeds the unit's own generator, repeatable the same way
+  SetRandomSeed(7);
+  LOldSeed := RandomSeed();
+  Randomize();
+  LTries := 1;
+  while (RandomSeed() = LOldSeed) and (LTries < 4) do
+    Randomize();
+    LTries := LTries + 1;
+  end;
+  println("free randomize new seed {}", RandomSeed() <> LOldSeed);
+  LNewSeed := RandomSeed();
+  LDrawA := RandomInt(1, 1000000);
+  LDrawB := RandomInt(1, 1000000);
+  LDrawC := RandomInt(1, 1000000);
+  SetRandomSeed(LNewSeed);
+  LRepeat := RandomInt(1, 1000000) = LDrawA;
+  LRepeat := LRepeat and (RandomInt(1, 1000000) = LDrawB);
+  LRepeat := LRepeat and (RandomInt(1, 1000000) = LDrawC);
+  println("free randomize repeat {}", LRepeat);
   // Vector2: operators, and the zero vector well defined everywhere
   LVA := V(3.0f, 4.0f);
   LVB := V(1.0f, 0.0f);

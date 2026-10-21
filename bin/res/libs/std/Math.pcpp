@@ -899,11 +899,11 @@ exported type
     Engine: std::mt19937;
     SeedValue: uint32;
     /// A generator seeded from the system's entropy source.
+    /// @see Randomize
     init();
     begin
       // The engine is built first (its default state), then seeded
-      self.SeedValue := EntropySeed();
-      self.Engine.seed(self.SeedValue);
+      self.Randomize();
     end;
     /// A generator that gives the sequence of ASeed.
     /// @param ASeed the seed
@@ -924,6 +924,20 @@ exported type
     const method Seed(): uint32;
     begin
       return self.SeedValue;
+    end;
+    /// Starts a fresh sequence from a seed taken from the system's entropy
+    /// source. A generator built without a seed calls this on creation.
+    /// Seed() then returns the new seed, so SetSeed(Seed()) repeats the
+    /// sequence from here.
+    /// @example `LRng.Randomize(); LAgain := LRng.Seed();`
+    /// @since 0.2
+    /// @see SetSeed
+    /// @see Seed
+    /// @see SetRandomSeed
+    method Randomize();
+    begin
+      self.SeedValue := EntropySeed();
+      self.Engine.seed(self.SeedValue);
     end;
     /// A whole number from AMin to AMax, both included.
     /// @param AMin one end
@@ -1073,6 +1087,19 @@ end;
 exported routine SetRandomSeed(const ASeed: uint32);
 begin
   GRandom.SetSeed(ASeed);
+end;
+
+/// Starts the unit's own generator on a fresh sequence, seeded from the
+/// system's entropy source. RandomSeed() then returns the new seed, so
+/// SetRandomSeed(RandomSeed()) repeats the sequence from here.
+/// @example `Randomize(); LRoll := RandomInt(1, 6);`
+/// @since 0.2
+/// @see SetRandomSeed
+/// @see RandomSeed
+/// @see RandomGenerator
+exported routine Randomize();
+begin
+  GRandom.Randomize();
 end;
 
 exported type
