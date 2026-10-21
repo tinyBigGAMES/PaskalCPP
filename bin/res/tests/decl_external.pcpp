@@ -47,13 +47,7 @@
 
 module exe decl_external;
 @addsourcefile "$P:res/tests/decl_external_c.c";
-@ifdef TARGET_X86_64_LINUX_GNU
-@addlibrarypath "$P:output/lib_plain_linux/lib";
-@addlibrarypath "$P:output/lib_runtime_linux/lib";
-@else
-@addlibrarypath "$P:output/lib_plain/lib";
-@addlibrarypath "$P:output/lib_runtime/lib";
-@endif
+@addlibrarypath "$P:output/lib";
 
 const
   CRuntimeLib: string = "lib_runtime";

@@ -25,11 +25,6 @@
 *******************************************************************************/
 
 module dll dll_build_dll;
-@ifdef TARGET_X86_64_LINUX_GNU
-@outputpath "$P:output/dll_build_dll_linux";
-@else
-@outputpath "$P:output/dll_build_dll";
-@endif
 
 exported routine clink dll_build_twice(AN: int32): int32;
 begin

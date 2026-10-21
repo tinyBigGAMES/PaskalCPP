@@ -1531,6 +1531,8 @@ begin
     Result := RSParShapeCStrings
   else if AShape = dsSeverityText then
     Result := RSParShapeSeverity
+  else if AShape = dsKeyAndPath then
+    Result := RSParShapeKeyPath
   else
     Result := RSParShapeNone;
 end;
@@ -1763,9 +1765,22 @@ end;
 
 function TPCParser.DoParseDirectiveArgs(const ARow: TPCDirectiveRow;
   const ADirective: TPCDirective): TPCArgOutcome;
+var
+  LKeyRow: TPCDirectiveRow;
 begin
   if ARow.Shape = dsNone then
     Result := arOk
+  else if ARow.Shape = dsKeyAndPath then
+  begin
+    // @addresdata "KEY" "PATH": both required. The key is text, never a
+    // path, so it is read through a copy of the row without IsPath; the
+    // path is read through the row itself (resolved once, BNF.md sec 2)
+    LKeyRow := ARow;
+    LKeyRow.IsPath := False;
+    Result := DoParseCStringArg(LKeyRow, ADirective);
+    if Result = arOk then
+      Result := DoParseCStringArg(ARow, ADirective);
+  end
   else if ARow.Shape = dsIdentifier then
     Result := DoParseIdentifierArg(ADirective)
   else if ARow.Shape = dsInteger then

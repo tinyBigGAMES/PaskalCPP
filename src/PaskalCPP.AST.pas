@@ -585,6 +585,15 @@ type
     // ATarget = the pointer's target (nil for htNone). The one rule of SEM's
     // create / destroy checks (SM0409 / SM0361) and the emitter's create
     class function HeapTargetOf(const AType: TPCTypeExpr; out ATarget: TPCTypeExpr): TPCHeapTarget; static;
+    // PLAN-RESDATA A5b: a pointer cast to ATarget (a typed pointer) from a
+    // value of AOperand whose pointee is a class C++ may relate (an object,
+    // an interface, a record with a C/C++ base, a C/C++ type) on either side,
+    // the operand a typed pointer (or C/C++, the target's pointee a class):
+    // C++ must pick the cast from the real classes (::pcpp::ptr_cast), since
+    // reinterpret_cast misses a base's offset (an interface is a virtual
+    // base). The one rule of the emitter's casts (both spellings) and the
+    // runtime-use row
+    class function IsClassPointerCast(const ATarget: TPCTypeExpr; const AOperand: TPCTypeExpr): Boolean; static;
     // How print / println writes an argument of this type (TPCPrintForm;
     // a pointer is a PaskalCPP pointer type or the type of @c); pfAsIs for
     // nil. The one rule of SEM's print check (pfUnprintable = SM0425), the
@@ -658,6 +667,11 @@ type
     // folded value, a char or choices bound as written; the one rule TypeText
     // and SEM's bound reports read
     function BoundText(): string;
+    // A float SEM folded to no finite number (0.0 / 0.0, 1.0 / 0.0, an
+    // overflow): 'nan', 'inf' or '-inf' (FloatText's spelling); '' for a
+    // finite value or no folded float. The emitter writes such a value
+    // itself: C++ refuses to compute one in a constant
+    function NonFiniteFloat(): string;
     // A routine named as a value (rkRoutine on a TPCName / TPCMember; SEM
     // types it with no ResolvedType: its type is its signature). ARoutine =
     // the routine (rvRoutine, rvMethod) or one member of the set (a name's
@@ -739,6 +753,10 @@ type
     constructor Create(); override;
     destructor Destroy(); override;
     procedure EnumChildren(const AVisit: TPCNodeVisitor); override;
+    // PLAN-RESDATA A3: an @addresdata whose key and path both hold their
+    // value, i.e. an entry the emitter writes into its module's source TU.
+    // The one rule of the emitter and the runtime-use row
+    function IsResDataEntry(): Boolean;
   end;
 
   { TPCImport }
@@ -889,9 +907,27 @@ type
     // runtime (test blocks and the main module's entry excluded;
     // TPCAst.ModuleNamesRuntime). The aggregate is TPCAst.UsesRuntime
     ResolvedUsesRuntime: Boolean;
+    // PLAN-RESDATA A8: the icon set through the Compiler's API (SetExeIcon),
+    // resolved; the Compiler writes it on the main module before SEM. Data
+    // from outside the source; '' = none. An @exeicon of the module wins
+    ApiExeIcon: string;
     constructor Create(); override;
     destructor Destroy(); override;
     procedure EnumChildren(const AVisit: TPCNodeVisitor); override;
+    // PLAN-RESDATA A3: some directive of the module is an entry
+    // (TPCDirective.IsResDataEntry), or it builds its icon in (BuildsExeIcon)
+    function HasResDataEntries(): Boolean;
+    // PLAN-RESDATA A6: an exe for a target that is not Windows builds its
+    // @exeicon in as the entry PC_RESDATA_EXEICON_KEY (a Windows exe stamps
+    // it as MAINICON). The directive, else nil (an empty target: the filter
+    // reported @target, nothing target-dependent is built)
+    function ExeIconEntry(): TPCDirective;
+    // PLAN-RESDATA A8, the one rule: such an exe builds its icon in from its
+    // @exeicon (ExeIconEntry), else from ApiExeIcon
+    function BuildsExeIcon(): Boolean;
+    // The icon file BuildsExeIcon builds in (the directive's resolved path,
+    // else ApiExeIcon); '' when it builds none
+    function ExeIconPath(): string;
   end;
 
   { TPCOpaqueType }
@@ -1130,6 +1166,11 @@ type
     Parts: TArray<string>;
     ResolvedDecl: TPCTypeDecl;      // semantics; nil for rkOpaque
     ResolvedKind: TPCResolvedKind;  // semantics: rkType or rkOpaque
+    // semantics: rkOpaque whose bare name is an imported unit's. A unit is a
+    // unit only before '.', so the name is reached as C/C++ (a C type spelled
+    // like its unit); when clang knows no such type, its 'unknown type name'
+    // there is SM0013 (TPCAst.UnitTypeAt, TPCCompiler.DoFrontendCheck)
+    ResolvedUnitName: Boolean;
     constructor Create(); override;
     function TypeText(): string; override;
   end;
@@ -2281,6 +2322,9 @@ type
     // clauses in tree order); False = no module names it
     function LocateLibrary(const ALibrary: string; out AOutFilename: string;
       out AOutLine: UInt64; out AOutColumn: UInt64): Boolean;
+    // PLAN-RESDATA A4b: the @addresdata entry adding AKey (exact case, as SEM
+    // compares keys), first in module order; nil = no module of this build adds it
+    function ResDataEntryOf(const AKey: string): TPCDirective;
     // The record whose align value holds the narrowest emitted span at a
     // location clang reported (the search TranslateLocation makes): the
     // frontend check the emitter writes is a span of the value
@@ -2334,6 +2378,11 @@ type
     // False = none there
     function PolyCheckAt(const AFilename: string; const ALine: UInt64; const AColumn: UInt64;
       out AExpr: TPCExpr): Boolean;
+    // The named type spelled as an imported unit (ResolvedUnitName) whose
+    // emitted span is the narrowest at a location clang reported. False =
+    // none there
+    function UnitTypeAt(const AFilename: string; const ALine: UInt64; const AColumn: UInt64;
+      out AType: TPCNamedType): Boolean;
   end;
 
 implementation
@@ -2964,6 +3013,41 @@ begin
   ATarget := nil;
 end;
 
+class function TPCTypeExpr.IsClassPointerCast(const ATarget: TPCTypeExpr; const AOperand: TPCTypeExpr): Boolean;
+
+  function DoIsClassPointee(const APointee: TPCTypeExpr): Boolean;
+  var
+    LCanon: TPCTypeExpr;
+  begin
+    // A C/C++ type may be a class; an object or an interface is one; a
+    // record is plain data unless its parent is a C/C++ base class (not a
+    // member: HasParentMember)
+    if IsOpaqueTier(APointee) then
+      Exit(True);
+    LCanon := APointee.Canon();
+    if not (LCanon is TPCRecordType) then
+      Exit(False);
+    if TPCRecordType(LCanon).IsObject then
+      Exit(True);
+    Result := (TPCRecordType(LCanon).ParentName <> nil) and not TPCRecordType(LCanon).HasParentMember();
+  end;
+
+var
+  LTargetPointee: TPCTypeExpr;
+  LOperandPointee: TPCTypeExpr;
+  LIsConst: Boolean;
+begin
+  Result := False;
+  if not PointerOf(ATarget, LTargetPointee, LIsConst) or (LTargetPointee = nil) then
+    Exit;
+  // A C/C++ operand: C++ knows what it points to, when the target is a class
+  if IsOpaqueTier(AOperand) then
+    Exit(DoIsClassPointee(LTargetPointee));
+  if not PointerOf(AOperand, LOperandPointee, LIsConst) or (LOperandPointee = nil) then
+    Exit;
+  Result := DoIsClassPointee(LTargetPointee) or DoIsClassPointee(LOperandPointee);
+end;
+
 class function TPCTypeExpr.PrintForm(const AType: TPCTypeExpr): TPCPrintForm;
 var
   LCanon: TPCTypeExpr;
@@ -3126,6 +3210,15 @@ function TPCExpr.ExprPower(): Integer;
 begin
   // A primary expression: never parenthesised
   Result := 60;
+end;
+
+function TPCExpr.NonFiniteFloat(): string;
+begin
+  Result := '';
+  if not HasConstFloat then
+    Exit;
+  if IsNan(ConstFloat) or IsInfinite(ConstFloat) then
+    Result := FloatText(ConstFloat);
 end;
 
 class function TPCExpr.RoutineValueOf(const AValue: TPCExpr; out ARoutine: TPCRoutine): TPCRoutineValueKind;
@@ -3415,6 +3508,13 @@ end;
 procedure TPCDirective.EnumChildren(const AVisit: TPCNodeVisitor);
 begin
   VisitList<TPCDirectiveArg>(Args, AVisit);
+end;
+
+function TPCDirective.IsResDataEntry(): Boolean;
+begin
+  // The parser keeps an argument it reported with HasValue False; nothing is
+  // emitted with errors, so an analyzed AST holds both values
+  Result := (DirectiveKind = bdAddResData) and (Args.Count >= 2) and Args[0].HasValue and Args[1].HasValue;
 end;
 
 { TPCImport }
@@ -3800,6 +3900,53 @@ begin
   Result := '';
   if not ResolvedTarget.IsEmpty() then
     Result := ' target=' + QuoteText(ResolvedTarget.ToLLVM());
+end;
+
+function TPCModule.HasResDataEntries(): Boolean;
+var
+  LDirective: TPCDirective;
+begin
+  for LDirective in Directives do
+  begin
+    if LDirective.IsResDataEntry() then
+      Exit(True);
+  end;
+  Result := BuildsExeIcon();
+end;
+
+function TPCModule.BuildsExeIcon(): Boolean;
+begin
+  Result := ExeIconPath() <> '';
+end;
+
+function TPCModule.ExeIconPath(): string;
+var
+  LDirective: TPCDirective;
+begin
+  Result := '';
+  if (ModuleKind <> mkExe) or ResolvedTarget.IsEmpty() or ResolvedTarget.IsWindows() then
+    Exit;
+  LDirective := ExeIconEntry();
+  if LDirective <> nil then
+    Result := LDirective.Args[0].ResolvedText
+  else
+    Result := ApiExeIcon;
+end;
+
+function TPCModule.ExeIconEntry(): TPCDirective;
+var
+  LDirective: TPCDirective;
+begin
+  Result := nil;
+  if (ModuleKind <> mkExe) or ResolvedTarget.IsEmpty() or ResolvedTarget.IsWindows() then
+    Exit;
+  for LDirective in Directives do
+  begin
+    // The parser keeps an argument it reported with HasValue False
+    if (LDirective.DirectiveKind = bdExeIcon) and (LDirective.Args.Count >= 1) and
+      LDirective.Args[0].HasValue then
+      Exit(LDirective);
+  end;
 end;
 
 procedure TPCModule.EnumChildren(const AVisit: TPCNodeVisitor);
@@ -4556,6 +4703,7 @@ begin
   inherited;
 
   FNodeKind := nkNamedType;
+  ResolvedUnitName := False;
 end;
 
 function TPCNamedType.DoDumpText(): string;
@@ -6593,8 +6741,12 @@ begin
   // that names the runtime (TPCTypeExpr.PrintForm: ::pcpp::CStr / WCStr /
   // utf8 / print_map; Q11, E4, E7; an address form is a plain cast, an
   // unprintable one is never emitted); a cpplink variadic's packed arguments
-  // (::pcpp::Pack / Slot). A conversion (rkType) and every other intrinsic
-  // write plain C++
+  // (::pcpp::Pack / Slot). A conversion (rkType) writes plain C++, except a
+  // pointer cast between classes C++ may relate (::pcpp::ptr_cast, PLAN-RESDATA
+  // A5b); every other intrinsic writes plain C++
+  if ACall.ResolvedKind = rkType then
+    Exit((ACall.ResolvedDecl is TPCTypeDecl) and (ACall.Args.Count = 1) and
+      TPCTypeExpr.IsClassPointerCast(TPCTypeDecl(ACall.ResolvedDecl).TypeDef, ACall.Args[0].ResolvedType));
   if ACall.IntrinsicKind in PC_RUNTIME_INTRINSICS then
     Exit(True);
   if (ACall.IntrinsicKind = ikPrint) or (ACall.IntrinsicKind = ikPrintLn) then
@@ -6693,6 +6845,12 @@ begin
     Exit(True);
   if (ANode is TPCCast) and (TPCCast(ANode).ResolvedDowncastHops > 0) then
     Exit(True);
+  // PLAN-RESDATA A5b: a pointer cast between classes C++ may relate
+  // (::pcpp::ptr_cast; the conversion spelling is DoCallNamesRuntime's)
+  if (ANode is TPCCast) and ((TPCCast(ANode).CastKind = ckBuiltin) or (TPCCast(ANode).CastKind = ckPointer)) and
+    (TPCCast(ANode).Operand <> nil) and
+    TPCTypeExpr.IsClassPointerCast(TPCCast(ANode).TargetType, TPCCast(ANode).Operand.ResolvedType) then
+    Exit(True);
   // PLAN-RECORDS M9: a packed field (or parent) whose type only clang lays
   // out gets the ::pcpp::packs_as_field check (DoWritePackedCheck)
   if (ANode is TPCRecordType) and TPCRecordType(ANode).IsPacked and TPCRecordType(ANode).HasParentMember() and
@@ -6726,6 +6884,10 @@ begin
     Result := True                    // PLAN-OBJECT O6: Own / Ref / Weak; make_own / make_ref
   else if ANode is TPCTypeTest then
     Result := True                    // PLAN-OBJECT O12: is_a / as_a
+  else if ANode is TPCDirective then
+    Result := TPCDirective(ANode).IsResDataEntry()                                // ResEntry (PLAN-RESDATA A3)
+  else if ANode is TPCModule then
+    Result := TPCModule(ANode).BuildsExeIcon()                                    // ResEntry of the icon (A6 / A8)
   else if ANode is TPCConstDecl then
     Result := TPCConstDecl(ANode).HasConstText(LWide)                             // ConstText (PLAN-VENDOR 1e)
   else if ANode is TPCLiteral then
@@ -7758,6 +7920,28 @@ begin
   Result := True;
 end;
 
+function TPCAst.UnitTypeAt(const AFilename: string; const ALine: UInt64; const AColumn: UInt64;
+  out AType: TPCNamedType): Boolean;
+var
+  LModule: TPCModule;
+  LBest: TPCNode;
+  LBestSpan: TPCEmitSpan;
+begin
+  // clang reports an unknown type name at its first character, inside the
+  // named type's own span: no narrower node covers it
+  Result := False;
+  AType := nil;
+  LModule := FindModuleByFile(AFilename);
+  if LModule = nil then
+    Exit;
+  if not DoNarrowestAt(LModule, ALine, AColumn, LBest, LBestSpan) then
+    Exit;
+  if not (LBest is TPCNamedType) or (not TPCNamedType(LBest).ResolvedUnitName) then
+    Exit;
+  AType := TPCNamedType(LBest);
+  Result := True;
+end;
+
 class function TPCAst.DoExternalLibRange(const ANode: TPCNode;
   const ALibrary: string): TSourceRange;
 var
@@ -7825,6 +8009,22 @@ begin
       AOutLine := LRange.StartLine;
       AOutColumn := LRange.StartColumn;
       Exit(True);
+    end;
+  end;
+end;
+
+function TPCAst.ResDataEntryOf(const AKey: string): TPCDirective;
+var
+  LIndex: Integer;
+  LDirective: TPCDirective;
+begin
+  Result := nil;
+  for LIndex := 0 to ModuleCount() - 1 do
+  begin
+    for LDirective in ModuleAt(LIndex).Directives do
+    begin
+      if LDirective.IsResDataEntry() and (LDirective.Args[0].ResolvedText = AKey) then
+        Exit(LDirective);
     end;
   end;
 end;

@@ -1,0 +1,102 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  DefaultFont.pcpp - data built into the program (import sfml_ext): no asset
+  files are read at run time.
+    - The window's icon (title bar and taskbar) is the exe's own icon, from
+      @exeicon: on Windows the icon stamped into the exe, on Linux the
+      picture the compiler builds in as data. sfx::RenderWindow sets it when
+      the window opens; nothing else to call.
+    - The text is drawn in sfml_ext's default font (JetBrains Mono), built
+      into every program that imports sfml_ext: sfx::openDefaultFont.
+    - The logo is a PNG this program builds in with @addresdata and opens
+      by its key: sfx::loadFromResData.
+  The exe can be copied anywhere and still shows all three. Escape or the
+  close button ends it.
+==============================================================================*/
+
+module exe DefaultFont;
+@exeicon "$P:res/assets/icons/paskalcpp.ico";
+@addresdata "logo" "$P:res/assets/images/paskalcpp.png";
+
+import
+  sfml_ext,
+  SysUtils;
+
+routine Run();
+var
+  LWin: sfx::RenderWindow(sf::Vector2u(800, 450), "PaskalCPP + SFML: built-in data");
+  LFont: sf::Font;
+  LLogo: sf::Texture;
+  LSprite: sf::Sprite(LLogo);
+  LEvent: std::optional<sf::Event>;
+  LKey: ptr to const sf::Event::KeyPressed;
+begin
+  if not sfx::openDefaultFont(LFont) then
+    println("the default font is not built in");
+    return;
+  end;
+  if not sfx::loadFromResData(LLogo, "logo") then
+    println("the logo is not built in");
+    return;
+  end;
+
+  // The sprite takes the loaded texture's whole size (true = reset its rect),
+  // scaled from 512 x 512 to 200 x 200
+  LLogo.setSmooth(true);
+  LSprite.setTexture(LLogo, true);
+  LSprite.setScale(sf::Vector2f(200.0f / 512.0f, 200.0f / 512.0f));
+  LSprite.setPosition(sf::Vector2f(60.0f, 125.0f));
+
+  LWin.setFrameColor(sf::Color(24, 24, 32));
+  LWin.setBarColor(sf::Color(8, 8, 12));
+
+  while LWin.isOpen() do
+    LEvent := LWin.pollEvent();
+    while LEvent.has_value() do
+      if LEvent->is<sf::Event::Closed>() then
+        LWin.close();
+      end;
+      LKey := LEvent->getIf<sf::Event::KeyPressed>();
+      if LKey <> nil then
+        if LKey^.scancode = sf::Keyboard::Scancode::Escape then
+          LWin.close();
+        end;
+      end;
+      LEvent := LWin.pollEvent();
+    end;
+
+    LWin.startFrame();
+
+    LWin.draw(LSprite);
+    LWin.drawText(LFont, "Built into this exe", sf::Vector2f(300.0f, 130.0f), 36,
+      sfx::Color::Gold);
+    LWin.drawText(LFont, "the window icon: @exeicon", sf::Vector2f(300.0f, 200.0f), 20,
+      sf::Color(230, 230, 230));
+    LWin.drawText(LFont, FormatStr("this font: {}, the default", LFont.getInfo().family),
+      sf::Vector2f(300.0f, 235.0f), 20, sf::Color(230, 230, 230));
+    LWin.drawText(LFont, "the logo: @addresdata \"logo\"", sf::Vector2f(300.0f, 270.0f), 20,
+      sf::Color(230, 230, 230));
+    LWin.drawText(LFont, "Escape closes", sf::Vector2f(300.0f, 330.0f), 16,
+      sf::Color(140, 140, 160));
+
+    LWin.endFrame();
+    LWin.display();
+  end;
+end;
+
+begin
+  Run();
+end.

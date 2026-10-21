@@ -19,9 +19,10 @@
   SysUtils.pcpp - the SysUtils unit: `import SysUtils;` turns any spelling of
   a path into one full, normalized path (ResolvePath), with the same prefixes
   the compiler's own directives take ($P: $D: $S:), and tells where the
-  running program lives (ExeDir), and formats values into a string as println
-  prints them (FormatStr). A name is read bare when no other imported
-  unit exports it (ResolvePath), or qualified (SysUtils.ResolvePath).
+  running program lives (ExeDir), formats values into a string as println
+  prints them (FormatStr) and waits a given time (Delay). A name is read bare
+  when no other imported unit exports it (ResolvePath), or qualified
+  (SysUtils.ResolvePath).
 ==============================================================================*/
 
 module unit SysUtils;
@@ -32,12 +33,15 @@ module unit SysUtils;
 // interface; none of this C++ is visible to an importer.
 cpp source;
 
+#include <chrono>
+#include <filesystem>
 #include <string>
+#include <system_error>
+#include <thread>
 #ifdef _WIN32
 #include <windows.h>
 #else
 #include <unistd.h>
-#include <filesystem>
 #endif
 
 namespace {
@@ -310,6 +314,25 @@ std::string PathExeDir()
 #endif
 }
 
+// std::filesystem on both targets; the UTF-8 text goes in as char8_t, never
+// through std::filesystem::path(std::string) (the ANSI code page on Windows)
+bool PathFileExists(const std::string& APath)
+{
+  std::error_code LError;
+  if (APath.empty())
+    return false;
+  const std::filesystem::path LPath(std::u8string(APath.begin(), APath.end()));
+  return std::filesystem::is_regular_file(LPath, LError);
+}
+
+// std::this_thread on both targets (at least the time asked: the OS may wake
+// the thread a little later); a wait of 0 or less returns at once
+void TimeDelay(const int AMilliseconds)
+{
+  if (AMilliseconds > 0)
+    std::this_thread::sleep_for(std::chrono::milliseconds(AMilliseconds));
+}
+
 } // namespace
 
 /// Resolves a path to one full, normalized path.
@@ -394,6 +417,57 @@ exported routine ExeDir(): string;
 begin
   return PathExeDir();
 end;
+
+/// Whether a file exists: true when the path names an existing file (a
+/// symbolic link: the file it points to), false for a folder, a missing path,
+/// "" or a path the OS cannot read. The path is UTF-8 on every target and goes
+/// through `ResolvePath` first, so a `$P:` / `$D:` prefix works as written.
+/// @param APath the file's path
+/// @returns true when the file is there
+/// @example `if not FileExists("$P:assets.zip") then ... end;`
+/// @since 0.2
+/// @see ResolvePath
+exported routine FileExists(const APath: string): bool;
+begin
+  return PathFileExists(ResolvePath(APath));
+end;
+
+/// FileExists for a C string (the same rule).
+/// @param APath the file's path
+/// @returns true when the file is there
+/// @since 0.2
+exported routine FileExists(const APath: ptr to const char): bool;
+begin
+  if APath = nil then
+    return false;
+  end;
+  return PathFileExists(ResolvePath(APath));
+end;
+
+/// Waits the given number of milliseconds, then returns: at least that long
+/// (std::this_thread::sleep_for), the OS may wake the program a little later.
+/// A wait of 0 or less returns at once.
+/// @param AMilliseconds how long to wait, in milliseconds
+/// @example `Delay(500);   // half a second`
+/// @since 0.2
+exported routine Delay(const AMilliseconds: int32);
+begin
+  TimeDelay(AMilliseconds);
+end;
+
+exported const
+  /// The bytes in a kilobyte (1024, binary): `4 * Kilobyte` is 4096.
+  /// @since 0.2
+  /// @see Megabyte
+  Kilobyte: int64 = 1024;
+  /// The bytes in a megabyte (1024 x 1024, binary).
+  /// @since 0.2
+  /// @see Gigabyte
+  Megabyte: int64 = 1024 * 1024;
+  /// The bytes in a gigabyte (1024 x 1024 x 1024, binary).
+  /// @example `if LSize > 2 * Gigabyte then ... end;`
+  /// @since 0.2
+  Gigabyte: int64 = 1024 * 1024 * 1024;
 
 // FormatStr(AFormat, ...) formats its arguments into a string, as println
 // prints them: `{}` specifiers (std::format's), each argument in println's

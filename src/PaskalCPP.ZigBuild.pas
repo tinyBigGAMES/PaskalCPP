@@ -353,6 +353,15 @@ type
   // reports its failure in the frontend's words; SetFrontendCheck hands it over
   TPCFrontendCheck = PaskalCPP.BuildOutput.TPCFrontendCheck;
 
+  { TPCDuplicateSymbolCheck }
+  // A duplicate symbol the frontend defined on purpose (a built-in data key's);
+  // SetDuplicateSymbolCheck hands it over
+  TPCDuplicateSymbolCheck = PaskalCPP.BuildOutput.TPCDuplicateSymbolCheck;
+
+  { TPCBuildNote }
+  // A note of a build diagnostic (TPCDuplicateSymbolCheck's ANotes)
+  TPCBuildNote = PaskalCPP.BuildOutput.TPCBuildNote;
+
   { TPCZigBuild }
   TPCZigBuild = class(TBaseObject)
   private
@@ -397,6 +406,7 @@ type
     FLibraryLocator: TPCLibraryLocator;
     FGeneratedFileTest: TPCGeneratedFileTest;
     FFrontendCheck: TPCFrontendCheck;
+    FDuplicateSymbolCheck: TPCDuplicateSymbolCheck;
 
     // Toolchain path + persisted build config (build.toml)
     FToolchainPath: string;
@@ -577,6 +587,10 @@ type
     // The frontend's own checks in its C++: a failed one is reported as the
     // frontend says (nil = every failure is clang's)
     procedure SetFrontendCheck(const ACheck: TPCFrontendCheck);
+    // A duplicate symbol the frontend defined (a built-in data key a
+    // separately built library holds too) is reported as the frontend says
+    // (nil = every duplicate symbol is the linker's)
+    procedure SetDuplicateSymbolCheck(const ACheck: TPCDuplicateSymbolCheck);
 
     // Command line handed to the artifact when it is run. Empty means no
     // arguments, which is the behaviour every caller had before this existed.
@@ -614,12 +628,23 @@ type
     procedure AddLibraryPath(const APath: string);
     procedure RemoveLibraryPath(const APath: string);
     procedure ClearLibraryPaths();
+    // The library paths, stored resolved, in the order they were added
+    function GetLibraryPaths(): TArray<string>;
 
     // Link libraries
     procedure AddLinkLibrary(const ALibrary: string);
     procedure AddLinkLibraries(const ALibraries: array of string);
     procedure RemoveLinkLibrary(const ALibrary: string);
     procedure ClearLinkLibraries();
+    // The link libraries, in the order they were added
+    function GetLinkLibraries(): TArray<string>;
+    // The file the linker links for a library name: each of ALibraryPaths
+    // (resolved) in order; a Unix target takes lib<name>.so before
+    // lib<name>.a in one folder (zig's paths_first), a Windows target
+    // <name>.lib (GetLibPrefix / GetLibExtension's static library). False =
+    // no folder holds one
+    class function FindLinkFile(const AWindows: Boolean; const ALibraryPaths: TArray<string>;
+      const ALibrary: string; out APath: string): Boolean; static;
 
     // Defines (-DNAME or -DNAME=VALUE)
     procedure SetDefine(const ADefineName: string); overload;
@@ -995,6 +1020,7 @@ begin
   FLibraryLocator := nil;
   FGeneratedFileTest := nil;
   FFrontendCheck := nil;
+  FDuplicateSymbolCheck := nil;
 
   // Default target triple (raw string; no platform define injection)
   FTarget := PC_DEFAULT_TARGET;
@@ -1221,6 +1247,11 @@ end;
 procedure TPCZigBuild.SetFrontendCheck(const ACheck: TPCFrontendCheck);
 begin
   FFrontendCheck := ACheck;
+end;
+
+procedure TPCZigBuild.SetDuplicateSymbolCheck(const ACheck: TPCDuplicateSymbolCheck);
+begin
+  FDuplicateSymbolCheck := ACheck;
 end;
 
 // Arguments passed to the artifact by Run(). Stored verbatim: the caller is
@@ -1975,6 +2006,14 @@ var
   LName: string;
   LPath: string;
 begin
+  // TODO: Stale-file removal is turned off for now and will be reworked in a
+  // future update. Every build shares one output folder, and this removal
+  // deleted the files other programs had built there (a lib before the
+  // program that links it). The record is still reset, so it lists only
+  // what this build installs.
+  FInstalled.Clear();
+  Exit;
+
   // Before the build: a recorded file this build does not produce (not one
   // of its own files, not a copy-DLL it deploys) is removed. One it does
   // produce stays recorded while it is there; a removal that fails stays
@@ -2850,6 +2889,7 @@ begin
       LDiagFiles := LDiagFiles + [DoDiagFilePath(FSourceFiles[LI])];
 
     FBuildCommit.SetErrors(FErrors);
+    FBuildCommit.SetDuplicateSymbolCheck(FDuplicateSymbolCheck);
     FBuildCommit.Commit(FBuildOutput, LDiagFiles,
       FOutputPath, FLocationTranslator, FLibraryLocator, FGeneratedFileTest,
       FFrontendCheck);
@@ -3715,21 +3755,50 @@ begin
 end;
 
 function TPCZigBuild.DoFindLinkFile(const ALibrary: string; out APath: string): Boolean;
+begin
+  // The linker's own search for -l<name> on a Linux target (FindLinkFile's Unix rule)
+  Result := FindLinkFile(False, GetLibraryPaths(), ALibrary, APath);
+end;
+
+function TPCZigBuild.GetLibraryPaths(): TArray<string>;
+begin
+  Result := FLibraryPaths.ToStringArray();
+end;
+
+function TPCZigBuild.GetLinkLibraries(): TArray<string>;
+begin
+  Result := FLinkLibraries.ToStringArray();
+end;
+
+class function TPCZigBuild.FindLinkFile(const AWindows: Boolean;
+  const ALibraryPaths: TArray<string>; const ALibrary: string; out APath: string): Boolean;
 var
-  LI: Integer;
+  LPath: string;
   LExt: Integer;
   LCandidate: string;
 begin
-  // The linker's own search for -l<name>: each library path in order, a shared library
-  // before a static one in the same folder (zig's paths_first). FLibraryPaths are stored
-  // resolved, so JoinResolvedPath joins without touching the file system; FileExists
-  // reports by result and never raises.
+  // Each library path in order. Unix: a shared library before a static one in
+  // the same folder (zig's paths_first). Windows: the static library's own
+  // name. The paths are stored resolved, so JoinResolvedPath joins without
+  // touching the file system; FileExists reports by result and never raises
   Result := False;
   APath := '';
-  for LI := 0 to FLibraryPaths.Count - 1 do
+  for LPath in ALibraryPaths do
+  begin
+    if AWindows then
+    begin
+      LCandidate := TUtils.JoinResolvedPath(LPath, ALibrary + '.lib');
+      if FileExists(LCandidate) then
+      begin
+        APath := LCandidate;
+        Exit(True);
+      end;
+      Continue;
+    end;
+
     for LExt := Low(PC_ZIG_LINK_FILE_EXTS) to High(PC_ZIG_LINK_FILE_EXTS) do
     begin
-      LCandidate := TUtils.JoinResolvedPath(FLibraryPaths[LI],
+      LCandidate := TUtils.JoinResolvedPath(LPath,
         'lib' + ALibrary + PC_ZIG_LINK_FILE_EXTS[LExt]);
       if FileExists(LCandidate) then
       begin
@@ -3737,6 +3806,7 @@ begin
         Exit(True);
       end;
     end;
+  end;
 end;
 
 procedure TPCZigBuild.DoApplyManifest(const AExePath: string);

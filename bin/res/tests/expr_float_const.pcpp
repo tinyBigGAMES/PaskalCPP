@@ -19,7 +19,10 @@
   whatever form it is written in: a negated literal, an operator of two
   constants, / of two integer constants, ?: with a constant condition, as an
   initializer, an assignment, a const and an argument. The value is computed
-  as C++ computes it.
+  as C++ computes it. A constant whose value is no finite number is a
+  constant too (IEEE): 0.0 / 0.0 is NaN (the positive one: it prints nan, not
+  -nan), a division by zero or an overflow an infinity, a float32 cast past
+  float32's range an infinity, and an infinite operand folds on.
 
   How to check, from repo\bin:
     pcpp res\tests\expr_float_const.pcpp -r
@@ -32,6 +35,10 @@
     const -1 1.5
     argument -1
     float64 -10
+    nan nan true
+    infinity inf -inf inf
+    overflow inf inf
+    infinite operand inf
     [Heap] Allocs: 0, Frees: 0, Leaked: 0
   EXITCODE: 0
   The [Heap] line is the debug build's heap report.
@@ -42,6 +49,8 @@
       1.0 / 3.0, which float32 cannot hold exactly, into a float32 (SM0200)
     expr_float_const_err_lost_bit.pcpp
       16777216.0 + 1.0 = 16777217, past float32's 24 bits, into a float32 (SM0200)
+    expr_float_const_err_to_int.pcpp
+      the constant NaN cast to an int32: no integer holds it (SM0200)
 *******************************************************************************/
 
 module exe expr_float_const;
@@ -49,6 +58,13 @@ module exe expr_float_const;
 const
   KNeg: float32 = -1.0;
   KSum: float32 = 1.0 + 0.5;
+  // No finite number: each is still a constant (IEEE)
+  KNaN: float64 = 0.0 / 0.0;
+  KInf: float64 = 1.0 / 0.0;
+  KNegInf: float64 = -1.0 / 0.0;
+  KInf32: float32 = 1.0f / 0.0f;
+  KOver: float64 = 1.0e308 * 10.0;
+  KCut32: float32 = float32(1.0e300);
 
 routine Show(const AValue: float32);
 begin
@@ -62,6 +78,7 @@ var
   LD: float32;
   LE: float32;
   LF: float64 = -2.5 * 4.0;
+  LG: float32 = KInf32 * 2.0f;
 
 begin
   LB := -0.5;
@@ -78,4 +95,8 @@ begin
   println("const {} {}", KNeg, KSum);
   Show(-1.0);
   println("float64 {}", LF);
+  println("nan {} {}", KNaN, KNaN <> KNaN);
+  println("infinity {} {} {}", KInf, KNegInf, KInf32);
+  println("overflow {} {}", KOver, KCut32);
+  println("infinite operand {}", LG);
 end.

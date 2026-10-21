@@ -23,11 +23,6 @@
 *******************************************************************************/
 
 module dll dir_copydll_dll;
-@ifdef TARGET_X86_64_LINUX_GNU
-@outputpath "$P:output/dir_copydll_dll_linux";
-@else
-@outputpath "$P:output/dir_copydll_dll";
-@endif
 
 exported routine clink dir_copydll_twice(AN: int32): int32;
 begin

@@ -1,0 +1,164 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  ResData.pcpp - the ResData unit: `import ResData;` reads the data a build
+  added with `@addresdata "key" "path";` back by its key, on every target.
+  Each exe and dll reads its own binary's data: the entries of every module
+  it was built from and of every PaskalCPP lib it links. A name is read bare
+  when no other imported unit exports it (FindResData), or qualified
+  (ResData.FindResData).
+
+  Keys starting "pcpp/" are the compiler's own. On a target that is not
+  Windows, an exe built with @exeicon holds "pcpp/exeicon": the icon's
+  largest image, width and height as little-endian 32-bit integers, then the
+  pixels as 8-bit RGBA (not premultiplied), rows top to bottom.
+==============================================================================*/
+
+module unit ResData;
+
+// The runtime's lookups (pcpp_runtime.h, which every generated file
+// includes) and the helpers the routines below call: the unit's own source
+// only
+cpp source;
+
+#include <cstdint>
+#include <string>
+#include <string_view>
+
+// The bytes of the entry the key names and their count; nullptr and 0 when
+// the binary holds no such key
+static const unsigned char* RuntimeFind(std::string_view AKey, std::int64_t& ASize)
+{
+    const ::pcpp::ResEntry* LEntry = ::pcpp::resdata_find(AKey);
+    if (LEntry == nullptr)
+    {
+        ASize = 0;
+        return nullptr;
+    }
+    ASize = static_cast<std::int64_t>(LEntry->size);
+    return LEntry->data;
+}
+
+// The key at an index of the binary's entries in key order; '' outside
+// 0 .. count - 1
+static std::string RuntimeKeyAt(std::int64_t AIndex)
+{
+    const char* LKey = ::pcpp::resdata_key_at(AIndex);
+    if (LKey == nullptr)
+        return std::string();
+    return std::string(LKey);
+}
+
+static std::int64_t RuntimeCount()
+{
+    return ::pcpp::resdata_count();
+}
+
+/// The bytes one key holds: `Data` points at them and `Size` counts them.
+/// One zero byte follows them, not counted, so text added as a file reads as
+/// a C string. `Data` is nil (and `Size` 0) when the binary holds no such key.
+/// The bytes live as long as the program: never free them.
+/// @since 0.2
+exported type
+  ResDataEntry = record
+    Data: ptr to const uint8;
+    Size: int64;
+  end;
+
+/// The entry a key names, in the binary that calls (each exe and dll reads
+/// its own). Keys compare exactly, case included; the key may be built at
+/// run time.
+/// @param AKey the key an `@addresdata` directive of the build added
+/// @returns the entry, its `Data` nil when the binary holds no such key
+/// @example `LFont := FindResData("fonts/main.ttf");`
+/// @since 0.2
+/// @see HasResData
+exported routine FindResData(const AKey: string): ResDataEntry;
+var
+  LEntry: ResDataEntry;
+begin
+  LEntry.Data := RuntimeFind(AKey, LEntry.Size);
+  return LEntry;
+end;
+
+/// FindResData for a C string; nil names no key (an entry with `Data` nil).
+/// @param AKey the key, a NUL-terminated UTF-8 text
+/// @returns the entry, its `Data` nil when the binary holds no such key
+/// @since 0.2
+/// @see HasResData
+exported routine FindResData(const AKey: ptr to const char): ResDataEntry;
+var
+  LEntry: ResDataEntry;
+begin
+  LEntry.Data := nil;
+  LEntry.Size := 0;
+  if AKey = nil then
+    return LEntry;
+  end;
+  LEntry.Data := RuntimeFind(AKey, LEntry.Size);
+  return LEntry;
+end;
+
+/// Whether the binary that calls holds a key.
+/// @param AKey the key an `@addresdata` directive of the build added
+/// @returns true when FindResData gives the key's bytes
+/// @example `if HasResData("fonts/main.ttf") then ... end;`
+/// @since 0.2
+/// @see FindResData
+exported routine HasResData(const AKey: string): bool;
+begin
+  return FindResData(AKey).Data <> nil;
+end;
+
+/// HasResData for a C string; nil names no key (false).
+/// @param AKey the key, a NUL-terminated UTF-8 text
+/// @returns true when FindResData gives the key's bytes
+/// @since 0.2
+/// @see FindResData
+exported routine HasResData(const AKey: ptr to const char): bool;
+begin
+  return FindResData(AKey).Data <> nil;
+end;
+
+/// How many keys the binary that calls holds, the compiler's own
+/// (`pcpp/exeicon`) included.
+/// @returns the number of entries, 0 when the build added none
+/// @since 0.2
+/// @see ResDataKey
+exported routine ResDataCount(): int64;
+begin
+  return RuntimeCount();
+end;
+
+/// A key of the binary that calls, by its place in key order: byte-wise over
+/// the UTF-8 key, the same on every target, so `ResDataKey(0)` ..
+/// `ResDataKey(ResDataCount() - 1)` lists every key once.
+/// @param AIndex the place, 0 .. ResDataCount() - 1
+/// @returns the key; '' outside 0 .. ResDataCount() - 1
+/// @example
+///   for LIndex := 0 to ResDataCount() - 1 do
+///     println("{}", ResDataKey(LIndex));
+///   end;
+/// @since 0.2
+/// @see ResDataCount
+exported routine ResDataKey(const AIndex: int64): string;
+begin
+  return RuntimeKeyAt(AIndex);
+end;
+
+end.

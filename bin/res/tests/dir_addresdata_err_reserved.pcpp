@@ -1,0 +1,29 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addresdata_err_reserved.pcpp - break step of dir_addresdata.pcpp:
+  the key starts with pcpp/, the compiler's own keys (SM0120)
+
+  How to check, from repo\bin:
+    pcpp res\tests\dir_addresdata_err_reserved.pcpp
+    pcpp res\tests\dir_addresdata_err_reserved.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe dir_addresdata_err_reserved;
+@addresdata "pcpp/hello" "$P:res/tests/dir_addresdata_hello.txt"; // ERROR SM0120@13
+
+begin
+end.

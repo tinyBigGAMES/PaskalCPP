@@ -1,0 +1,164 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  ZipPlayer.pcpp - music streamed and an image shown from a password zip
+  (import sfml_ext). The examples share repo\bin\assets.zip: when it is not
+  there, sfx::buildZip packs res\assets into it (entries res/assets/...,
+  delete it to pack again); the image, the font and the music then come from
+  sfx::ZipStreams over its entries. sf::Music streams: it reads (and on a
+  loop seeks back in) its ZipStream while it plays, on SFML's audio thread.
+  Space pauses / resumes, N plays the next track, Escape or the close
+  button ends it.
+==============================================================================*/
+
+module exe ZipPlayer;
+
+import
+  sfml_ext,
+  SysUtils;
+
+const
+  KPassword: string = "PaskalCPP";
+  KArchive: string = "$P:../../assets.zip";
+
+// buildZip's progress callback: one line as each entry begins
+routine OnProgress(const AEntry: string; const APercent: int32; const ANewFile: bool);
+begin
+  if ANewFile then
+    println("  + {}", AEntry);
+  end;
+end;
+
+// The track N names, in the zip: 0 or 1
+routine TrackEntry(const ATrack: int32): string;
+begin
+  if ATrack = 0 then
+    return "res/assets/audio/music/song01.ogg";
+  end;
+  return "res/assets/audio/music/song02.ogg";
+end;
+
+routine Run();
+var
+  LArchive: string;
+  LFontZip: sfx::ZipStream;
+  LImageZip: sfx::ZipStream;
+  LMusicZip: sfx::ZipStream;
+  LFont: sf::Font;
+  LTexture: sf::Texture;
+  LMusic: sf::Music;
+  LWin: sfx::RenderWindow(sf::Vector2u(800, 450), "PaskalCPP + SFML: assets from a zip");
+  LSprite: sf::Sprite(LTexture);
+  LTrack: int32;
+  LScale: float32;
+  LEvent: std::optional<sf::Event>;
+  LKey: ptr to const sf::Event::KeyPressed;
+begin
+  // The examples' shared archive, repo\bin\assets.zip, packed when it is not
+  // there: entries named below repo\bin (res/assets/...)
+  LArchive := KArchive;
+  if not FileExists(LArchive) then
+    println("packing res\\assets into assets.zip:");
+    if not sfx::buildZip("$P:../../res/assets", LArchive, KPassword, "$P:../..", OnProgress) then
+      println("buildZip failed");
+      return;
+    end;
+  end;
+
+  // Each stream is declared before what reads it, so it lives longer
+  if not LFontZip.open(LArchive, "res/assets/fonts/JetBrainsMonoRegular.ttf", KPassword) then
+    println("the font entry did not open");
+    return;
+  end;
+  if not LFont.openFromStream(LFontZip) then
+    println("the font did not load");
+    return;
+  end;
+
+  if not LImageZip.open(LArchive, "res/assets/images/paskalcpp.png", KPassword) then
+    println("the image entry did not open");
+    return;
+  end;
+  if not LTexture.loadFromStream(LImageZip) then
+    println("the texture did not load");
+    return;
+  end;
+  LTexture.setSmooth(true);
+  LSprite.setTexture(LTexture, true);
+  LScale := 260.0f / float32(LTexture.getSize().y);
+  LSprite.setScale(sf::Vector2f(LScale, LScale));
+  LSprite.setOrigin(sf::Vector2f(float32(LTexture.getSize().x) / 2.0f, float32(LTexture.getSize().y) / 2.0f));
+  LSprite.setPosition(sf::Vector2f(400.0f, 200.0f));
+
+  LTrack := 0;
+  if not LMusicZip.open(LArchive, TrackEntry(LTrack), KPassword) then
+    println("the music entry did not open");
+    return;
+  end;
+  if not LMusic.openFromStream(LMusicZip) then
+    println("the music did not load");
+    return;
+  end;
+  LMusic.setLooping(true);
+  LMusic.play();
+
+  LWin.setFrameColor(sf::Color(24, 24, 32));
+
+  while LWin.isOpen() do
+    LEvent := LWin.pollEvent();
+    while LEvent.has_value() do
+      if LEvent->is<sf::Event::Closed>() then
+        LWin.close();
+      end;
+      LKey := LEvent->getIf<sf::Event::KeyPressed>();
+      if LKey <> nil then
+        if LKey^.scancode = sf::Keyboard::Scancode::Escape then
+          LWin.close();
+        end;
+        if LKey^.scancode = sf::Keyboard::Scancode::Space then
+          if LMusic.getStatus() = sf::SoundSource::Status::Playing then
+            LMusic.pause();
+          else
+            LMusic.play();
+          end;
+        end;
+        if LKey^.scancode = sf::Keyboard::Scancode::N then
+          // The music stops reading before its stream moves to the next entry
+          LMusic.stop();
+          LTrack := 1 - LTrack;
+          if LMusicZip.open(LArchive, TrackEntry(LTrack), KPassword) then
+            if LMusic.openFromStream(LMusicZip) then
+              LMusic.play();
+            end;
+          end;
+        end;
+      end;
+      LEvent := LWin.pollEvent();
+    end;
+
+    LWin.startFrame();
+    LWin.draw(LSprite);
+    LWin.drawText(LFont, FormatStr("{}   {:.1f} s", TrackEntry(LTrack), LMusic.getPlayingOffset().asSeconds()),
+      sf::Vector2f(16.0f, 360.0f), 18, sf::Color(230, 230, 230));
+    LWin.drawText(LFont, "Space pause / resume   N next track   Escape quit",
+      sf::Vector2f(16.0f, 395.0f), 16, sf::Color(160, 200, 160));
+    LWin.endFrame();
+    LWin.display();
+  end;
+end;
+
+begin
+  Run();
+end.

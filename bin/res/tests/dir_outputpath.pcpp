@@ -19,8 +19,8 @@
   C++, zig's folders, the program), in the main module only (BNF.md sec 2).
   It resolves once, as every path directive ($P: = the folder pcpp.exe is
   in), so the CLI and the editor build in the same place. pcpp -o wins over
-  it; without either the folder is output. dll_build.pcpp depends on it:
-  it links its dll from the folder the dll's @outputpath names.
+  it; without either the folder is output. This file names output itself
+  ($P:output): every build writes there, never into a subfolder of it.
 
   How to check, from repo\bin:
     pcpp res\tests\dir_outputpath.pcpp -r
@@ -30,8 +30,8 @@
     [Heap] Allocs: 0, Frees: 0, Leaked: 0
   EXITCODE: 0
   The [Heap] line is the debug build's heap report.
-  CHECK: output\dir_outputpath_out\bin holds the program (output\dir_outputpath_out_linux
-  for the Linux build).
+  CHECK: output\bin holds the program (dir_outputpath.exe on Windows,
+  dir_outputpath on Linux).
 
   Break it: run each file below the same way, without -r; each reports
   exactly what the // comment on its marked line says, and nothing else:
@@ -40,11 +40,7 @@
 *******************************************************************************/
 
 module exe dir_outputpath;
-@ifdef TARGET_X86_64_LINUX_GNU
-@outputpath "$P:output/dir_outputpath_out_linux";
-@else
-@outputpath "$P:output/dir_outputpath_out";
-@endif
+@outputpath "$P:output";
 
 begin
   println("built where the source says");

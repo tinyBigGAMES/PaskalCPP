@@ -22,10 +22,10 @@
   How to check, from repo\bin:
     First build the host once:
             pcpp res\tests\dbg_dll_host.pcpp
-    REPL:   pcpp res\tests\dbg_dll.pcpp -d --host output\dbg_host\bin\dbg_dll_host.exe
+    REPL:   pcpp res\tests\dbg_dll.pcpp -d --host output\bin\dbg_dll_host.exe
             then type each step's words
     Editor: open res\tests\dbg_dll.pcpp, F5: it asks for the host exe,
-            pick output\dbg_host\bin\dbg_dll_host.exe
+            pick output\bin\dbg_dll_host.exe
   Each step: what to type, then "->" what both front-ends show.
 
   Keys (REPL word = editor key):

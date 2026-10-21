@@ -118,6 +118,14 @@ const
   PC_ERR_SEM_117 = 'SM0117';   // the value of @cppdefine <name> is more than one line
   { PC_ERR_SEM_118 }
   PC_ERR_SEM_118 = 'SM0118';   // <this one> conflicts with <earlier one> at <file>:<line>
+  { PC_ERR_SEM_119 }
+  PC_ERR_SEM_119 = 'SM0119';   // @addresdata: the key is empty or holds a control character
+  { PC_ERR_SEM_120 }
+  PC_ERR_SEM_120 = 'SM0120';   // @addresdata: the key starts with the compiler's prefix (pcpp/)
+  { PC_ERR_SEM_121 }
+  PC_ERR_SEM_121 = 'SM0121';   // @addresdata: the key is already added in the build (+ note at the first)
+  { PC_ERR_SEM_122 }
+  PC_ERR_SEM_122 = 'SM0122';   // ResData.Find / Has of a literal key no @addresdata of the build adds (warning)
   { PC_ERR_SEM_200 }
   PC_ERR_SEM_200 = 'SM0200';   // <from> does not convert implicitly to <to>[; write <cast>] | <constant> does not fit in <to> (<low>..<high>)
   { PC_ERR_SEM_202 }
@@ -526,6 +534,13 @@ type
     LabelNode: TPCMatchLabel;
   end;
 
+  { TPCLinkedResDataKeys }
+  // PLAN-RESDATA A5b (1): the built-in data keys the PaskalCPP libraries
+  // this build links hold (data from outside the source: the Compiler reads
+  // the libraries' files). Asked once per Analyze, after every module, and
+  // only when a literal key no directive adds is left to judge
+  TPCLinkedResDataKeys = reference to function(): TArray<string>;
+
   { TPCSemantics }
   TPCSemantics = class(TBaseObject)
   private
@@ -561,6 +576,20 @@ type
     // The first @cppdefine / @cppundef seen for each macro name, across the
     // program's modules (SM0118); lives for one Analyze
     FCppMacros: TDictionary<string, TPCDirective>;
+    // Every @addresdata key of the program's modules -> the directive that
+    // added it first (SM0121: one key space per linked binary); lives for
+    // one Analyze
+    FResDataKeys: TDictionary<string, TPCDirective>;
+    // PLAN-RESDATA A5 (WHAT 4): the literal keys passed to the std ResData's
+    // Find / Has, judged once every module's directives are known (a unit's
+    // call is walked before the main module's directives)
+    FResDataLookups: TList<TPCLiteral>;
+    // The keys of the linked libraries (SetLinkedResDataKeys); nil = none asked
+    FLinkedResDataKeys: TPCLinkedResDataKeys;
+    // The std ResData unit's resolved file (PC_RESDATA_UNIT_FILE), resolved
+    // on the first call that may be one of its lookups
+    FResDataUnitFile: string;
+    FResDataUnitKnown: Boolean;
     // The varargs type node a variadic routine's local is being declared
     // with (SM0422: every other varargs type node is an error)
     FVarargsLocal: TPCTypeExpr;
@@ -661,6 +690,11 @@ type
     class function DoMacroText(const ADirective: TPCDirective): string; static;
     class function DoSameMacro(const AFirst: TPCDirective; const ASecond: TPCDirective): Boolean; static;
     procedure DoCheckCppMacro(const ADirective: TPCDirective);
+    class function DoIsResDataKey(const AText: string): Boolean; static;
+    procedure DoCheckResData(const ADirective: TPCDirective);
+    function DoIsResDataLookup(const ARoutine: TPCRoutine; const AAt: TPCNode): Boolean;
+    procedure DoNoteResDataLookup(const ACall: TPCCall);
+    procedure DoCheckResDataLookups();
     procedure DoReportMessage(const ADirective: TPCDirective);
     procedure DoCheckDirective(const AModule: TPCModule; const ADirective: TPCDirective;
       const AVerInfo: TPCVerInfoState);
@@ -717,6 +751,15 @@ type
     function DoPointerCastTakes(const AFromType: TPCTypeExpr; const ATo: TPCTypeExpr): Boolean;
     function DoConstNotFit(const AValue: TPCExpr; const ATo: TPCTypeExpr; out AValueText: string;
       out ALowText: string; out AHighText: string): Boolean;
+    // An integer type's range as the not-fit message prints it
+    class procedure DoIntRangeText(const ABits: Integer; const AIsUnsigned: Boolean; out ALowText: string;
+      out AHighText: string); static;
+    // A float's integer part held by an integer type of ABits / AIsUnsigned
+    // (C++'s float-to-integer rule): never for a NaN or an infinity
+    class function DoFloatTruncFits(const AValue: Double; const ABits: Integer; const AIsUnsigned: Boolean): Boolean; static;
+    // A cast of a folded float constant to an integer-family type the value
+    // cannot convert to: SM0200 at the cast; True = reported
+    function DoCheckFloatToIntCast(const AExpr: TPCExpr; const AOperand: TPCExpr; const ATarget: TPCTypeExpr): Boolean;
     procedure DoCheckConvert(const AValue: TPCExpr; const ATo: TPCTypeExpr);
     function DoCheckConstant(const AExpr: TPCExpr; const APosition: string): Boolean;
     procedure DoConstLeaf(const AExpr: TPCExpr; const ADecl: TPCConstDecl);
@@ -1094,6 +1137,9 @@ type
     constructor Create(); override;
     // Analyzes every module of AAst, also a tree the parser reported errors on
     procedure Analyze(const AAst: TPCAst);
+    // Where SM0122 finds the keys linked PaskalCPP libraries add (the
+    // Compiler's); not set = only this build's @addresdata keys count
+    procedure SetLinkedResDataKeys(const AQuery: TPCLinkedResDataKeys);
     // The last Analyze's directive paths tested against the disk, each once,
     // without the long-path prefix (the LSP server watches them)
     function DiskPaths(): TArray<string>;
@@ -1130,6 +1176,14 @@ type
     // of AOwner without `override`; one text for SEM and the emitted check
     // (a C/C++ parent's virtual, which only clang sees)
     class function NeedsOverrideText(const AName: string; const AOwner: string): string; static;
+    // SM0013's message, one routine for SEM and the Compiler's report of
+    // clang's unknown type name at a type spelled as an imported unit
+    class function NotTypeText(const AName: string): string; static;
+    // SM0121's messages (PLAN-RESDATA A4b): a data key added twice in one
+    // linked binary, and a separately built library that holds it too (the
+    // Compiler's report of the linker's duplicate key symbol)
+    class function ResKeyTwiceText(const AKey: string): string; static;
+    class function ResKeyLibraryText(const ALibrary: string; const AKey: string): string; static;
     // SM0333 / SM0334's messages for an override on a chain reaching C/C++
     // that clang finds overrides nothing (O13b (4)): ARecordName the object,
     // ACppParent the C/C++ class (SM0333's text is SEM's own too)
@@ -1185,8 +1239,11 @@ begin
   FFrames := nil;
   FDefining := nil;
   FPendingOwners := nil;
+  FResDataLookups := nil;
+  FLinkedResDataKeys := nil;
   FFlow := nil;
   FCppMacros := nil;
+  FResDataKeys := nil;
   FRoutine := nil;
   FIterators := nil;
   FVarargsLocal := nil;
@@ -1206,6 +1263,10 @@ begin
   FFlow := TList<TPCFlowEntry>.Create();
   FIterators := TList<TPCNode>.Create();
   FCppMacros := TDictionary<string, TPCDirective>.Create();
+  FResDataKeys := TDictionary<string, TPCDirective>.Create();
+  FResDataLookups := TList<TPCLiteral>.Create();
+  FResDataUnitFile := '';
+  FResDataUnitKnown := False;
   FRoutine := nil;
   FRecoveredDepth := 0;
   try
@@ -1215,7 +1276,13 @@ begin
         Break;
       DoAnalyzeModule(AAst.ModuleAt(LIndex));
     end;
+    if not DoStopped() then
+      DoCheckResDataLookups();
   finally
+    FResDataLookups.Free();
+    FResDataLookups := nil;
+    FResDataKeys.Free();
+    FResDataKeys := nil;
     FCppMacros.Free();
     FCppMacros := nil;
     FIterators.Free();
@@ -2931,25 +2998,82 @@ begin
   else
     AValueText := IntToStr(AValue.ConstInt);
 
-  // The target's range: unsigned 0 .. 2^N - 1, signed -2^(N-1) .. 2^(N-1) - 1
-  if LIsUnsigned then
+  DoIntRangeText(LBits, LIsUnsigned, ALowText, AHighText);
+  Result := True;
+end;
+
+class procedure TPCSemantics.DoIntRangeText(const ABits: Integer; const AIsUnsigned: Boolean; out ALowText: string;
+  out AHighText: string);
+begin
+  // The range: unsigned 0 .. 2^N - 1, signed -2^(N-1) .. 2^(N-1) - 1
+  if AIsUnsigned then
   begin
     ALowText := '0';
-    if LBits = 64 then
+    if ABits = 64 then
       AHighText := UIntToStr(High(UInt64))
     else
-      AHighText := UIntToStr((UInt64(1) shl LBits) - 1);
+      AHighText := UIntToStr((UInt64(1) shl ABits) - 1);
   end
-  else if LBits = 64 then
+  else if ABits = 64 then
   begin
     ALowText := IntToStr(Low(Int64));
     AHighText := IntToStr(High(Int64));
   end
   else
   begin
-    ALowText := '-' + UIntToStr(UInt64(1) shl (LBits - 1));
-    AHighText := UIntToStr((UInt64(1) shl (LBits - 1)) - 1);
+    ALowText := '-' + UIntToStr(UInt64(1) shl (ABits - 1));
+    AHighText := UIntToStr((UInt64(1) shl (ABits - 1)) - 1);
   end;
+end;
+
+class function TPCSemantics.DoFloatTruncFits(const AValue: Double; const ABits: Integer; const AIsUnsigned: Boolean): Boolean;
+var
+  LLimit: Double;
+begin
+  // C++ [conv.fpint]: the value is truncated toward 0, and the result must
+  // be a value of the integer type (else undefined). So the value must lie
+  // strictly between low - 1 and high + 1. 2^N and 2^(N-1) are exact
+  // doubles; NaN fails every comparison, an infinity both bounds
+  if AIsUnsigned then
+  begin
+    LLimit := Power(2.0, ABits);
+    Exit((AValue > -1.0) and (AValue < LLimit));
+  end;
+  LLimit := Power(2.0, ABits - 1);
+  // low - 1 is no double at 64 bits (-2^63 - 1 rounds to -2^63), so the
+  // low end is "above low - 1, or exactly low": every double below -2^63 is
+  // at least 2^11 below it
+  Result := (AValue < LLimit) and ((AValue > -LLimit - 1.0) or (AValue = -LLimit));
+end;
+
+function TPCSemantics.DoCheckFloatToIntCast(const AExpr: TPCExpr; const AOperand: TPCExpr; const ATarget: TPCTypeExpr): Boolean;
+var
+  LTarget: TPCTokenKind;
+  LBits: Integer;
+  LIsUnsigned: Boolean;
+  LLowText: string;
+  LHighText: string;
+begin
+  // User 2026-10-20 ("fix them all", after the IEEE constants): C++ converts
+  // a float to an integer only when the type holds its integer part; a NaN,
+  // an infinity or a value out of range is undefined, and clang refuses it in
+  // a constant. A folded float constant cast to an integer, char or wchar
+  // type that cannot hold it is a PaskalCPP error (SM0200, the not-fit
+  // text), never a C++ value. One that fits stays C++'s conversion; bool
+  // takes any float (NaN is true), so it is not checked
+  Result := False;
+  if (AOperand = nil) or not AOperand.HasConstFloat or DoIsPoisoned(AOperand) then
+    Exit;
+  if (ATarget = nil) or not DoBuiltinOf(ATarget, LTarget) or (LTarget = tkKwBool) then
+    Exit;
+  if not DoFoldInfo(LTarget, LBits, LIsUnsigned) then
+    Exit;
+  if DoFloatTruncFits(AOperand.ConstFloat, LBits, LIsUnsigned) then
+    Exit;
+  DoIntRangeText(LBits, LIsUnsigned, LLowText, LHighText);
+  DoError(AExpr, PC_ERR_SEM_200, RSSemTypeNotFit, [TPCNode.FloatText(AOperand.ConstFloat), ATarget.TypeText(),
+    LLowText, LHighText]);
+  DoPoison(AExpr);
   Result := True;
 end;
 
@@ -4330,6 +4454,10 @@ begin
       DoStoreFloat(AExpr, LTarget, LValue);
     Exit;
   end;
+  // A folded float constant to an integer-family type: SM0200 when the type
+  // cannot hold it (a NaN, an infinity, out of range); otherwise C++'s
+  if DoCheckFloatToIntCast(AExpr, AOperand, ATarget) then
+    Exit;
   // A cast of a folded integer-family constant to a PaskalCPP integer, bool,
   // char or wchar type: the C++23 conversion (modulo 2^N; to bool <> 0).
   // The node keeps the type it names (an alias stays the alias). F38: a
@@ -4426,21 +4554,29 @@ var
   LMask: TArithmeticExceptionMask;
   LSingle: Single;
   LValue: Double;
+  LNaNBits: UInt64;
 begin
   // Stores a folded float value on AExpr in its type: a float32 one rounded
-  // to float32 (C++'s float arithmetic and conversion). A value that is no
-  // finite number (an overflow, a division by zero) or past float32's range
-  // is not stored: the expression stays unfolded, C++'s as before
+  // to float32 (IEEE arithmetic and conversion, as C++ computes at run time).
+  // A value that is no finite number is stored too (user 2026-10-20, IEEE:
+  // 0.0 / 0.0 is NaN, 1.0 / 0.0 and an overflow are an infinity): C++
+  // refuses to compute one in a constant, so the emitter writes it from here
+  // (TPCExpr.NonFiniteFloat), and nothing reaches clang in a form it refuses
   Result := False;
-  if IsNan(AValue) or IsInfinite(AValue) then
-    Exit;
   LValue := AValue;
+  if IsNan(LValue) then
+  begin
+    // IEEE leaves a NaN's sign and payload open (x86's 0.0 / 0.0 is the
+    // negative one): the one NaN kept is the positive quiet one, the value
+    // std::numeric_limits<T>::quiet_NaN() gives, so the AST and the C++ agree
+    LNaNBits := UInt64($7FF8000000000000);
+    Move(LNaNBits, LValue, SizeOf(LValue));
+  end;
   if AToken = tkKwFloat32 then
   begin
-    if Abs(LValue) > MaxSingle then
-      Exit;
-    // A float32 below its normal range rounds to a denormal or 0, as clang:
-    // the RTL's underflow exception stays masked for the conversion
+    // A float32 below its normal range rounds to a denormal or 0, past its
+    // range to an infinity, as IEEE conversion does: the RTL's underflow and
+    // overflow exceptions stay masked for the conversion
     LMask := GetExceptionMask();
     SetExceptionMask(exAllArithmeticExceptions);
     try
@@ -4481,11 +4617,11 @@ begin
   try
     // A float32 result: an integer operand becomes a float32 first (one
     // rounding); the float32 operation's exact result fits a double, so the
-    // double operation rounded once to float32 below gives C++'s value
+    // double operation rounded once to float32 below gives C++'s value. An
+    // operand is a float32 value (an infinity or a NaN too) or an integer a
+    // double holds exactly: each converts, masked, as IEEE converts it
     if LToken = tkKwFloat32 then
     begin
-      if (Abs(LLeft) > MaxSingle) or (Abs(LRight) > MaxSingle) then
-        Exit;
       LSingle := LLeft;
       LLeft := LSingle;
       LSingle := LRight;
@@ -8486,6 +8622,23 @@ begin
   Result := Format(RSSemDeclNeedsOverride, [AName, AOwner, AName]);
 end;
 
+class function TPCSemantics.NotTypeText(const AName: string): string;
+begin
+  Result := Format(RSSemCoreNotType, [AName]);
+end;
+
+class function TPCSemantics.ResKeyTwiceText(const AKey: string): string;
+begin
+  // SM0121's message, one routine for SEM (two directives of this build) and
+  // the Compiler's report of the linker's duplicate key symbol (A4b)
+  Result := Format(RSSemModResKeyTwice, [AKey]);
+end;
+
+class function TPCSemantics.ResKeyLibraryText(const ALibrary: string; const AKey: string): string;
+begin
+  Result := Format(RSSemModResKeyLibrary, [ALibrary, AKey]);
+end;
+
 class function TPCSemantics.OverridesNothingText(const AName: string; const ARecordName: string): string;
 begin
   // SM0333's message: SEM's (no PaskalCPP level) and the Compiler's (clang:
@@ -10034,13 +10187,19 @@ begin
   LValue := '';
   if ADirective.Args.Count > 0 then
     LValue := ADirective.Args[0].ResolvedText;
-  if ((ADirective.DirectiveKind = bdSubsystem) and (LValue = PC_SEM_VALUE_GUI)) or
-    (ADirective.DirectiveKind = bdExeIcon) then
+  if (ADirective.DirectiveKind = bdSubsystem) and (LValue = PC_SEM_VALUE_GUI) then
   begin
     if AModule.ModuleKind <> mkExe then
       AWhere := RSSemModWhereNotExe
     else if not LWindows then
       AWhere := RSSemModWhereNotWindows;
+  end
+  else if ADirective.DirectiveKind = bdExeIcon then
+  begin
+    // PLAN-RESDATA A6: an exe's icon applies on every target (Windows stamps
+    // it, any other builds it in: TPCModule.ExeIconEntry)
+    if AModule.ModuleKind <> mkExe then
+      AWhere := RSSemModWhereNotExe;
   end
   else if (ADirective.DirectiveKind = bdAddVerInfo) and (LValue = PC_SEM_VALUE_ON) then
   begin
@@ -10247,6 +10406,167 @@ begin
   FCppMacros.Add(LName, ADirective);
 end;
 
+class function TPCSemantics.DoIsResDataKey(const AText: string): Boolean;
+var
+  LIndex: Integer;
+  LCode: Integer;
+begin
+  // A data key (PLAN-RESDATA A2): at least one character, no control
+  // character (C0, DEL, C1). A NUL would cut the key the run time compares,
+  // and a control character is no name a program writes to look it up
+  if AText = '' then
+    Exit(False);
+  for LIndex := 0 to AText.Length - 1 do
+  begin
+    LCode := Ord(AText.Chars[LIndex]);
+    if (LCode < 32) or ((LCode >= 127) and (LCode <= 159)) then
+      Exit(False);
+  end;
+  Result := True;
+end;
+
+procedure TPCSemantics.DoCheckResData(const ADirective: TPCDirective);
+var
+  LKey: string;
+  LPrevious: TPCDirective;
+begin
+  // @addresdata "key" "path" (BNF sec 2): the file exists; the key is a
+  // valid key text (SM0119), not the compiler's (SM0120), and added once in
+  // the whole build (SM0121 at this one, a note at the first): the linker
+  // gathers every module's entries into one key space. The key and the path
+  // are two mistakes of their own: both are judged. An argument the parser
+  // reported (no value) is not judged again
+  if ADirective.Args.Count < 2 then
+    Exit;
+  if ADirective.Args[1].HasValue then
+    DoCheckPath(ADirective.Args[1], False);
+  if not ADirective.Args[0].HasValue then
+    Exit;
+  LKey := ADirective.Args[0].ResolvedText;
+  if not DoIsResDataKey(LKey) then
+  begin
+    DoError(ADirective.Args[0], PC_ERR_SEM_119, RSSemModResKey, []);
+    Exit;
+  end;
+  if LKey.StartsWith(PC_RESDATA_RESERVED_PREFIX) then
+  begin
+    DoError(ADirective.Args[0], PC_ERR_SEM_120, RSSemModResKeyReserved, [LKey, PC_RESDATA_RESERVED_PREFIX]);
+    Exit;
+  end;
+  // Exact case: keys are compared as written
+  if FResDataKeys.TryGetValue(LKey, LPrevious) then
+  begin
+    if DoError(ADirective.Args[0], PC_ERR_SEM_121, RSSemModResKeyTwice, [LKey]) then
+      DoNote(LPrevious.Args[0], RSSemModResKeyFirst, [LKey]);
+    Exit;
+  end;
+  FResDataKeys.Add(LKey, ADirective);
+end;
+
+function TPCSemantics.DoIsResDataLookup(const ARoutine: TPCRoutine; const AAt: TPCNode): Boolean;
+begin
+  // A lookup routine of the std ResData unit: Find or Has, declared in the
+  // module named ResData whose file is the shipped unit (a unit of the same
+  // name beside the program is the person's own, not judged)
+  Result := False;
+  if (ARoutine.DeclName <> PC_RESDATA_FIND) and (ARoutine.DeclName <> PC_RESDATA_HAS) then
+    Exit;
+  if (ARoutine.DeclModule = nil) or (ARoutine.DeclModule.ModuleName <> PC_RESDATA_UNIT_NAME) then
+    Exit;
+  if not FResDataUnitKnown then
+  begin
+    FResDataUnitKnown := True;
+    try
+      FResDataUnitFile := TUtils.ResolvePath(PC_RESDATA_UNIT_FILE);
+    except
+      on E: Exception do
+      begin
+        FResDataUnitFile := '';
+        DoError(AAt, PC_ERR_SEM_107, RSSemModPathCheck, [PC_RESDATA_UNIT_FILE, E.Message]);
+      end;
+    end;
+  end;
+  if FResDataUnitFile = '' then
+    Exit;
+  Result := TUtils.SamePath(ARoutine.DeclModule.SourceFile, FResDataUnitFile);
+end;
+
+procedure TPCSemantics.DoNoteResDataLookup(const ACall: TPCCall);
+var
+  LArg: TPCExpr;
+  LRoutine: TPCRoutine;
+begin
+  // PLAN-RESDATA A5 (WHAT 4): a plain string literal key passed to the std
+  // ResData's Find / Has is kept, and judged against every @addresdata of the
+  // build once all modules are walked (DoCheckResDataLookups). A key built
+  // at run time is never judged
+  if (FRecoveredDepth > 0) or DoIsPoisoned(ACall) or (ACall.Args.Count <> 1) then
+    Exit;
+  LArg := ACall.Args[0];
+  if not (LArg is TPCLiteral) or (TPCLiteral(LArg).LiteralKind <> lkString) then
+    Exit;
+  LRoutine := ACall.TargetRoutine();
+  if (LRoutine = nil) or not DoIsResDataLookup(LRoutine, LArg) then
+    Exit;
+  FResDataLookups.Add(TPCLiteral(LArg));
+end;
+
+procedure TPCSemantics.SetLinkedResDataKeys(const AQuery: TPCLinkedResDataKeys);
+begin
+  FLinkedResDataKeys := AQuery;
+end;
+
+procedure TPCSemantics.DoCheckResDataLookups();
+var
+  LLiteral: TPCLiteral;
+  LKey: string;
+  LLinked: TDictionary<string, Boolean>;
+  LLinkedAsked: Boolean;
+  LLinkedKey: string;
+  LIconBuilt: Boolean;
+  LIndex: Integer;
+begin
+  // SM0122 (warning) at a literal key neither an @addresdata of this build
+  // nor a linked PaskalCPP library adds: Find gives nil for it. The key is
+  // named as written (its decoded text may hold a control character). A wide
+  // literal has no decoded value: never judged. The libraries' keys are asked
+  // for at the first key this build does not add (they are read from disk)
+  // A6 / A8: an exe that builds its icon in (TPCModule.BuildsExeIcon: its
+  // @exeicon or the Compiler's API icon) adds the compiler's own key
+  LIconBuilt := False;
+  for LIndex := 0 to FAst.ModuleCount() - 1 do
+  begin
+    if FAst.ModuleAt(LIndex).BuildsExeIcon() then
+      LIconBuilt := True;
+  end;
+  LLinked := TDictionary<string, Boolean>.Create();
+  try
+    LLinkedAsked := False;
+    for LLiteral in FResDataLookups do
+    begin
+      if not LLiteral.DecodedValue(LKey) then
+        Continue;
+      if FResDataKeys.ContainsKey(LKey) then
+        Continue;
+      if LIconBuilt and (LKey = PC_RESDATA_EXEICON_KEY) then
+        Continue;
+
+      if (not LLinkedAsked) and Assigned(FLinkedResDataKeys) then
+      begin
+        LLinkedAsked := True;
+        for LLinkedKey in FLinkedResDataKeys() do
+          LLinked.AddOrSetValue(LLinkedKey, True);
+      end;
+      if LLinked.ContainsKey(LKey) then
+        Continue;
+
+      DoWarning(LLiteral, PC_ERR_SEM_122, RSSemModResKeyUnknown, [LLiteral.Text]);
+    end;
+  finally
+    LLinked.Free();
+  end;
+end;
+
 procedure TPCSemantics.DoReportMessage(const ADirective: TPCDirective);
 var
   LSeverity: TErrorSeverity;
@@ -10347,7 +10667,9 @@ begin
   else if ADirective.DirectiveKind = bdAddSourceFile then
     DoCheckSourceFile(ADirective.Args[0])
   else if (ADirective.DirectiveKind = bdCppDefine) or (ADirective.DirectiveKind = bdCppUndef) then
-    DoCheckCppMacro(ADirective);
+    DoCheckCppMacro(ADirective)
+  else if ADirective.DirectiveKind = bdAddResData then
+    DoCheckResData(ADirective);
 end;
 
 procedure TPCSemantics.DoModuleDirectives(const AModule: TPCModule);
@@ -12315,6 +12637,7 @@ var
   LFound: TList<TPCNode>;
   LSpelling: string;
   LIndex: Integer;
+  LUnitName: Boolean;
 begin
   if Length(AType.Parts) <> 1 then
   begin
@@ -12347,10 +12670,14 @@ begin
     // A unit's name is a unit only before '.' (Module.Type above); in a type
     // position it is never a candidate, so a C/C++ type spelled as an imported
     // unit (stb_vorbis in the stb_vorbis unit) is reached as C/C++
+    LUnitName := False;
     for LIndex := LFound.Count - 1 downto 0 do
     begin
       if LFound[LIndex] is TPCImport then
+      begin
         LFound.Delete(LIndex);
+        LUnitName := True;
+      end;
     end;
     if LFound.Count > 0 then
       DoBindFoundType(AType, LName, LFound)
@@ -12363,7 +12690,12 @@ begin
       // never a type, so it is no opaque C++ type name either
       DoError(AType, PC_ERR_SEM_013, RSSemCoreNotType, [LName])
     else
+    begin
       AType.ResolvedKind := rkOpaque;
+      // Spelled as an imported unit: C/C++ decides whether such a type exists;
+      // when none does, clang's error there is SM0013 (TPCAst.UnitTypeAt)
+      AType.ResolvedUnitName := LUnitName;
+    end;
   finally
     LFound.Free();
   end;
@@ -14372,6 +14704,7 @@ begin
       Exit;
     end;
     DoPickTarget(ACall, LTargets);
+    DoNoteResDataLookup(ACall);
   finally
     LTargets.Free();
   end;

@@ -37,7 +37,8 @@
   Dependencies: StdApp.Base (TBaseObject, TErrors), StdApp.Utils (paths),
     StdApp.Resources (RSCmp*), PaskalCPP.Common, PaskalCPP.AST,
     PaskalCPP.Parser, PaskalCPP.Semantics, PaskalCPP.Emitter,
-    PaskalCPP.ZigBuild
+    PaskalCPP.Archive (linked libraries' data keys), PaskalCPP.Icon (a
+    non-Windows exe's icon), PaskalCPP.ZigBuild
   Notes: a fresh AST, phases and driver per Compile: nothing carries over
     between two compiles except the caller's settings and the overrides.
 ===============================================================================}
@@ -57,6 +58,8 @@ uses
   PaskalCPP.Parser,
   PaskalCPP.Semantics,
   PaskalCPP.Emitter,
+  PaskalCPP.Archive,
+  PaskalCPP.Icon,
   PaskalCPP.ZigBuild;
 
 const
@@ -72,6 +75,10 @@ const
   PC_ERR_CMP_005 = 'CMP0005';   // warning: the output record could not be written
   { PC_ERR_CMP_006 }
   PC_ERR_CMP_006 = 'CMP0006';   // pcpp --clean refuses a folder (the check that failed is named)
+  { PC_ERR_CMP_007 }
+  PC_ERR_CMP_007 = 'CMP0007';   // warning: a linked library could not be read for its data keys
+  { PC_ERR_CMP_008 }
+  PC_ERR_CMP_008 = 'CMP0008';   // a non-Windows exe's icon could not be decoded / written (PLAN-RESDATA A6)
 
   { PC_CMP_OUTPUT_RECORD }
   // pcpp's own record of an output folder, written by every build (beside
@@ -190,6 +197,9 @@ type
     FKeyDefaults: TDictionary<string, string>;   // defaults: a directive wins over them
     FModulePaths: TArray<string>;                // AddModulePath, in order: the main parser's first module paths
     FMainModule: TPCModule;
+    // SetExeIcon (PLAN-RESDATA A8): as given; resolved onto the main module
+    // (TPCModule.ApiExeIcon) after parsing. An @exeicon wins over it
+    FApiExeIcon: string;
     FSourceFile: string;
     FOutputPath: string;
     FOutputGiven: Boolean;        // Prepare got an explicit folder (-o): @outputpath does not apply
@@ -223,6 +233,11 @@ type
     function DoFormatArgCheck(const AFilename: string; const ALine: UInt64;
       const AColumn: UInt64; out ACode: string; out AText: string; out AOutFilename: string;
       out AOutLine: UInt64; out AOutColumn: UInt64): Boolean;
+    // PLAN-RESDATA A4b: the linker's duplicate symbol of a built-in data key
+    // (TPCZigBuild.SetDuplicateSymbolCheck); True = owned
+    function DoDuplicateSymbolCheck(const ASymbol: string; const AArchives: TArray<string>;
+      out ACode: string; out AText: string; out AOutFilename: string; out AOutLine: UInt64;
+      out AOutColumn: UInt64; out ANotes: TArray<TPCBuildNote>): Boolean;
     procedure DoInternalError(const AException: Exception);
     procedure DoFreePhases();
     procedure DoCreatePhases();
@@ -233,7 +248,14 @@ type
     function DoFrontend(): Boolean;
     procedure DoApplyDirective(const ADirective: TPCDirective);
     procedure DoApplyDirectives(const AModule: TPCModule; const AIsMain: Boolean);
-    procedure DoCollectLinks(const ANode: TPCNode);
+    // Every `external` clause's library under ANode, handed to AAdd in walk order
+    procedure DoCollectLinks(const ANode: TPCNode; const AAdd: TProc<string>);
+    // PLAN-RESDATA A5b (1), SEM's TPCLinkedResDataKeys: the data keys of the
+    // static libraries this build links, read from their symbol indexes
+    function DoLinkedResDataKeys(): TArray<string>;
+    // PLAN-RESDATA A6: a non-Windows exe's icon decoded into its entry file
+    function DoWriteExeIcon(): Boolean;
+    procedure DoApplyApiExeIcon();
     function DoApplyKeys(const AKeys: TDictionary<string, string>): Boolean;
     function DoKeyTarget(const AKeys: TDictionary<string, string>;
       out ATarget: TPCTargetTriple): Boolean;
@@ -333,6 +355,8 @@ type
     function GetBuildMode(): TPCBuildMode;
     function GetOptimizeLevel(): TPCOptimizeLevel;
     function GetSubsystem(): TPCSubsystemType;
+    // The icon the driver stamps (a Windows exe); '' when it stamps none
+    function GetExeIcon(): string;
     function HasDefine(const ADefineName: string): Boolean;
     function GenerateBuildZig(): string;
 
@@ -463,6 +487,78 @@ begin
   end;
 end;
 
+function TPCCompiler.DoDuplicateSymbolCheck(const ASymbol: string; const AArchives: TArray<string>;
+  out ACode: string; out AText: string; out AOutFilename: string; out AOutLine: UInt64;
+  out AOutColumn: UInt64; out ANotes: TArray<TPCBuildNote>): Boolean;
+var
+  LKey: string;
+  LDirective: TPCDirective;
+  LArchive: string;
+  LLibrary: string;
+  LNote: TPCBuildNote;
+  LPrefix: string;
+  LExtension: string;
+  LPlaced: Boolean;
+begin
+  // One data key, two holders in one linked binary: SEM sees only this build's
+  // modules, so a key a separately built library (@linklibrary) also holds
+  // reaches the linker as the key symbol's duplicate (TPCResDataKey). SM0121 in
+  // SEM's words at the key's @addresdata, else (two libraries) at the first
+  // holder's @linklibrary; a note per library holding it, at its naming. The
+  // linker names an archive by its file: the target's library prefix and
+  // extension around the name the source links it by
+  Result := False;
+  ACode := '';
+  AText := '';
+  AOutFilename := '';
+  AOutLine := 0;
+  AOutColumn := 0;
+  ANotes := nil;
+  if (FAst = nil) or (FZigBuild = nil) or (not TPCResDataKey.TryKeyOf(ASymbol, LKey)) then
+    Exit;
+
+  LPlaced := False;
+  LDirective := FAst.ResDataEntryOf(LKey);
+  if LDirective <> nil then
+  begin
+    AOutFilename := LDirective.Args[0].Range.Filename;
+    AOutLine := LDirective.Args[0].Range.StartLine;
+    AOutColumn := LDirective.Args[0].Range.StartColumn;
+    LPlaced := True;
+  end;
+
+  LPrefix := FZigBuild.GetLibPrefix();
+  LExtension := FZigBuild.GetLibExtension();
+  for LArchive in AArchives do
+  begin
+    // An object of this build: its directive holds the report
+    if LArchive = '' then
+      Continue;
+    LLibrary := LArchive;
+    if (LPrefix <> '') and LLibrary.StartsWith(LPrefix) then
+      LLibrary := LLibrary.Substring(Length(LPrefix));
+    if (LExtension <> '') and LLibrary.EndsWith(LExtension, True) then
+      LLibrary := LLibrary.Substring(0, Length(LLibrary) - Length(LExtension));
+
+    LNote := Default(TPCBuildNote);
+    LNote.MessageText := TPCSemantics.ResKeyLibraryText(LLibrary, LKey);
+    // False = linked through the API, not named in the source: no location
+    FAst.LocateLibrary(LLibrary, LNote.Filename, LNote.Line, LNote.Column);
+    if not LPlaced then
+    begin
+      AOutFilename := LNote.Filename;
+      AOutLine := LNote.Line;
+      AOutColumn := LNote.Column;
+      LPlaced := True;
+    end;
+    ANotes := ANotes + [LNote];
+  end;
+
+  ACode := PC_ERR_SEM_121;
+  AText := TPCSemantics.ResKeyTwiceText(LKey);
+  Result := True;
+end;
+
 function TPCCompiler.DoFrontendCheck(const AFilename: string; const ALine: UInt64;
   const AColumn: UInt64; const AMessage: string; const AEvaluated: string;
   const AFlag: string; out ACode: string; out AText: string; out AOutFilename: string;
@@ -481,6 +577,7 @@ var
   LMethod: TPCMethodItem;
   LCppParent: string;
   LRange: TSourceRange;
+  LUnitType: TPCNamedType;
 begin
   // One of the emitter's align checks failed: its code at the record's align
   // value, the message SEM writes for it (TPCSemantics.Align*Text). The
@@ -552,6 +649,20 @@ begin
   if AMessage.Contains(PC_CLANG_FORMAT_STRING) and AMessage.Contains(PC_CLANG_NOT_CONSTANT) then
     Exit(DoFormatStringCheck(AFilename, ALine, AColumn, ACode, AText, AOutFilename, AOutLine,
       AOutColumn));
+  // A PaskalCPP type spelled as an imported unit is reached as C/C++ (SEM:
+  // a unit is a unit only before '.'); when clang knows no such type, the
+  // name is no type at all: SM0013 in SEM's words, at the type
+  if AMessage.Contains(PC_CLANG_UNKNOWN_TYPE) then
+  begin
+    if not FAst.UnitTypeAt(AFilename, ALine, AColumn, LUnitType) then
+      Exit;
+    ACode := PC_ERR_SEM_013;
+    AText := TPCSemantics.NotTypeText(LUnitType.TypeText());
+    AOutFilename := LUnitType.Range.Filename;
+    AOutLine := LUnitType.Range.StartLine;
+    AOutColumn := LUnitType.Range.StartColumn;
+    Exit(True);
+  end;
   // PLAN-OBJECT O13b: a rule SEM left to clang's view of an object's
   // polymorphism (a C/C++ base): the expression SEM marked, its code by the
   // rule, SEM's own message (TPCExpr.ResolvedPolyText)
@@ -984,6 +1095,11 @@ begin
   Result := FZigBuild.GetOptimizeLevel();
 end;
 
+function TPCCompiler.GetExeIcon(): string;
+begin
+  Result := FZigBuild.GetExeIcon();
+end;
+
 function TPCCompiler.GetSubsystem(): TPCSubsystemType;
 begin
   Result := FZigBuild.GetSubsystem();
@@ -1222,11 +1338,10 @@ end;
 
 procedure TPCCompiler.SetExeIcon(const AValue: string);
 begin
-  DoAddSetup(
-    procedure(const AZig: TPCZigBuild)
-    begin
-      AZig.SetExeIcon(AValue);
-    end);
+  // PLAN-RESDATA A8: kept, not a driver setup: a non-Windows exe builds it in
+  // (TPCModule.BuildsExeIcon), any other build hands it to the driver unless
+  // the main module's @exeicon wins (DoApplyApiExeIcon)
+  FApiExeIcon := AValue;
 end;
 
 procedure TPCCompiler.SetBuildConfigPath(const APath: string);
@@ -1260,6 +1375,8 @@ begin
   FAst.SetErrors(FErrors);
   FSemantics := TPCSemantics.Create();
   FSemantics.SetErrors(FErrors);
+  // SM0122 counts the keys the linked PaskalCPP libraries hold too
+  FSemantics.SetLinkedResDataKeys(DoLinkedResDataKeys);
   FEmitter := TPCEmitter.Create();
   FEmitter.SetErrors(FErrors);
   FZigBuild := TPCZigBuild.Create();
@@ -1385,6 +1502,20 @@ begin
   FMainModule := ParseModuleFile(FAst, FErrors, FSourceFile, nil,
     Default(TPCTargetTriple), LOverride, LDefault, FModulePaths, FSourceProvider, ACheckOnly);
 
+  // A8: the API icon is AST data before SEM (its key counts for SM0122)
+  if (FMainModule <> nil) and (FApiExeIcon <> '') then
+  begin
+    try
+      FMainModule.ApiExeIcon := TUtils.ResolvePath(FApiExeIcon);
+    except
+      on E: Exception do
+      begin
+        FErrors.Add(esFatal, PC_ERR_CMP_001, RSCmpPathFailed, [FApiExeIcon, E.Message]);
+        Exit;
+      end;
+    end;
+  end;
+
   FSemantics.Analyze(FAst);
   Result := not FErrors.HasErrors();
 end;
@@ -1430,7 +1561,55 @@ begin
   FEmitter.Init(FAst, FMainModule);
   if not FEmitter.WriteFiles(FGeneratedPath) then
     Exit;
+  if not DoWriteExeIcon() then
+    Exit;
   Result := not FErrors.HasErrors();
+end;
+
+function TPCCompiler.DoWriteExeIcon(): Boolean;
+var
+  LDirective: TPCDirective;
+  LIconPath: string;
+  LEntryPath: string;
+  LFailure: string;
+begin
+  // PLAN-RESDATA A6: the entry the emitter's #embed names beside the
+  // generated sources (PC_RESDATA_EXEICON_FILE): the icon's largest frame
+  // as RGBA, decoded here at build time (TPCIconImage). A failure is an
+  // error at the icon's path (A8: an API icon has no location); nothing is
+  // built
+  Result := True;
+  LIconPath := FMainModule.ExeIconPath();
+  if LIconPath = '' then
+    Exit;
+  LEntryPath := TUtils.JoinResolvedPath(FGeneratedPath, PC_RESDATA_EXEICON_FILE);
+  if not TPCIconImage.WriteEntryFile(LIconPath, LEntryPath, LFailure) then
+  begin
+    LDirective := FMainModule.ExeIconEntry();
+    if LDirective <> nil then
+      FErrors.Add(LDirective.Args[0].Range, esError, PC_ERR_CMP_008, RSCmpExeIconFailed, [LIconPath, LFailure])
+    else
+      FErrors.Add(esError, PC_ERR_CMP_008, RSCmpExeIconFailed, [LIconPath, LFailure]);
+    Result := False;
+  end;
+end;
+
+procedure TPCCompiler.DoApplyApiExeIcon();
+var
+  LDirective: TPCDirective;
+begin
+  // A8: the API icon goes to the driver (a Windows stamp; ZB0019 for a
+  // non-exe) unless the main module's @exeicon wins over it or the exe
+  // builds it in (TPCModule.BuildsExeIcon)
+  if (FApiExeIcon = '') or FMainModule.BuildsExeIcon() then
+    Exit;
+  for LDirective in FMainModule.Directives do
+  begin
+    if (LDirective.DirectiveKind = bdExeIcon) and (LDirective.Args.Count >= 1) and
+      LDirective.Args[0].HasValue then
+      Exit;
+  end;
+  FZigBuild.SetExeIcon(FMainModule.ApiExeIcon);
 end;
 
 procedure TPCCompiler.DoApplyDirective(const ADirective: TPCDirective);
@@ -1484,7 +1663,13 @@ begin
     bdVICopyright:
       FZigBuild.SetVICopyright(LValue);
     bdExeIcon:
-      FZigBuild.SetExeIcon(LValue);
+      begin
+        // A6: an icon a non-Windows exe builds in is the emitter's entry
+        // (TPCModule.ExeIconEntry, DoWriteExeIcon): the driver stamps only
+        // a Windows one (else it warns ZB0019)
+        if ADirective <> FMainModule.ExeIconEntry() then
+          FZigBuild.SetExeIcon(LValue);
+      end;
     bdCopyDLL:
       FZigBuild.AddCopyDLL(LValue);
     bdLinkLibrary:
@@ -1507,8 +1692,10 @@ begin
       FZigBuild.UnsetDefine(LValue);
     // Read elsewhere: @target by the filter (TPCModule.ResolvedTarget),
     // @unittestmode by the emitter, @addmodulepath by the parser, @breakpoint
-    // and @message by SEM, @outputpath by DoApplyOutputPath (before emitting)
-    bdTarget, bdUnitTestMode, bdAddModulePath, bdBreakpoint, bdMessage, bdOutputPath:
+    // and @message by SEM, @outputpath by DoApplyOutputPath (before emitting),
+    // @addresdata by the emitter (each module's entries in its own TU)
+    bdTarget, bdUnitTestMode, bdAddModulePath, bdBreakpoint, bdMessage, bdOutputPath,
+    bdAddResData:
       ;
   end;
 end;
@@ -1529,7 +1716,7 @@ begin
   end;
 end;
 
-procedure TPCCompiler.DoCollectLinks(const ANode: TPCNode);
+procedure TPCCompiler.DoCollectLinks(const ANode: TPCNode; const AAdd: TProc<string>);
 begin
   // Every `external` clause's library (SEM: TPCExternal.ResolvedLib)
   if ANode = nil then
@@ -1538,19 +1725,101 @@ begin
   if ANode is TPCVarDecl then
   begin
     if TPCVarDecl(ANode).ExternalClause.ResolvedLib <> '' then
-      FZigBuild.AddLinkLibrary(TPCVarDecl(ANode).ExternalClause.ResolvedLib);
+      AAdd(TPCVarDecl(ANode).ExternalClause.ResolvedLib);
   end
   else if ANode is TPCRoutine then
   begin
     if TPCRoutine(ANode).ExternalClause.ResolvedLib <> '' then
-      FZigBuild.AddLinkLibrary(TPCRoutine(ANode).ExternalClause.ResolvedLib);
+      AAdd(TPCRoutine(ANode).ExternalClause.ResolvedLib);
   end;
 
   ANode.EnumChildren(
     procedure(const AChild: TPCNode)
     begin
-      DoCollectLinks(AChild);
+      DoCollectLinks(AChild, AAdd);
     end);
+end;
+
+function TPCCompiler.DoLinkedResDataKeys(): TArray<string>;
+var
+  LPaths: TArray<string>;
+  LLibraries: TArray<string>;
+  LIndex: Integer;
+  LModule: TPCModule;
+  LDirective: TPCDirective;
+  LTarget: TPCTargetTriple;
+  LLibrary: string;
+  LFile: string;
+  LFiles: TDictionary<string, Boolean>;
+  LSymbols: TArray<string>;
+  LSymbol: string;
+  LKey: string;
+  LFailure: string;
+begin
+  // The paths and libraries the driver will link with, in its order: the
+  // program's API settings (already on the driver, DoCreatePhases), then each
+  // module's applied directives and its `external` clauses (DoConfigureBuild).
+  // Each library's file by the linker's own search (TPCZigBuild.FindLinkFile);
+  // only a static library's symbol index holds keys (a shared library's or a
+  // dll's import library's data is its own binary's), each file read once
+  Result := nil;
+  if (FAst = nil) or (FZigBuild = nil) or (FMainModule = nil) then
+    Exit;
+
+  LPaths := FZigBuild.GetLibraryPaths();
+  LLibraries := FZigBuild.GetLinkLibraries();
+  for LIndex := 0 to FAst.ModuleCount() - 1 do
+  begin
+    LModule := FAst.ModuleAt(LIndex);
+    for LDirective in LModule.Directives do
+    begin
+      if LDirective.ResolvedNoEffect or (LDirective.Args.Count = 0) then
+        Continue;
+      if PC_BUILD_DIRECTIVES[LDirective.DirectiveKind].IsMainOnly and
+        (LModule <> FMainModule) then
+        Continue;
+      if LDirective.DirectiveKind = bdAddLibraryPath then
+        LPaths := LPaths + [LDirective.Args[0].ResolvedText]
+      else if LDirective.DirectiveKind = bdLinkLibrary then
+        LLibraries := LLibraries + [LDirective.Args[0].ResolvedText];
+    end;
+    DoCollectLinks(LModule,
+      procedure(ALibrary: string)
+      begin
+        LLibraries := LLibraries + [ALibrary];
+      end);
+  end;
+
+  // The target decides the library's file name (Prepare's ResolvedTarget:
+  // the override, else @target, else the default)
+  LTarget := FMainModule.ResolvedTarget;
+  if LTarget.IsEmpty() then
+    LTarget := TPCTargetTriple.DefaultTriple();
+
+  LFiles := TDictionary<string, Boolean>.Create();
+  try
+    for LLibrary in LLibraries do
+    begin
+      if not TPCZigBuild.FindLinkFile(LTarget.IsWindows(), LPaths, LLibrary, LFile) then
+        Continue;
+      if LFiles.ContainsKey(LFile) then
+        Continue;
+      LFiles.Add(LFile, True);
+
+      // A file that cannot be read: its keys are unknown, so a key only it
+      // holds would warn wrongly; said once, the build goes on
+      if not TPCArchiveIndex.ReadFileSymbols(LFile, LSymbols, LFailure) then
+      begin
+        FErrors.Add(esWarning, PC_ERR_CMP_007, RSCmpLibraryUnreadable, [LFile, LFailure]);
+        Continue;
+      end;
+      for LSymbol in LSymbols do
+        if TPCResDataKey.TryKeyOf(LSymbol, LKey) then
+          Result := Result + [LKey];
+    end;
+  finally
+    LFiles.Free();
+  end;
 end;
 
 function TPCCompiler.DoApplyKeys(const AKeys: TDictionary<string, string>): Boolean;
@@ -1657,6 +1926,8 @@ begin
   FZigBuild.SetGeneratedFileTest(DoIsGeneratedFile);
   // The emitter's own checks clang judges: reported in PaskalCPP words
   FZigBuild.SetFrontendCheck(DoFrontendCheck);
+  // A data key a separately built library holds too: SM0121, as SEM's
+  FZigBuild.SetDuplicateSymbolCheck(DoDuplicateSymbolCheck);
 end;
 
 function TPCCompiler.DoConfigureBuild(): Boolean;
@@ -1672,8 +1943,13 @@ begin
   begin
     LModule := FAst.ModuleAt(LIndex);
     DoApplyDirectives(LModule, LModule = FMainModule);
-    DoCollectLinks(LModule);
+    DoCollectLinks(LModule,
+      procedure(ALibrary: string)
+      begin
+        FZigBuild.AddLinkLibrary(ALibrary);
+      end);
   end;
+  DoApplyApiExeIcon();
 
   if not DoApplyKeys(FKeyValues) then
     Exit(False);

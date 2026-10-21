@@ -36,11 +36,11 @@
 
 module exe dll_build;
 @ifdef TARGET_X86_64_LINUX_GNU
-@addlibrarypath "$P:output/dll_build_dll_linux/bin";
-@copydll "$P:output/dll_build_dll_linux/bin/libdll_build_dll.so";
+@addlibrarypath "$P:output/bin";
+@copydll "$P:output/bin/libdll_build_dll.so";
 @else
-@addlibrarypath "$P:output/dll_build_dll/lib";
-@copydll "$P:output/dll_build_dll/bin/dll_build_dll.dll";
+@addlibrarypath "$P:output/lib";
+@copydll "$P:output/bin/dll_build_dll.dll";
 @endif
 @linklibrary "dll_build_dll";
 

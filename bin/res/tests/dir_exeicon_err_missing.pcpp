@@ -16,9 +16,9 @@
   dir_exeicon_err_missing.pcpp - break step of dir_exeicon.pcpp: an icon file
   that does not exist (the report names the resolved path)
 
-  How to check, from repo\bin (Windows only: on Linux @exeicon is a warning
-  and is not checked, dir_exeicon_err_linux.pcpp):
+  How to check, from repo\bin (both targets):
     pcpp res\tests\dir_exeicon_err_missing.pcpp
+    pcpp res\tests\dir_exeicon_err_missing.pcpp -t x86_64-linux-gnu
   The marked line reports that code; nothing else is reported.
 *******************************************************************************/
 

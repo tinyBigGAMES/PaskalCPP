@@ -1,0 +1,45 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addresdata.pcpp - Directive compliance: @addresdata
+
+  @addresdata "<key>" "<path>"; builds the file at <path> into the program
+  under <key>, the same on every target (BNF.md sec 2). Any module may give
+  it, as many times as it needs. The key is text, read as written; the path
+  resolves once, as every path directive ($P: = the folder pcpp.exe is in).
+  dir_addresdata_hello.txt beside this file is the data it adds.
+
+  How to check, from repo\bin:
+    pcpp res\tests\dir_addresdata.pcpp
+    pcpp res\tests\dir_addresdata.pcpp -t x86_64-linux-gnu
+  Nothing is reported.
+
+  Break it: run each file below the same way; each reports exactly what the
+  // comment on its marked line says, and nothing else:
+    dir_addresdata_err_shape.pcpp       the path after the key is missing
+    dir_addresdata_err_nofile.pcpp      the path names no existing file
+    dir_addresdata_err_key.pcpp         the key is empty
+    dir_addresdata_err_reserved.pcpp    the key starts with pcpp/ (the compiler's)
+    dir_addresdata_err_duplicate.pcpp   a key an imported unit already adds
+    dir_addresdata_err_duplicate_lib.pcpp   a key a separately built library adds too
+                                        (linked: dir_addresdata_err_duplicate_lib_dep.pcpp)
+*******************************************************************************/
+
+module exe dir_addresdata;
+@addresdata "hello" "$P:res/tests/dir_addresdata_hello.txt";
+@addresdata "texts/hello again" "$P:res/tests/dir_addresdata_hello.txt";
+
+begin
+end.

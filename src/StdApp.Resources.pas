@@ -478,6 +478,8 @@ resourcestring
   RSParShapeCString = 'a string literal';
   { RSParShapeCStrings }
   RSParShapeCStrings = 'a string literal, then optionally a second one';
+  { RSParShapeKeyPath }
+  RSParShapeKeyPath = 'a key string literal, then a file path string literal';
   { RSParShapeSeverity }
   RSParShapeSeverity = 'a severity (hint, warn, error, fatal) and a string literal';
   { RSParSeverity }
@@ -790,6 +792,18 @@ resourcestring
   RSSemModMacroLines = 'the value of @cppdefine "%s" is more than one line';
   { RSSemModMacroConflict }
   RSSemModMacroConflict = '%s conflicts with %s at %s:%d: one name has one meaning in the build';
+  { RSSemModResKey }
+  RSSemModResKey = 'this data key is not valid: a key needs at least one character and no control characters';
+  { RSSemModResKeyReserved }
+  RSSemModResKeyReserved = 'the data key "%s" starts with "%s": those keys are the compiler''s';
+  { RSSemModResKeyTwice }
+  RSSemModResKeyTwice = 'the data key "%s" is already added: one key holds one file in the build';
+  { RSSemModResKeyFirst }
+  RSSemModResKeyFirst = 'the data key "%s" is first added here';
+  { RSSemModResKeyLibrary }
+  RSSemModResKeyLibrary = 'the library "%s" holds the data key "%s" too';
+  { RSSemModResKeyUnknown }
+  RSSemModResKeyUnknown = 'no @addresdata of this build and no static library it links adds the data key %s: the lookup finds nothing';
   { RSSemModPathCheck }
   RSSemModPathCheck = 'cannot check ''%s'': %s';
   { RSSemModMessage }
@@ -1441,6 +1455,14 @@ resourcestring
   RSCmpRemovedStaleRuntime = 'Removed %s: this lib no longer uses the runtime';
   { RSCmpStaleRuntime }
   RSCmpStaleRuntime = 'cannot remove the stale runtime library %s (this lib no longer uses the runtime): %s';
+  { RSCmpLibraryUnreadable }
+  RSCmpLibraryUnreadable = 'cannot read the library %s for the built-in data keys it holds: %s';
+  { RSCmpExeIconFailed }
+  RSCmpExeIconFailed = 'cannot build the icon %s into the program: %s';
+  { RSIcoWicFailed }
+  RSIcoWicFailed = '%s failed (0x%.8x) %s';
+  { RSIcoNoFrame }
+  RSIcoNoFrame = 'the file holds no image';
   { RSCmpRecordFailed }
   RSCmpRecordFailed = 'cannot write the output record %s: %s (pcpp --clean will refuse this folder)';
   { RSCmpCleanBadFolder }

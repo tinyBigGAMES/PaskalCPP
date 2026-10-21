@@ -22,7 +22,10 @@
     points to; Swap takes two pointers and writes through both;
   - a ptr to T converts to a ptr to const T and to the untyped ptr; a
     pointer cast, ptr to T(x), goes back from ptr, from an integer of
-    pointer width (uint64) and to one (uint64(P));
+    pointer width (uint64) and to one (uint64(P)); a typed pointer is cast
+    to another typed pointer, by ptr to T(x) and through a pointer type's
+    name (TByteRef(LP)): both read LA's first byte (7, both targets are
+    little-endian);
   - a ptr to ptr to int32 (LPP^^), a ptr to an array (LAQ^[3]), a ptr to a
     record (LR^.X and LR->Y), a pointer alias (TPointRef) returned by a
     routine, nil compared;
@@ -49,6 +52,7 @@
     nil true false
     text pointer cast
     cast back 7
+    bytes 7 7
     size 8 8
     [Heap] Allocs: 0, Frees: 0, Leaked: 0
   EXITCODE: 0
@@ -95,6 +99,7 @@ type
     Y: int32;
   end;
   TPointRef = ptr to TPoint;
+  TByteRef = ptr to uint8;
   TQuad = array[0..3] of int32;
 
 routine Swap(AA: ptr to int32; AB: ptr to int32);
@@ -142,6 +147,8 @@ var
   LPt: TPoint;
   LR: TPointRef;
   LText: ptr to const char;
+  LBytes: ptr to uint8;
+  LByteRef: TByteRef;
 
 begin
   LP := address of LA;
@@ -181,5 +188,9 @@ begin
   println("text {} {}", LText, ptr to const char("cast"));
   LP := ptr to int32(LU);
   println("cast back {}", LP^);
+  // A typed pointer to another typed pointer, by either spelling of the cast
+  LBytes := ptr to uint8(LP);
+  LByteRef := TByteRef(LP);
+  println("bytes {} {}", LBytes^, LByteRef^);
   println("size {} {}", size(ptr to int32), size(ptr));
 end.

@@ -28,14 +28,14 @@
     pcpp res\tests\lib_runtime.pcpp
     pcpp res\tests\lib_runtime.pcpp -t x86_64-linux-gnu
   CHECK: each prints "Publishing pcpp_runtime.lib to ..." (Linux: libpcpp_runtime.a);
-  output\lib_runtime\lib holds lib_runtime.lib and pcpp_runtime.lib;
-  output\lib_runtime_linux\lib holds liblib_runtime.a and libpcpp_runtime.a.
+  output\lib holds lib_runtime.lib and pcpp_runtime.lib (windows),
+  liblib_runtime.a and libpcpp_runtime.a (linux).
   Then lib_runtime_host.pcpp (a PaskalCPP program that links it).
 
   A C program built by another toolchain: the lib, then pcpp_runtime, a C++ driver:
-    res\zig\zig.exe c++ -target x86_64-windows-gnu res\tests\lib_runtime_host.c output\lib_runtime\lib\lib_runtime.lib output\lib_runtime\lib\pcpp_runtime.lib -o output\lib_runtime_c.exe
+    res\zig\zig.exe c++ -target x86_64-windows-gnu res\tests\lib_runtime_host.c output\lib\lib_runtime.lib output\lib\pcpp_runtime.lib -o output\lib_runtime_c.exe
     output\lib_runtime_c.exe
-    res\zig\zig.exe c++ -target x86_64-linux-gnu res\tests\lib_runtime_host.c output\lib_runtime_linux\lib\liblib_runtime.a output\lib_runtime_linux\lib\libpcpp_runtime.a -o output\lib_runtime_c
+    res\zig\zig.exe c++ -target x86_64-linux-gnu res\tests\lib_runtime_host.c output\lib\liblib_runtime.a output\lib\libpcpp_runtime.a -o output\lib_runtime_c
     wsl ./output/lib_runtime_c
   CHECK: both print   from C: lib_rt_div(7, 2) = 3
   and the [Heap] line (pcpp_runtime was built debug, as the lib), exit code 0.
@@ -48,11 +48,6 @@
 *******************************************************************************/
 
 module lib lib_runtime;
-@ifdef TARGET_X86_64_LINUX_GNU
-@outputpath "$P:output/lib_runtime_linux";
-@else
-@outputpath "$P:output/lib_runtime";
-@endif
 
 exported routine clink lib_rt_div(AA: int32; AB: int32): int32;
 begin

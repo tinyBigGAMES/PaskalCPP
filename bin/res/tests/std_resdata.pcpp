@@ -1,0 +1,165 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_resdata.pcpp - Std library compliance: the ResData unit
+  (res\libs\std\ResData.pcpp)
+
+  ResData reads back by key the files a build added with
+  `@addresdata "key" "path";`. This program holds the keys of its own
+  directives, of the unit it imports (std_resdata_unit) and of the library it
+  links (std_resdata_lib, built apart): ResDataKey lists all six in byte-wise
+  key order ("bin" "empty" "lib" "text" "unit", then the UTF-8 "été/note"),
+  the same on both targets, and '' outside 0 .. ResDataCount() - 1.
+  FindResData gives a key's bytes and their count, one zero byte after them
+  (a text reads as a C string, an empty file gives a non-nil Data and that
+  one zero byte); a binary file comes back byte for byte (0 .. 255, sum
+  32640). One file may be added under two keys. The dll it links
+  (std_resdata_dll) reads only its own binary's data: one key, and not the
+  program's "text"; the program does not see the dll's key either. A key no
+  directive adds gives Data nil and Size 0, and nil as a key gives nothing.
+  Key strings built at run time are looked up as literals are (the library's
+  key from this program). A literal key that neither a directive of this
+  build nor a linked static library adds is a warning (SM0122), on the three
+  marked lines: the library's "lib" is no warning, the dll's "dll" is (a
+  dll's data is its own binary's).
+
+  How to check, from repo\bin (the library and the dll first):
+    pcpp res\tests\std_resdata_lib.pcpp
+    pcpp res\tests\std_resdata_dll.pcpp
+    pcpp res\tests\std_resdata.pcpp -r
+    pcpp res\tests\std_resdata_lib.pcpp -t x86_64-linux-gnu
+    pcpp res\tests\std_resdata_dll.pcpp -t x86_64-linux-gnu
+    pcpp res\tests\std_resdata.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
+  EXPECT:
+    count 6
+    key 0 = bin
+    key 1 = empty
+    key 2 = lib
+    key 3 = text
+    key 4 = unit
+    key 5 = été/note
+    key -1 = ''
+    key 6 = ''
+    text 25 'Hello from built-in data.'
+    bin 256 sum 32640 first 0 last 255 after 0
+    empty 0 data true after 0
+    été/note 25 'Hello from built-in data.'
+    unit 9 'unit data' from the unit 9
+    lib 8 'lib data' from the lib 8
+    lib literal 8
+    dll keys 1 size 9 sees text false
+    program has dll false
+    program has dll literal false
+    missing has false
+    missing data nil true size 0
+    nil key false
+    qualified 25
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+  Two [Heap] lines: the program's and the debug dll's own.
+*******************************************************************************/
+
+module exe std_resdata;
+@ifdef TARGET_X86_64_LINUX_GNU
+@addlibrarypath "$P:output/lib";
+@addlibrarypath "$P:output/bin";
+@copydll "$P:output/bin/libstd_resdata_dll.so";
+@else
+@addlibrarypath "$P:output/lib";
+@copydll "$P:output/bin/std_resdata_dll.dll";
+@endif
+@linklibrary "std_resdata_lib";
+@linklibrary "std_resdata_dll";
+@addresdata "text" "$P:res/tests/std_resdata_text.txt";
+@addresdata "bin" "$P:res/tests/std_resdata_bin.dat";
+@addresdata "empty" "$P:res/tests/std_resdata_empty.txt";
+@addresdata "été/note" "$P:res/tests/std_resdata_text.txt";
+
+import ResData, std_resdata_unit;
+
+routine clink std_resdata_lib_size(): int64; external;
+routine clink std_resdata_dll_count(): int64; external;
+routine clink std_resdata_dll_size(): int64; external;
+routine clink std_resdata_dll_sees_text(): bool; external;
+
+type
+  PChar = ptr to const char;
+
+var
+  LEntry: ResDataEntry;
+  LIndex: int64;
+  LSum: int64;
+  LKey: string;
+  LNoKey: PChar;
+
+begin
+  // Every key this program holds, in key order
+  println("count {}", ResDataCount());
+  for LIndex := 0 to ResDataCount() - 1 do
+    println("key {} = {}", LIndex, ResDataKey(LIndex));
+  end;
+  println("key -1 = '{}'", ResDataKey(-1));
+  println("key {} = '{}'", ResDataCount(), ResDataKey(ResDataCount()));
+
+  // A text: its bytes read as a C string (the zero byte after them)
+  LEntry := FindResData("text");
+  println("text {} '{}'", LEntry.Size, PChar(LEntry.Data));
+
+  // A binary file, byte for byte, and the zero byte after it
+  LEntry := FindResData("bin");
+  LSum := 0;
+  for LIndex := 0 to LEntry.Size - 1 do
+    LSum := LSum + LEntry.Data[LIndex];
+  end;
+  println("bin {} sum {} first {} last {} after {}", LEntry.Size, LSum, LEntry.Data[0],
+    LEntry.Data[255], LEntry.Data[LEntry.Size]);
+
+  // An empty file: no bytes, still a Data with the zero byte
+  LEntry := FindResData("empty");
+  println("empty {} data {} after {}", LEntry.Size, LEntry.Data <> nil, LEntry.Data[0]);
+
+  // The same file under a second key, a UTF-8 one
+  LEntry := FindResData("été/note");
+  println("été/note {} '{}'", LEntry.Size, PChar(LEntry.Data));
+
+  // The unit's key, from here and from the unit itself
+  LEntry := FindResData("unit");
+  println("unit {} '{}' from the unit {}", LEntry.Size, PChar(LEntry.Data), UnitSize());
+
+  // The library's key, built at run time and as a literal: this build adds no
+  // "lib", the linked library does, so the literal is no warning
+  LKey := "lib";
+  LEntry := FindResData(LKey);
+  println("lib {} '{}' from the lib {}", LEntry.Size, PChar(LEntry.Data), std_resdata_lib_size());
+  println("lib literal {}", FindResData("lib").Size);
+
+  // The dll reads its own binary's data; this program does not see its key
+  println("dll keys {} size {} sees text {}", std_resdata_dll_count(), std_resdata_dll_size(),
+    std_resdata_dll_sees_text());
+  LKey := "dll";
+  println("program has dll {}", HasResData(LKey));
+  println("program has dll literal {}", HasResData("dll")); // WARN SM0122
+
+  // A key nobody adds, and nil as a key
+  println("missing has {}", HasResData("nope")); // WARN SM0122
+  LEntry := FindResData("nope"); // WARN SM0122
+  println("missing data nil {} size {}", LEntry.Data = nil, LEntry.Size);
+  LNoKey := nil;
+  println("nil key {}", HasResData(LNoKey));
+
+  // Qualified names
+  println("qualified {}", ResData.FindResData("text").Size);
+end.

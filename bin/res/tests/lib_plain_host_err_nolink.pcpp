@@ -24,11 +24,7 @@
 *******************************************************************************/
 
 module exe lib_plain_host_err_nolink;
-@ifdef TARGET_X86_64_LINUX_GNU
-@addlibrarypath "$P:output/lib_plain_linux/lib";
-@else
-@addlibrarypath "$P:output/lib_plain/lib";
-@endif
+@addlibrarypath "$P:output/lib";
 
 routine clink lib_plain_add(AA: int32; AB: int32): int32; external;
 

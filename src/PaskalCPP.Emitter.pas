@@ -235,6 +235,9 @@ type
     class function DoIsStringType(const AType: TPCTypeExpr): Boolean; static;
     class function DoIsPointerType(const AType: TPCTypeExpr): Boolean; static;
     class function DoIsUntypedPointer(const AType: TPCTypeExpr): Boolean; static;
+    // The C++ cast a PaskalCPP conversion to ATarget is written with (T(x)
+    // and a builtin T(x); ptr to T(x) gives the same for a PaskalCPP operand)
+    class function DoCastWord(const ATarget: TPCTypeExpr; const AOperand: TPCTypeExpr): string; static;
     class function DoIsEnclosed(const AExpr: TPCExpr): Boolean; static;
     class function DoBinaryOpText(const AOp: TPCBinaryOp; const AIsSet: Boolean): string; static;
     class function DoAssignOpText(const AOp: TPCAssignOp; const AIsSet: Boolean): string; static;
@@ -336,6 +339,8 @@ type
     procedure DoWriteTypeConstant(const AFile: TPCOutFile; const AExpr: TPCExpr);
     procedure DoWriteExprAs(const AFile: TPCOutFile; const AExpr: TPCExpr; const AIsStmt: Boolean);
     procedure DoWriteOperand(const AFile: TPCOutFile; const AExpr: TPCExpr);
+    // A float SEM folded to NaN or an infinity, written as its value
+    procedure DoWriteNonFiniteFloat(const AFile: TPCOutFile; const AExpr: TPCExpr; const AKind: string);
     procedure DoWriteBorrowedExpr(const AFile: TPCOutFile; const AExpr: TPCExpr);
     procedure DoWriteLiteral(const AFile: TPCOutFile; const ALiteral: TPCLiteral);
     function DoPartsRespelled(const ALiteral: TPCLiteral): Boolean;
@@ -419,6 +424,9 @@ type
     procedure DoCloseRun(const AFile: TPCOutFile);
     procedure DoWriteHeaderPreamble();
     procedure DoWriteSourcePreamble();
+    procedure DoWriteResData();
+    procedure DoWriteResEntry(const ARawKey: string; const APath: string; const ALine: UInt64;
+      const ASpan: TPCNode; const AIndex: Integer);
     procedure DoEmitFile(const AFile: TPCOutFile);
     procedure DoEmitItem(const AItem: TPCModuleItem; const AFile: TPCOutFile);
     procedure DoEmitDecl(const AStmt: TPCStmt; const AFile: TPCOutFile);
@@ -452,6 +460,7 @@ type
     procedure DoEmitBody();
     procedure DoEmitTrailer();
     function DoInitChain(): string;
+    function DoResDataKeepText(): string;
     function DoFinalChain(): string;
     function DoRegisterChain(): string;
     // The ONE way an entry into PaskalCPP code from outside is written:
@@ -514,6 +523,28 @@ const
   { PC_EMT_ENTER_NAME }
   // The runtime routine every entry runs through (research\runtime\api.md)
   PC_EMT_ENTER_NAME = '::pcpp::enter';
+  { PC_EMT_RESDATA_MARK_NAME }
+  // PLAN-RESDATA A3: a module with @addresdata entries defines this empty
+  // function in its namespace beside them; a lib's main TU keeps the address
+  // of every one (PC_EMT_RESDATA_KEEP_NAME), so the archive member holding a
+  // module's entries is linked whenever the lib's main member is
+  PC_EMT_RESDATA_MARK_NAME = 'pcpp_resdata';
+  { PC_EMT_RESDATA_KEEP_NAME }
+  PC_EMT_RESDATA_KEEP_NAME = 'pcpp_resdata_keep';
+  { PC_EMT_RESDATA_DATA_PREFIX }
+  // An entry's bytes: the prefix + its place among the module's entries
+  // (0-based); static, so unique in the module's TU
+  PC_EMT_RESDATA_DATA_PREFIX = 'pcpp_res_d_';
+  { PC_EMT_RESDATA_ENTRY_PREFIX }
+  // An entry's record (::pcpp::ResEntry), numbered as its bytes
+  PC_EMT_RESDATA_ENTRY_PREFIX = 'pcpp_res_e_';
+  { PC_EMT_RESDATA_EMBED_OPEN }
+  // clang warns that #embed is a Clang extension in C++ (-Wc23-extensions):
+  // silenced around the entry only, never by a flag for the whole TU
+  PC_EMT_RESDATA_EMBED_OPEN = '_Pragma("clang diagnostic push") ' +
+    '_Pragma("clang diagnostic ignored \"-Wc23-extensions\"") ';
+  { PC_EMT_RESDATA_EMBED_CLOSE }
+  PC_EMT_RESDATA_EMBED_CLOSE = ' _Pragma("clang diagnostic pop")';
   { PC_EMT_TEST_PREFIX }
   // A test block's function: the prefix + the test's Range.StartByteOffset
   PC_EMT_TEST_PREFIX = 'pcpp_test_';
@@ -2343,6 +2374,28 @@ begin
     (TPCDerivedType(LCanon).Target = nil));
 end;
 
+class function TPCEmitter.DoCastWord(const ATarget: TPCTypeExpr; const AOperand: TPCTypeExpr): string;
+begin
+  // SEM's pointer cast rule (DoPointerCastTakes) takes a pointer that keeps
+  // const and an integer of pointer width; C++ takes those as static_cast only
+  // from void*, so a pointer from or to an integer and a typed pointer to
+  // another typed pointer (ptr to const uint8 -> ptr to const char, through
+  // either spelling of the cast) are reinterpret_cast; everything else, a
+  // C/C++ operand included, static_cast (clang's judgment). PLAN-RESDATA A5b:
+  // a cast between classes C++ may relate is ::pcpp::ptr_cast, which picks
+  // the cast from the real classes (an interface is a virtual base)
+  if TPCTypeExpr.IsClassPointerCast(ATarget, AOperand) then
+    Exit('::pcpp::ptr_cast<');
+  if DoIsPointerType(ATarget) and DoIsIntegerType(AOperand) then
+    Exit('reinterpret_cast<');
+  if DoIsIntegerType(ATarget) and DoIsPointerType(AOperand) then
+    Exit('reinterpret_cast<');
+  if DoIsPointerType(ATarget) and not DoIsUntypedPointer(ATarget) and
+    DoIsPointerType(AOperand) and not DoIsUntypedPointer(AOperand) then
+    Exit('reinterpret_cast<');
+  Result := 'static_cast<';
+end;
+
 class function TPCEmitter.DoIsEnclosed(const AExpr: TPCExpr): Boolean;
 begin
   // E18: the nodes whose own text is one parenthesized group; every other
@@ -2484,6 +2537,7 @@ procedure TPCEmitter.DoWriteExprAs(const AFile: TPCOutFile; const AExpr: TPCExpr
 var
   LMark: TPCWriterMark;
   LChoiceRead: TPCField;
+  LNonFinite: string;
 begin
   // A8: every expression node writes itself on its own line with a span on
   // itself (a composite span covers its children). AIsStmt: the expression
@@ -2536,7 +2590,16 @@ begin
     DoWriteBorrowedType(AFile, LChoiceRead.TypeExpr);
     DoText(AFile, '>(');
   end;
-  if AExpr is TPCName then
+  // A computed float SEM folded to NaN or an infinity (TPCExpr.NonFiniteFloat,
+  // user 2026-10-20 IEEE): its value, written from the AST, since C++ refuses
+  // to compute one in a constant. A name or a member keeps its name: its
+  // declaration holds the value
+  LNonFinite := '';
+  if not (AExpr is TPCName) and not (AExpr is TPCMember) then
+    LNonFinite := AExpr.NonFiniteFloat();
+  if LNonFinite <> '' then
+    DoWriteNonFiniteFloat(AFile, AExpr, LNonFinite)
+  else if AExpr is TPCName then
     DoWriteName(AFile, TPCName(AExpr))
   else if AExpr is TPCMember then
     DoWriteMember(AFile, TPCMember(AExpr))
@@ -2603,6 +2666,24 @@ begin
     DoWriteExpr(AFile, AExpr);
     DoText(AFile, ')');
   end;
+end;
+
+procedure TPCEmitter.DoWriteNonFiniteFloat(const AFile: TPCOutFile; const AExpr: TPCExpr; const AKind: string);
+begin
+  // std::numeric_limits of the expression's own type (float, double, or an
+  // alias of one), a constant expression clang takes: AKind is
+  // TPCExpr.NonFiniteFloat's 'nan' / 'inf' / '-inf'. A postfix expression
+  // (the negative one parenthesised), so it stands in any operand position
+  if AKind = '-inf' then
+    DoText(AFile, '(-');
+  DoText(AFile, 'std::numeric_limits<');
+  DoWriteBorrowedType(AFile, AExpr.ResolvedType);
+  if AKind = 'nan' then
+    DoText(AFile, '>::quiet_NaN()')
+  else
+    DoText(AFile, '>::infinity()');
+  if AKind = '-inf' then
+    DoText(AFile, ')');
 end;
 
 procedure TPCEmitter.DoWriteBorrowedExpr(const AFile: TPCOutFile; const AExpr: TPCExpr);
@@ -3388,17 +3469,16 @@ procedure TPCEmitter.DoWriteConversion(const AFile: TPCOutFile; const ACall: TPC
 var
   LTarget: TPCTypeExpr;
 begin
-  // T(x) with T a declared type (Q9): static_cast<T>((x)); a pointer from or
-  // to an integer reinterpret_cast
+  // T(x) with T a declared type (Q9): the cast DoCastWord names for T and x
+  // (static_cast<T>((x)); a pointer from or to an integer, a typed pointer to
+  // another, reinterpret_cast)
   if ACall.Args.Count <> 1 then
     DoMissing(AFile, 'conversion argument');
   LTarget := nil;
   if ACall.ResolvedDecl is TPCTypeDecl then
     LTarget := TPCTypeDecl(ACall.ResolvedDecl).TypeDef;
-  if (LTarget <> nil) and
-    ((DoIsPointerType(LTarget) and DoIsIntegerType(ACall.Args[0].ResolvedType)) or
-    (DoIsIntegerType(LTarget) and DoIsPointerType(ACall.Args[0].ResolvedType))) then
-    DoText(AFile, 'reinterpret_cast<')
+  if LTarget <> nil then
+    DoText(AFile, DoCastWord(LTarget, ACall.Args[0].ResolvedType))
   else
     DoText(AFile, 'static_cast<');
   if ACall.ResolvedDecl is TPCTypeDecl then
@@ -4067,16 +4147,15 @@ begin
   end;
   case ACast.CastKind of
     ckBuiltin:
-      begin
-        if (DoIsPointerType(ACast.TargetType) and DoIsIntegerType(ACast.Operand.ResolvedType)) or
-          (DoIsIntegerType(ACast.TargetType) and DoIsPointerType(ACast.Operand.ResolvedType)) then
-          DoText(AFile, 'reinterpret_cast<')
-        else
-          DoText(AFile, 'static_cast<');
-      end;
+      DoText(AFile, DoCastWord(ACast.TargetType, ACast.Operand.ResolvedType));
     ckPointer:
       begin
-        if DoIsUntypedPointer(ACast.Operand.ResolvedType) then
+        // A5b: a cast between classes C++ may relate is ::pcpp::ptr_cast
+        // (IsClassPointerCast, as DoCastWord); a C/C++ operand otherwise
+        // stays reinterpret_cast, as this form always wrote it
+        if TPCTypeExpr.IsClassPointerCast(ACast.TargetType, ACast.Operand.ResolvedType) then
+          DoText(AFile, '::pcpp::ptr_cast<')
+        else if DoIsUntypedPointer(ACast.Operand.ResolvedType) then
           DoText(AFile, 'static_cast<')
         else
           DoText(AFile, 'reinterpret_cast<');
@@ -5573,6 +5652,8 @@ begin
     LProtos := LProtos + ' void ' + PC_EMT_INIT_NAME + '();';
   if FModule.FinalRoutine <> nil then
     LProtos := LProtos + ' void ' + PC_EMT_FINAL_NAME + '();';
+  if FModule.HasResDataEntries() then
+    LProtos := LProtos + ' void ' + PC_EMT_RESDATA_MARK_NAME + '();';
   if LProtos = '' then
     LWriter.WritePreamble('namespace ' + DoNamespaceName(FModule) + ' {}')
   else
@@ -5586,6 +5667,97 @@ begin
   LWriter := FWriters[ofSource];
   LWriter.WritePreamble('#include "' + FModule.ModuleName + PC_EMT_HEADER_EXT + '"');
   LWriter.WritePreamble('using namespace ::' + DoNamespaceName(FModule) + ';');
+end;
+
+procedure TPCEmitter.DoWriteResData();
+var
+  LDirective: TPCDirective;
+  LIndex: Integer;
+  LRawKey: string;
+  LPath: string;
+  LPathArg: TPCDirectiveArg;
+  LIcon: TPCDirective;
+begin
+  // PLAN-RESDATA A3: every @addresdata entry of the module, at global scope
+  // in its source TU, on its path argument's line (clang's report about the
+  // file maps to the path: the #embed line's span is on it). The bytes are a
+  // const array clang fills from the file (#embed of the resolved path, its
+  // extension warning silenced around it; suffix(,) leaves an empty file's
+  // array its one zero byte), one zero byte after them, not counted; then the
+  // record PCPP_RESDATA_ENTRY places in the section the linker gathers
+  // (runtime api.md "Built-in data"). Directives stand before every item, so
+  // no run is open yet
+  if not FModule.HasResDataEntries() then
+    Exit;
+  LIcon := FModule.ExeIconEntry();
+  LIndex := 0;
+  // A8: an icon from the Compiler's API (no @exeicon) has no argument of its
+  // own: its entry goes first, on the module's line, with no span (the file is
+  // the Compiler's own: a clang report there is an invariant)
+  if (LIcon = nil) and FModule.BuildsExeIcon() then
+  begin
+    DoWriteResEntry(PC_RESDATA_EXEICON_KEY, PC_RESDATA_EXEICON_FILE, FModule.Range.StartLine, nil, LIndex);
+    Inc(LIndex);
+  end;
+  for LDirective in FModule.Directives do
+  begin
+    // A6: a non-Windows exe's @exeicon is an entry too, in the same source
+    // order (the writer's lines only go forward): the decoded file the
+    // Compiler writes beside the generated sources, on the path's line
+    if LDirective.IsResDataEntry() then
+    begin
+      LRawKey := LDirective.Args[0].ResolvedText;
+      // A header-name takes no escapes: the plain spelling, forward slashes
+      LPath := TUtils.StripLongPathPrefix(LDirective.Args[1].ResolvedText).Replace('\', '/');
+      LPathArg := LDirective.Args[1];
+    end
+    else if LDirective = LIcon then
+    begin
+      LRawKey := PC_RESDATA_EXEICON_KEY;
+      LPath := PC_RESDATA_EXEICON_FILE;
+      LPathArg := LDirective.Args[0];
+    end
+    else
+      Continue;
+    DoWriteResEntry(LRawKey, LPath, LPathArg.Range.StartLine, LPathArg, LIndex);
+    Inc(LIndex);
+  end;
+  // The mark a lib's main TU keeps (DoResDataKeepText), after the last entry
+  DoText(ofSource, ' namespace ' + DoNamespaceName(FModule) + ' { void ' + PC_EMT_RESDATA_MARK_NAME + '() {} }');
+end;
+
+procedure TPCEmitter.DoWriteResEntry(const ARawKey: string; const APath: string; const ALine: UInt64;
+  const ASpan: TPCNode; const AIndex: Integer);
+var
+  LData: string;
+  LEntry: string;
+  LKey: string;
+begin
+  // One entry on ALine: the bytes (#embed of APath, its span on ASpan; nil =
+  // no span: the text is borrowed), the record, the key's symbol
+  LData := PC_EMT_RESDATA_DATA_PREFIX + IntToStr(AIndex);
+  LEntry := PC_EMT_RESDATA_ENTRY_PREFIX + IntToStr(AIndex);
+  // SEM: a key holds no control character (SM0119); '\' and '"' escaped
+  LKey := ARawKey.Replace('\', '\\').Replace('"', '\"');
+  DoPut(ofSource, ALine, PC_EMT_RESDATA_EMBED_OPEN + 'static const unsigned char ' + LData + '[] = {');
+  if ASpan <> nil then
+    FWriters[ofSource].WritePreprocLine('#embed "' + APath + '" suffix(,)', ASpan)
+  else
+  begin
+    FWriters[ofSource].BeginBorrowed();
+    try
+      FWriters[ofSource].WritePreprocLine('#embed "' + APath + '" suffix(,)', FModule);
+    finally
+      FWriters[ofSource].EndBorrowed();
+    end;
+  end;
+  DoText(ofSource, '0 };' + PC_EMT_RESDATA_EMBED_CLOSE + ' PCPP_RESDATA_ENTRY static const ::pcpp::ResEntry ' +
+    LEntry + ' = { "' + LKey + '", ' + LData + ', sizeof(' + LData + ') - 1 };');
+  // A4b: the key's own symbol, one strong definition per holder, so a
+  // second holder linked into the same binary (a lib built apart) is the
+  // linker's duplicate symbol (the Compiler reports it as SM0121)
+  DoText(ofSource, ' extern "C" { __attribute__((used)) extern const unsigned char ' +
+    TPCResDataKey.SymbolOf(ARawKey) + ' = 0; }');
 end;
 
 procedure TPCEmitter.DoEmitFile(const AFile: TPCOutFile);
@@ -6318,6 +6490,32 @@ begin
   end;
 end;
 
+function TPCEmitter.DoResDataKeepText(): string;
+var
+  LIndex: Integer;
+  LModule: TPCModule;
+  LMarks: string;
+begin
+  // PLAN-RESDATA A3: an archive member is linked only when something in it
+  // is referenced, and a module's entries are referenced by nothing. A lib's
+  // main TU keeps the mark of every module with entries in a used array, so
+  // the linker pulls each such member in with the main one ('' when none)
+  LMarks := '';
+  for LIndex := 0 to FAst.ModuleCount() - 1 do
+  begin
+    LModule := FAst.ModuleAt(LIndex);
+    if not LModule.HasResDataEntries() then
+      Continue;
+    if LMarks <> '' then
+      LMarks := LMarks + ',';
+    LMarks := LMarks + ' &::' + DoNamespaceName(LModule) + '::' + PC_EMT_RESDATA_MARK_NAME;
+  end;
+  if LMarks = '' then
+    Exit('');
+  Result := '__attribute__((used)) static void (* const ' + PC_EMT_RESDATA_KEEP_NAME + '[])() = {' + LMarks +
+    ' }; ';
+end;
+
 function TPCEmitter.DoFinalChain(): string;
 var
   LIndex: Integer;
@@ -6380,7 +6578,7 @@ end;
 function TPCEmitter.DoLibText(): string;
 begin
   // H12 (W1 option 1): a static library starts and stops with the program
-  Result := '__attribute__((constructor)) static void pcpp_lib_startup() { ::pcpp::init(0, nullptr); ' +
+  Result := DoResDataKeepText() + '__attribute__((constructor)) static void pcpp_lib_startup() { ::pcpp::init(0, nullptr); ' +
     DoEntryText(DoInitChain(), '0') + '; } __attribute__((destructor)) static void pcpp_lib_shutdown() { ' +
     DoEntryText(DoFinalChain(), '0') + '; }';
 end;
@@ -6443,6 +6641,9 @@ begin
     DoWriteHeaderPreamble();
     DoWriteSourcePreamble();
     DoEmitFile(ofHeader);
+    // After the header: the source's text on a .pcpp line starts past the
+    // header's on it (V1)
+    DoWriteResData();
     DoEmitFile(ofSource);
     AHeader := FWriters[ofHeader].GetBytes();
     ASource := FWriters[ofSource].GetBytes();

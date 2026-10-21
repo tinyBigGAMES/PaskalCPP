@@ -1,0 +1,179 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  VideoPlayer.pcpp - MPEG-1 videos with their sound, played from a password
+  zip (import sfml_ext): sfx::Video opens an entry of the examples' shared
+  repo\bin\assets.zip (packed from res\assets when it is not there, as
+  ZipPlayer does), update() decodes by the time passed each frame and the
+  window draws it scaled to fit, centred. The status callback prints each
+  change. Space pause / resume, S stop, L looping on / off, Up / Down
+  volume (a level 0 to 1 in steps of 0.1, heard through Math's
+  PerceivedVolume), N the next video, Escape or the close button ends it.
+==============================================================================*/
+
+module exe VideoPlayer;
+
+import
+  sfml_ext,
+  SysUtils;
+
+const
+  KPassword: string = "PaskalCPP";
+  KArchive: string = "$P:../../assets.zip";
+
+// buildZip's progress callback: one line as each entry begins
+routine OnProgress(const AEntry: string; const APercent: int32; const ANewFile: bool);
+begin
+  if ANewFile then
+    println("  + {}", AEntry);
+  end;
+end;
+
+routine StatusText(const AStatus: sfx::Video::Status): string;
+begin
+  if AStatus = sfx::Video::Status::Playing then
+    return "playing";
+  end;
+  if AStatus = sfx::Video::Status::Paused then
+    return "paused";
+  end;
+  return "stopped";
+end;
+
+// The video's status callback: one line per change
+routine OnStatus(const AStatus: sfx::Video::Status; const AName: string);
+begin
+  println("{}: {}", AName, StatusText(AStatus));
+end;
+
+// The video N names, in the zip: 0 or 1
+routine VideoEntry(const AVideo: int32): string;
+begin
+  if AVideo = 0 then
+    return "res/assets/videos/intro.mpg";
+  end;
+  return "res/assets/videos/explainer.mpg";
+end;
+
+// Opens video AIndex and plays it, scaled to fit the 960 x 540 frame, centred
+routine Start(var AVideo: sfx::Video; const AIndex: int32): bool;
+var
+  LScale: float32;
+begin
+  if not AVideo.openFromZip(KArchive, VideoEntry(AIndex), KPassword) then
+    println("{} did not open", VideoEntry(AIndex));
+    return false;
+  end;
+  LScale := std::min(960.0f / float32(AVideo.getSize().x), 540.0f / float32(AVideo.getSize().y));
+  AVideo.setScale(sf::Vector2f(LScale, LScale));
+  AVideo.setOrigin(sf::Vector2f(float32(AVideo.getSize().x) / 2.0f, float32(AVideo.getSize().y) / 2.0f));
+  AVideo.setPosition(sf::Vector2f(480.0f, 270.0f));
+  AVideo.play();
+  return true;
+end;
+
+routine Run();
+var
+  LArchive: string;
+  LFontZip: sfx::ZipStream;
+  LFont: sf::Font;
+  LWin: sfx::RenderWindow(sf::Vector2u(960, 540), "PaskalCPP + SFML: video from a zip");
+  LVideo: sfx::Video;
+  LIndex: int32;
+  LEvent: std::optional<sf::Event>;
+  LKey: ptr to const sf::Event::KeyPressed;
+begin
+  // The examples' shared archive, packed when it is not there
+  LArchive := KArchive;
+  if not FileExists(LArchive) then
+    println("packing res\\assets into assets.zip:");
+    if not sfx::buildZip("$P:../../res/assets", LArchive, KPassword, "$P:../..", OnProgress) then
+      println("buildZip failed");
+      return;
+    end;
+  end;
+
+  if not LFontZip.open(LArchive, "res/assets/fonts/JetBrainsMonoRegular.ttf", KPassword) then
+    println("the font entry did not open");
+    return;
+  end;
+  if not LFont.openFromStream(LFontZip) then
+    println("the font did not load");
+    return;
+  end;
+
+  LVideo.setStatusCallback(OnStatus);
+  LIndex := 0;
+  if not Start(LVideo, LIndex) then
+    return;
+  end;
+
+  LWin.setFrameColor(sf::Color(24, 24, 32));
+
+  while LWin.isOpen() do
+    LEvent := LWin.pollEvent();
+    while LEvent.has_value() do
+      if LEvent->is<sf::Event::Closed>() then
+        LWin.close();
+      end;
+      LKey := LEvent->getIf<sf::Event::KeyPressed>();
+      if LKey <> nil then
+        if LKey^.scancode = sf::Keyboard::Scancode::Escape then
+          LWin.close();
+        end;
+        if LKey^.scancode = sf::Keyboard::Scancode::Space then
+          if LVideo.getStatus() = sfx::Video::Status::Playing then
+            LVideo.pause();
+          else
+            LVideo.play();
+          end;
+        end;
+        if LKey^.scancode = sf::Keyboard::Scancode::S then
+          LVideo.stop();
+        end;
+        if LKey^.scancode = sf::Keyboard::Scancode::L then
+          LVideo.setLooping(not LVideo.isLooping());
+        end;
+        if LKey^.scancode = sf::Keyboard::Scancode::Up then
+          LVideo.setVolume(LVideo.getVolume() + 0.05f);
+        end;
+        if LKey^.scancode = sf::Keyboard::Scancode::Down then
+          LVideo.setVolume(LVideo.getVolume() - 0.05f);
+        end;
+        if LKey^.scancode = sf::Keyboard::Scancode::N then
+          LIndex := 1 - LIndex;
+          Start(LVideo, LIndex);
+        end;
+      end;
+      LEvent := LWin.pollEvent();
+    end;
+
+    LVideo.update();
+
+    LWin.startFrame();
+    LWin.draw(LVideo);
+    LWin.drawText(LFont, FormatStr("{}  {}  {:.1f} / {:.1f} s  volume {:.1f}  loop {}", VideoEntry(LIndex),
+      StatusText(LVideo.getStatus()), LVideo.getPlayingOffset().asSeconds(), LVideo.getDuration().asSeconds(),
+      LVideo.getVolume(), LVideo.isLooping()), sf::Vector2f(12.0f, 490.0f), 16, sf::Color(230, 230, 230));
+    LWin.drawText(LFont, "Space pause / play   S stop   L loop   Up / Down volume   N next   Escape quit",
+      sf::Vector2f(12.0f, 514.0f), 14, sf::Color(160, 200, 160));
+    LWin.endFrame();
+    LWin.display();
+  end;
+end;
+
+begin
+  Run();
+end.

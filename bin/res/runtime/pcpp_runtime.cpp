@@ -1257,6 +1257,93 @@ void assert_assert_equal_ptr(const void* expected, const void* actual, const cha
 } // namespace pcpp
 
 /*******************************************************************************
+ * Built-in data (PLAN-RESDATA): the bounds of this image's section and its
+ * key-ordered index. This TU is linked once into every exe and dll, so each
+ * image has exactly one pair of bounds and reads only its own entries
+ ******************************************************************************/
+
+#if defined(_WIN32)
+// COFF: the linker sorts a section's $ groups by name, so these two zero
+// records bracket every .pcppres$m contribution. Both are 32 bytes and
+// 32-aligned (ResEntry), so the records between them line up
+__attribute__((section(".pcppres$a"), used)) static const ::pcpp::ResEntry pcpp_resdata_begin = {};
+__attribute__((section(".pcppres$z"), used)) static const ::pcpp::ResEntry pcpp_resdata_end = {};
+#else
+// ELF: the linker defines these for a section named as a C identifier. Weak:
+// an image without entries has no section, both are then nullptr. Hidden: the
+// reference must resolve inside this image, never to a dll's section
+extern "C" const ::pcpp::ResEntry __start_pcppres[] __attribute__((weak, visibility("hidden")));
+extern "C" const ::pcpp::ResEntry __stop_pcppres[] __attribute__((weak, visibility("hidden")));
+#endif
+
+namespace pcpp {
+
+namespace {
+
+// The section's records with a key, sorted by key (byte-wise: char_traits<char>
+// compares as unsigned char). Walked by address, not by pointer arithmetic
+// across objects; a record with key nullptr is the linker's padding (or a
+// marker) and is skipped
+std::vector<const ResEntry*> resdata_build_index() {
+    std::uintptr_t LFrom;
+    std::uintptr_t LTo;
+#if defined(_WIN32)
+    LFrom = reinterpret_cast<std::uintptr_t>(&pcpp_resdata_begin) + sizeof(ResEntry);
+    LTo = reinterpret_cast<std::uintptr_t>(&pcpp_resdata_end);
+#else
+    LFrom = reinterpret_cast<std::uintptr_t>(__start_pcppres);
+    LTo = reinterpret_cast<std::uintptr_t>(__stop_pcppres);
+#endif
+    std::vector<const ResEntry*> LResult;
+    for (std::uintptr_t LAt = LFrom; LAt + sizeof(ResEntry) <= LTo; LAt += sizeof(ResEntry)) {
+        const ResEntry* LEntry = reinterpret_cast<const ResEntry*>(LAt);
+        if (LEntry->key != nullptr) {
+            LResult.push_back(LEntry);
+        }
+    }
+    // stable: two records of one key (only hand-written C++ records: the
+    // linker refuses a key two PaskalCPP holders add, its key symbol pcpp_rk_)
+    // keep their place, so a lookup finds the same one on every run
+    std::stable_sort(LResult.begin(), LResult.end(), [](const ResEntry* ALeft, const ResEntry* ARight) {
+        return std::string_view(ALeft->key) < std::string_view(ARight->key);
+    });
+    return LResult;
+}
+
+// Built on the first call (a function-local static: thread-safe)
+const std::vector<const ResEntry*>& resdata_index() {
+    static const std::vector<const ResEntry*> LIndex = resdata_build_index();
+    return LIndex;
+}
+
+} // namespace
+
+const ResEntry* resdata_find(const std::string_view key) {
+    const std::vector<const ResEntry*>& LIndex = resdata_index();
+    const auto LAt = std::lower_bound(LIndex.begin(), LIndex.end(), key, [](const ResEntry* AEntry, const std::string_view AKey) {
+        return std::string_view(AEntry->key) < AKey;
+    });
+    if (LAt == LIndex.end() || std::string_view((*LAt)->key) != key) {
+        return nullptr;
+    }
+    return *LAt;
+}
+
+std::int64_t resdata_count() {
+    return static_cast<std::int64_t>(resdata_index().size());
+}
+
+const char* resdata_key_at(const std::int64_t index) {
+    const std::vector<const ResEntry*>& LIndex = resdata_index();
+    if (index < 0 || index >= static_cast<std::int64_t>(LIndex.size())) {
+        return nullptr;
+    }
+    return LIndex[static_cast<std::size_t>(index)]->key;
+}
+
+} // namespace pcpp
+
+/*******************************************************************************
  * DLL / shared object entry (PCPP_BUILD_DLL): the emitted main module defines
  * the two hooks
  ******************************************************************************/

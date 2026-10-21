@@ -1,0 +1,85 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_exeicon_linux.pcpp - Directive compliance: @exeicon on Linux
+
+  An ELF file has no icon of its own, so on a target that is not Windows the
+  compiler builds the icon's largest image into the exe as the built-in data
+  entry "pcpp/exeicon" (std unit ResData): width and height as little-endian
+  32-bit integers, then the pixels as 8-bit RGBA (not premultiplied), rows
+  top to bottom. A window library sets it as the window's icon. The key is
+  the compiler's own (pcpp/ keys: no @addresdata may add one).
+
+  This program reads its own entry: paskalcpp.ico's largest image is the
+  256 x 256 one; the pixel bytes' FNV-1a 32 hash and the centre pixel are
+  those an independent decoder gives (scripts\vendor\resdata_a6\ico_peek.py).
+
+  How to check, from repo\bin (the Linux target only: on Windows the icon is
+  stamped, dir_exeicon.pcpp):
+    pcpp res\tests\dir_exeicon_linux.pcpp -t x86_64-linux-gnu -r
+  EXPECT:
+    count 1 key pcpp/exeicon
+    size 262152
+    width 256 height 256
+    fnv 068b7208
+    centre 1 11 49 253
+    corner 0 0 0 0
+    [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  EXITCODE: 0
+
+  Break it: run each file below the same way, without -r; each reports
+  exactly what the // ERROR / WARN / HINT comment on its marked line says,
+  and nothing else:
+    dir_exeicon_err_decode.pcpp   an icon file that holds no image
+*******************************************************************************/
+
+module exe dir_exeicon_linux;
+@exeicon "$P:res/assets/icons/paskalcpp.ico";
+
+import ResData;
+
+var
+  LEntry: ResDataEntry;
+  LIndex: int64;
+  LWidth: uint32;
+  LHeight: uint32;
+  LHash: uint64;
+  LCentre: int64;
+
+begin
+  println("count {} key {}", ResDataCount(), ResDataKey(0));
+  LEntry := FindResData("pcpp/exeicon");
+  println("size {}", LEntry.Size);
+
+  // The header: two little-endian 32-bit integers
+  LWidth := uint32(LEntry.Data[0]) | (uint32(LEntry.Data[1]) shl 8) |
+    (uint32(LEntry.Data[2]) shl 16) | (uint32(LEntry.Data[3]) shl 24);
+  LHeight := uint32(LEntry.Data[4]) | (uint32(LEntry.Data[5]) shl 8) |
+    (uint32(LEntry.Data[6]) shl 16) | (uint32(LEntry.Data[7]) shl 24);
+  println("width {} height {}", LWidth, LHeight);
+
+  // FNV-1a 32 over the pixels, in 64-bit arithmetic (the product stays below 2^56)
+  LHash := 2166136261;
+  for LIndex := 8 to LEntry.Size - 1 do
+    LHash := ((LHash xor uint64(LEntry.Data[LIndex])) * 16777619) & 4294967295;
+  end;
+  println("fnv {:08x}", LHash);
+
+  // Pixel (128, 128) and the first pixel
+  LCentre := 8 + (128 * 256 + 128) * 4;
+  println("centre {} {} {} {}", LEntry.Data[LCentre], LEntry.Data[LCentre + 1],
+    LEntry.Data[LCentre + 2], LEntry.Data[LCentre + 3]);
+  println("corner {} {} {} {}", LEntry.Data[8], LEntry.Data[9], LEntry.Data[10], LEntry.Data[11]);
+end.

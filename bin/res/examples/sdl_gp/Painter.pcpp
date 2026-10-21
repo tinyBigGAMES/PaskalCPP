@@ -209,7 +209,7 @@ begin
     raise("SDL could not create a GPU device");
   end;
 
-  // DPI scaling as in examples\sdl3\Window: all the pixels, a window sized to
+  // DPI scaling as in examples\sdl3\SdlWindow: all the pixels, a window sized to
   // 800 x 450 times its display scale, shown once it has that size
   GWindow := SDL_CreateWindow("SDL_gp Painter", CWidth, CHeight,
     SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);

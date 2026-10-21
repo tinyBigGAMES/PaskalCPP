@@ -1,0 +1,123 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  PlmpegDecode.pcpp - decode an MPEG-1 video (import pl_mpeg): no window, it prints
+  what it finds. Opens res\assets\videos\intro.mpg with
+  plm_create_with_filename_utf8, prints the stream's facts, then decodes
+  every video frame (audio off) and, after a rewind, every audio frame
+  (video off). Each pass prints its count and an FNV-1a hash of what it
+  decoded (the Y plane of each frame; each sample as an integer), so two
+  builds that print the same lines decoded the same pictures and sound.
+==============================================================================*/
+
+module exe PlmpegDecode;
+
+import
+  pl_mpeg,
+  SysUtils;
+
+const
+  KVideo: string = "$P:../../res/assets/videos/intro.mpg";
+  KFnvOffset: uint64 = 0xcbf29ce484222325;
+  KFnvPrime: uint64 = 0x100000001b3;
+
+// FNV-1a over ACount bytes from AData, continuing from AHash
+routine HashBytes(const AHash: uint64; const AData: ptr to uint8; const ACount: uint64): uint64;
+var
+  LHash: uint64;
+  LIndex: uint64;
+begin
+  LHash := AHash;
+  LIndex := 0;
+  while LIndex < ACount do
+    LHash := (LHash xor uint64(AData[LIndex])) * KFnvPrime;
+    LIndex := LIndex + 1;
+  end;
+  return LHash;
+end;
+
+routine Run();
+var
+  LPath: string;
+  LPlm: ptr to plm_t;
+  LFrame: ptr to plm_frame_t;
+  LSamples: ptr to plm_samples_t;
+  LFrames: int64;
+  LLastTime: float64;
+  LHash: uint64;
+  LIndex: uint32;
+  LValue: int32;
+begin
+  LPath := ResolvePath(KVideo);
+  LPlm := plm_create_with_filename_utf8(LPath.c_str());
+  if LPlm = nil then
+    println("cannot open {}", KVideo);
+    return;
+  end;
+  if plm_has_headers(LPlm) = 0 then
+    println("no MPEG-PS headers in {}", KVideo);
+    plm_destroy(LPlm);
+    return;
+  end;
+
+  println("size: {} x {}", plm_get_width(LPlm), plm_get_height(LPlm));
+  println("framerate: {:.3f}", plm_get_framerate(LPlm));
+  println("audio streams: {}, samplerate: {}", plm_get_num_audio_streams(LPlm), plm_get_samplerate(LPlm));
+  println("duration: {:.3f} s", plm_get_duration(LPlm));
+
+  // Every picture: the audio is skipped, so its packets are not kept
+  plm_set_loop(LPlm, 0);
+  plm_set_audio_enabled(LPlm, 0);
+  LFrames := 0;
+  LLastTime := 0.0;
+  LHash := KFnvOffset;
+  LFrame := plm_decode_video(LPlm);
+  while LFrame <> nil do
+    LHash := HashBytes(LHash, LFrame^.y.data, uint64(LFrame^.y.width) * uint64(LFrame^.y.height));
+    LLastTime := LFrame^.time;
+    LFrames := LFrames + 1;
+    LFrame := plm_decode_video(LPlm);
+  end;
+  println("video frames: {}, last at {:.3f} s, Y hash {:016x}", LFrames, LLastTime, LHash);
+
+  // Every sound frame, from the start again, the video skipped; a sample is
+  // hashed as the 16-bit value it would be played as
+  plm_rewind(LPlm);
+  plm_set_video_enabled(LPlm, 0);
+  plm_set_audio_enabled(LPlm, 1);
+  LFrames := 0;
+  LLastTime := 0.0;
+  LHash := KFnvOffset;
+  LSamples := plm_decode_audio(LPlm);
+  while LSamples <> nil do
+    LIndex := 0;
+    while LIndex < LSamples^.count * 2 do
+      LValue := int32(LSamples^.interleaved[LIndex] * 32767.0f);
+      LHash := (LHash xor uint64(uint32(LValue))) * KFnvPrime;
+      LIndex := LIndex + 1;
+    end;
+    LLastTime := LSamples^.time;
+    LFrames := LFrames + 1;
+    LSamples := plm_decode_audio(LPlm);
+  end;
+  println("audio frames: {} ({} samples each), last at {:.3f} s, hash {:016x}", LFrames,
+    PLM_AUDIO_SAMPLES_PER_FRAME, LLastTime, LHash);
+
+  plm_destroy(LPlm);
+end;
+
+begin
+  Run();
+end.

@@ -52,10 +52,10 @@
 
 module exe dir_copydll;
 @ifdef TARGET_X86_64_LINUX_GNU
-@copydll "$P:output/dir_copydll_dll_linux/bin/libdir_copydll_dll.so";
+@copydll "$P:output/bin/libdir_copydll_dll.so";
 @linklibrary "dl";
 @else
-@copydll "$P:output/dir_copydll_dll/bin/dir_copydll_dll.dll";
+@copydll "$P:output/bin/dir_copydll_dll.dll";
 @endif
 
 #include <string>

@@ -1,0 +1,285 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  Mixer.pcpp - sfx::Mixer (import sfml_ext): music and sounds from the
+  examples' password zip, repo\bin\assets.zip (packed from res\assets when it
+  is not there, as ZipPlayer does). Two tracks cross-fade; five sounds play as
+  voices on 16 channels, placed where the mouse is (left / right of the
+  listener in the middle of the window, fading with distance); channel 0 is
+  reserved for an engine loop. The boxes show each channel: green playing,
+  amber paused, grey stopped, outlined when reserved.
+  Keys: 1 - 5 a sound at the mouse, E the engine loop on / off, N the next
+  track (cross-fade), Space pause / resume everything (only what was playing
+  resumes), Up / Down the music level, Left / Right the sound level, Escape
+  or the close button ends it.
+==============================================================================*/
+
+module exe Mixer;
+
+@exeicon "$P:res/assets/icons/paskalcpp.ico";
+
+import
+  sfml_ext,
+  SysUtils;
+
+const
+  KPassword: string = "PaskalCPP";
+  KArchive: string = "$P:../../assets.zip";
+  KChannels: int32 = 16;
+  KEngine: int32 = 0;
+
+// buildZip's progress callback: one line as each entry begins
+routine OnProgress(const AEntry: string; const APercent: int32; const ANewFile: bool);
+begin
+  if ANewFile then
+    println("  + {}", AEntry);
+  end;
+end;
+
+// The two tracks, in the zip
+routine TrackEntry(const ATrack: int32): string;
+begin
+  if ATrack = 0 then
+    return "res/assets/audio/music/song01.ogg";
+  end;
+  return "res/assets/audio/music/song02.ogg";
+end;
+
+// The sounds keys 1 - 5 play, in the zip
+routine SoundEntry(const AIndex: int32): string;
+begin
+  if AIndex = 0 then
+    return "res/assets/audio/sfx/digthis.ogg";
+  end;
+  if AIndex = 1 then
+    return "res/assets/audio/sfx/explo_enemy.ogg";
+  end;
+  if AIndex = 2 then
+    return "res/assets/audio/sfx/explo_rock.ogg";
+  end;
+  if AIndex = 3 then
+    return "res/assets/audio/sfx/samp0.ogg";
+  end;
+  return "res/assets/audio/sfx/engine_player.ogg";
+end;
+
+// A channel box's colour for its voice's status
+routine StatusColor(const AStatus: sf::SoundSource::Status): sf::Color;
+begin
+  if AStatus = sf::SoundSource::Status::Playing then
+    return sf::Color(60, 200, 90);
+  end;
+  if AStatus = sf::SoundSource::Status::Paused then
+    return sf::Color(230, 170, 40);
+  end;
+  return sf::Color(70, 70, 80);
+end;
+
+// The pause state as the window shows it
+routine PauseText(const APaused: bool): string;
+begin
+  if APaused then
+    return "paused";
+  end;
+  return "playing";
+end;
+
+// The sound key 1 - 5 names: 0 - 4, or -1 for any other key
+routine SoundKey(const AScancode: sf::Keyboard::Scancode): int32;
+begin
+  if AScancode = sf::Keyboard::Scancode::Num1 then
+    return 0;
+  end;
+  if AScancode = sf::Keyboard::Scancode::Num2 then
+    return 1;
+  end;
+  if AScancode = sf::Keyboard::Scancode::Num3 then
+    return 2;
+  end;
+  if AScancode = sf::Keyboard::Scancode::Num4 then
+    return 3;
+  end;
+  if AScancode = sf::Keyboard::Scancode::Num5 then
+    return 4;
+  end;
+  return -1;
+end;
+
+routine Run();
+var
+  LArchive: string;
+  LWin: sfx::RenderWindow(sf::Vector2u(800, 450), "PaskalCPP + SFML: sfx::Mixer");
+  LFont: sf::Font;
+  LMixer: sfx::Mixer(16);
+  LTracks: std::vector<sfx::MusicId>;
+  LSounds: std::vector<sfx::SoundId>;
+  LOptions: sfx::PlayOptions;
+  // the voice a play started (invalid when no channel took it)
+  LVoice: sfx::VoiceId;
+  LBox: sf::RectangleShape(sf::Vector2f(36.0f, 36.0f));
+  LClock: sf::Clock;
+  LEvent: std::optional<sf::Event>;
+  LKey: ptr to const sf::Event::KeyPressed;
+  LTrack: int32;
+  LIndex: int32;
+  LSound: int32;
+  LMouse: sf::Vector2i;
+  LPaused: bool;
+begin
+  // The examples' shared archive, packed when it is not there
+  LArchive := KArchive;
+  if not FileExists(LArchive) then
+    println("packing res\\assets into assets.zip:");
+    if not sfx::buildZip("$P:../../res/assets", LArchive, KPassword, "$P:../..", OnProgress) then
+      println("buildZip failed");
+      return;
+    end;
+  end;
+  if not sfx::openDefaultFont(LFont) then
+    println("the default font did not open");
+    return;
+  end;
+
+  // Every load reports why it failed through sfx::setError: getLastError
+  for LIndex := 0 to 1 do
+    LTracks.push_back(LMixer.loadMusicFromZip(LArchive, TrackEntry(LIndex), KPassword));
+    if not LMixer.isValid(LTracks.at(LIndex)) then
+      println("{}", sfx::getLastError());
+      return;
+    end;
+  end;
+  for LIndex := 0 to 4 do
+    LSounds.push_back(LMixer.loadSoundFromZip(LArchive, SoundEntry(LIndex), KPassword));
+    if not LMixer.isValid(LSounds.at(LIndex)) then
+      println("{}", sfx::getLastError());
+      return;
+    end;
+  end;
+
+  // The listener in the middle; channel 0 kept for the engine loop
+  LMixer.setListenerPosition(sf::Vector2f(400.0f, 225.0f));
+  LMixer.setReserved(KEngine, true);
+  LTrack := 0;
+  LPaused := false;
+  LMixer.fadeIn(LTracks.at(LTrack), sf::seconds(2.0f), 1.0f, true);
+
+  LWin.setFrameColor(sf::Color(24, 24, 32));
+  LBox.setOutlineColor(sf::Color(230, 230, 230));
+
+  while LWin.isOpen() do
+    LEvent := LWin.pollEvent();
+    while LEvent.has_value() do
+      if LEvent->is<sf::Event::Closed>() then
+        LWin.close();
+      end;
+      LKey := LEvent->getIf<sf::Event::KeyPressed>();
+      if LKey <> nil then
+        if LKey^.scancode = sf::Keyboard::Scancode::Escape then
+          LWin.close();
+        end;
+
+        // A sound at the mouse: a higher key outranks a lower one when every
+        // channel is busy
+        LSound := SoundKey(LKey^.scancode);
+        if LSound >= 0 then
+          LMouse := LWin.getFrameMousePosition();
+          LOptions.channel := -1;
+          LOptions.loop := false;
+          LOptions.priority := LSound;
+          LOptions.position := sf::Vector2f(float32(LMouse.x), float32(LMouse.y));
+          LVoice := LMixer.play(LSounds.at(LSound), LOptions);
+          if not LMixer.isValid(LVoice) then
+            println("sound {}: every channel holds a voice of higher priority", LSound + 1);
+          end;
+        end;
+
+        // The engine loop on its reserved channel
+        if LKey^.scancode = sf::Keyboard::Scancode::E then
+          if LMixer.getStatus(LMixer.getVoice(KEngine)) = sf::SoundSource::Status::Stopped then
+            LOptions.channel := KEngine;
+            LOptions.loop := true;
+            LOptions.priority := 0;
+            LOptions.position.reset();
+            LVoice := LMixer.play(LSounds.at(4), LOptions);
+          else
+            LMixer.stopChannel(KEngine);
+          end;
+        end;
+
+        // Cross-fade to the other track
+        if LKey^.scancode = sf::Keyboard::Scancode::N then
+          LMixer.fadeOut(LTracks.at(LTrack), sf::seconds(1.5f));
+          LTrack := 1 - LTrack;
+          LMixer.fadeIn(LTracks.at(LTrack), sf::seconds(1.5f), 1.0f, true);
+        end;
+
+        if LKey^.scancode = sf::Keyboard::Scancode::Space then
+          if LPaused then
+            LMixer.resumeAll();
+          else
+            LMixer.pauseAll();
+          end;
+          LPaused := not LPaused;
+        end;
+
+        if LKey^.scancode = sf::Keyboard::Scancode::Up then
+          LMixer.setMusicLevel(LMixer.getMusicLevel() + 0.1f);
+        end;
+        if LKey^.scancode = sf::Keyboard::Scancode::Down then
+          LMixer.setMusicLevel(LMixer.getMusicLevel() - 0.1f);
+        end;
+        if LKey^.scancode = sf::Keyboard::Scancode::Right then
+          LMixer.setSoundLevel(LMixer.getSoundLevel() + 0.1f);
+        end;
+        if LKey^.scancode = sf::Keyboard::Scancode::Left then
+          LMixer.setSoundLevel(LMixer.getSoundLevel() - 0.1f);
+        end;
+      end;
+      LEvent := LWin.pollEvent();
+    end;
+
+    // The fades move by the real time passed
+    LMixer.update(LClock.restart());
+
+    LWin.startFrame();
+    for LIndex := 0 to KChannels - 1 do
+      LBox.setPosition(sf::Vector2f(16.0f + float32(LIndex) * 48.0f, 120.0f));
+      LBox.setFillColor(StatusColor(LMixer.getStatus(LMixer.getVoice(LIndex))));
+      if LMixer.isReserved(LIndex) then
+        LBox.setOutlineThickness(3.0f);
+      else
+        LBox.setOutlineThickness(0.0f);
+      end;
+      LWin.draw(LBox);
+    end;
+    LWin.drawText(LFont, "channels (0 = the engine, reserved)", sf::Vector2f(16.0f, 90.0f), 16,
+      sf::Color(160, 160, 170));
+    LWin.drawText(LFont, FormatStr("{}   level {:.2f}   {:.1f} / {:.1f} s", TrackEntry(LTrack),
+      LMixer.getLevel(LTracks.at(LTrack)), LMixer.getPlayingOffset(LTracks.at(LTrack)).asSeconds(),
+      LMixer.getDuration(LTracks.at(LTrack)).asSeconds()), sf::Vector2f(16.0f, 200.0f), 18, sf::Color(230, 230, 230));
+    LWin.drawText(LFont, FormatStr("music {:.1f}   sounds {:.1f}   {}", LMixer.getMusicLevel(), LMixer.getSoundLevel(),
+      PauseText(LPaused)), sf::Vector2f(16.0f, 230.0f), 18, sf::Color(230, 230, 230));
+    LWin.drawText(LFont, "1 - 5 a sound at the mouse   E engine   N next track", sf::Vector2f(16.0f, 360.0f), 16,
+      sf::Color(160, 200, 160));
+    LWin.drawText(LFont, "Space pause / resume   Up / Down music   Left / Right sounds   Escape quit",
+      sf::Vector2f(16.0f, 390.0f), 16, sf::Color(160, 200, 160));
+    LWin.endFrame();
+    LWin.display();
+  end;
+end;
+
+begin
+  Run();
+end.

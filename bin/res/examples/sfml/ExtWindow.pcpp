@@ -1,0 +1,176 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  ExtWindow.pcpp - the SFML extensions (import sfml_ext): an sfx::RenderWindow
+  drawing in an 800 x 450 frame. The window opens at the monitor's scale
+  (DPI / 96) and keeps the frame's aspect when resized: drag a corner and the
+  frame stays whole, bars outside it. A ring follows the mouse in frame
+  coordinates; the line at the top shows the scale, DPI, frame rate and mouse.
+  Window states, the second line shows them: F11 fullscreen on / off, B
+  borders on / off, M minimize (back through the taskbar), X maximize, R
+  restore. Escape or the close button ends it.
+  Below them, each draw helper: a line, a polyline, a rectangle outlined and
+  filled, circles, ellipses, triangles, and an L-shaped (concave) polygon
+  outlined and filled. The two text lines are drawText: crisp at any scale.
+  The gold line at the bottom is a program's own sf::Text sized through
+  setCharacterSize (the same rule), coloured with a named colour,
+  sfx::Color::Gold.
+==============================================================================*/
+
+module exe ExtWindow;
+
+import
+  sfml_ext,
+  SysUtils;
+
+routine Run();
+var
+  LWin: sfx::RenderWindow(sf::Vector2u(800, 450), "PaskalCPP + SFML: sfx::RenderWindow");
+  LFont: sf::Font;
+  LOwnText: sf::Text(LFont, "an sf::Text of the program, sized by setCharacterSize", 16);
+  LBorder: sf::RectangleShape(sf::Vector2f(796.0f, 446.0f));
+  LRing: sf::CircleShape(16.0f);
+  LCorner: sf::RectangleShape(sf::Vector2f(40.0f, 40.0f));
+  LZigzag: array[0..4] of sf::Vector2f;
+  LShape: array[0..5] of sf::Vector2f;
+  LFilled: array of sf::Vector2f;
+  LIndex: int32;
+  LEvent: std::optional<sf::Event>;
+  LKey: ptr to const sf::Event::KeyPressed;
+  LMouse: sf::Vector2i;
+begin
+  if not LFont.openFromFile(ResolvePath("$P:../../res/assets/fonts/JetBrainsMonoRegular.ttf")) then
+    println("font not found");
+    return;
+  end;
+
+  LWin.setFrameColor(sf::Color(24, 24, 32));
+  LWin.setBarColor(sf::Color(8, 8, 12));
+
+  // A zigzag for drawPolyline, an L shape for drawPolygon (a static array)
+  // and the same L moved right for drawFilledPolygon (a dynamic array)
+  LZigzag[0] := sf::Vector2f(230.0f, 140.0f);
+  LZigzag[1] := sf::Vector2f(260.0f, 100.0f);
+  LZigzag[2] := sf::Vector2f(290.0f, 140.0f);
+  LZigzag[3] := sf::Vector2f(320.0f, 100.0f);
+  LZigzag[4] := sf::Vector2f(350.0f, 140.0f);
+  LShape[0] := sf::Vector2f(60.0f, 320.0f);
+  LShape[1] := sf::Vector2f(160.0f, 320.0f);
+  LShape[2] := sf::Vector2f(160.0f, 345.0f);
+  LShape[3] := sf::Vector2f(85.0f, 345.0f);
+  LShape[4] := sf::Vector2f(85.0f, 400.0f);
+  LShape[5] := sf::Vector2f(60.0f, 400.0f);
+  setlength(LFilled, 6);
+  for LIndex := 0 to 5 do
+    LFilled[LIndex] := LShape[LIndex] + sf::Vector2f(140.0f, 0.0f);
+  end;
+
+  // The frame's edge: the bars begin outside it.
+  LBorder.setPosition(sf::Vector2f(2.0f, 2.0f));
+  LBorder.setFillColor(sf::Color::Transparent);
+  LBorder.setOutlineColor(sf::Color(40, 160, 220));
+  LBorder.setOutlineThickness(2.0f);
+
+  LRing.setOrigin(sf::Vector2f(16.0f, 16.0f));
+  LRing.setFillColor(sf::Color::Transparent);
+  LRing.setOutlineColor(sf::Color(255, 140, 0));
+  LRing.setOutlineThickness(3.0f);
+
+  LCorner.setFillColor(sf::Color(120, 200, 80));
+
+  while LWin.isOpen() do
+    LEvent := LWin.pollEvent();
+    while LEvent.has_value() do
+      if LEvent->is<sf::Event::Closed>() then
+        LWin.close();
+      end;
+      LKey := LEvent->getIf<sf::Event::KeyPressed>();
+      if LKey <> nil then
+        if LKey^.scancode = sf::Keyboard::Scancode::Escape then
+          LWin.close();
+        end;
+        if LKey^.scancode = sf::Keyboard::Scancode::F11 then
+          LWin.toggleFullscreen();
+        end;
+        if LKey^.scancode = sf::Keyboard::Scancode::B then
+          LWin.setBordersVisible(not LWin.areBordersVisible());
+        end;
+        if LKey^.scancode = sf::Keyboard::Scancode::M then
+          LWin.minimize();
+        end;
+        if LKey^.scancode = sf::Keyboard::Scancode::X then
+          LWin.maximize();
+        end;
+        if LKey^.scancode = sf::Keyboard::Scancode::R then
+          LWin.restore();
+        end;
+      end;
+      LEvent := LWin.pollEvent();
+    end;
+
+    LWin.startFrame();
+
+    LMouse := LWin.getFrameMousePosition();
+    LRing.setPosition(sf::Vector2f(LMouse));
+
+    // A square in two corners of the frame: whatever the window's size, they
+    // sit in the frame's corners.
+    LCorner.setPosition(sf::Vector2f(0.0f, 410.0f));
+    LWin.draw(LCorner);
+    LCorner.setPosition(sf::Vector2f(760.0f, 410.0f));
+    LWin.draw(LCorner);
+
+    // The draw helpers, in frame coordinates
+    LWin.drawLine(sf::Vector2f(40.0f, 100.0f), sf::Vector2f(200.0f, 140.0f), sf::Color(240, 200, 60), 3.0f);
+    LWin.drawPolyline(LZigzag, sf::Color(80, 200, 240), 4.0f);
+    LWin.drawRect(sf::FloatRect(sf::Vector2f(380.0f, 100.0f), sf::Vector2f(100.0f, 50.0f)),
+      sf::Color(220, 90, 90), 2.0f);
+    LWin.drawFilledRect(sf::FloatRect(sf::Vector2f(500.0f, 100.0f), sf::Vector2f(100.0f, 50.0f)),
+      sf::Color(220, 90, 90));
+    LWin.drawCircle(sf::Vector2f(660.0f, 125.0f), 28.0f, sf::Color(160, 120, 240), 3.0f);
+    LWin.drawFilledCircle(sf::Vector2f(735.0f, 125.0f), 28.0f, sf::Color(160, 120, 240));
+    LWin.drawEllipse(sf::Vector2f(110.0f, 240.0f), sf::Vector2f(70.0f, 35.0f), sf::Color(90, 200, 120), 3.0f);
+    LWin.drawFilledEllipse(sf::Vector2f(270.0f, 240.0f), sf::Vector2f(70.0f, 35.0f), sf::Color(90, 200, 120));
+    LWin.drawTriangle(sf::Vector2f(380.0f, 280.0f), sf::Vector2f(440.0f, 200.0f), sf::Vector2f(500.0f, 280.0f),
+      sf::Color(240, 160, 60), 3.0f);
+    LWin.drawFilledTriangle(sf::Vector2f(530.0f, 280.0f), sf::Vector2f(590.0f, 200.0f),
+      sf::Vector2f(650.0f, 280.0f), sf::Color(240, 160, 60));
+    LWin.drawPolygon(LShape, sf::Color(200, 200, 200), 3.0f);
+    LWin.drawFilledPolygon(LFilled, sf::Color(200, 200, 200));
+
+    LWin.draw(LBorder);
+    LWin.draw(LRing);
+    LWin.drawText(LFont, FormatStr("scale {:.2f}   dpi {}   fps {}   mouse {}, {}",
+      LWin.getScale(), LWin.getDpi(), LWin.getFrameRate(), LMouse.x, LMouse.y),
+      sf::Vector2f(16.0f, 12.0f), 18, sf::Color(230, 230, 230));
+    LWin.drawText(LFont, FormatStr("fullscreen {}   borders {}   minimized {}   maximized {}   restored {}",
+      LWin.isFullscreen(), LWin.areBordersVisible(), LWin.isMinimized(), LWin.isMaximized(),
+      LWin.isRestored()), sf::Vector2f(16.0f, 40.0f), 16, sf::Color(160, 200, 160));
+
+    // A text of the program's own: sized for the frame view each frame (the
+    // window's size or DPI may have changed)
+    LWin.setCharacterSize(LOwnText, 16);
+    LOwnText.setFillColor(sfx::Color::Gold);
+    LOwnText.setPosition(sf::Vector2f(56.0f, 418.0f));
+    LWin.draw(LOwnText);
+
+    LWin.endFrame();
+    LWin.display();
+  end;
+end;
+
+begin
+  Run();
+end.

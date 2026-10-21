@@ -28,7 +28,11 @@
     overrides Show, and a call through the interface runs TMore's;
   - an interface is reached through var, const, ptr to, own or ref, never
     held by value: Report / Named / Print take var, LP is a ptr to IShape,
-    LR a ref IShape holding a TSquare (freed at exit: Leaked 0).
+    LR a ref IShape holding a TSquare (freed at exit: Leaked 0);
+  - a pointer cast to an interface, from it back to the object and across to
+    another interface lands on the right address, both spellings (ptr to
+    IShape(x) and the pointer type's name PShape(x)): an interface is a
+    virtual base, so the address moves.
 
   How to check, from repo\bin:
     pcpp res\tests\type_object_iface.pcpp -r
@@ -46,6 +50,10 @@
     more i
     got 7
     ref square
+    cast 16 16 true true
+    back 4
+    show x 4
+    cross 4
     [Heap] Allocs: 1, Frees: 1, Leaked: 0
   EXITCODE: 0
   The [Heap] line is the debug build's heap report.
@@ -125,6 +133,7 @@ type
       return 7;
     end;
   end;
+  PShape = ptr to IShape;
 
 routine Report(var AShape: IShape);
 begin
@@ -148,6 +157,10 @@ var
   LMore: TMore;
   LP: ptr to IShape;
   LR: ref IShape;
+  LSqP: ptr to TSquare;
+  LC: ptr to IShape;
+  LQ: PShape;
+  LPr: ptr to IPrintable;
 begin
   LSq.S := 4;
   Report(LB);
@@ -162,4 +175,12 @@ begin
   Print(LMore);
   LR := ref TSquare();
   println("ref {}", LR.Name());
+  LSqP := address of LSq;
+  LC := ptr to IShape(LSqP);
+  LQ := PShape(LSqP);
+  println("cast {} {} {} {}", LC^.Area(), LQ^.Area(), LC = LP, LQ = LP);
+  LSqP := ptr to TSquare(LC);
+  println("back {}", LSqP^.S);
+  LPr := ptr to IPrintable(LC);
+  println("cross {}", LPr^.Show("x"));
 end.

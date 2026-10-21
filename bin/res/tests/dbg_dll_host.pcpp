@@ -15,9 +15,9 @@
 -------------------------------------------------------------------------------
   dbg_dll_host.pcpp - Debugger compliance: the host of dbg_dll
 
-  The host exe for dbg_dll.pcpp (see its steps). It runs in its own folder
-  (output\dbg_host\bin), loads ..\..\bin\dbg_dll.dll
-  (repo\bin\output\bin, where dbg_dll builds) and calls DllAdd.
+  The host exe for dbg_dll.pcpp (see its steps). It builds into
+  repo\bin\output\bin beside dbg_dll.dll, loads it from its own folder and
+  calls DllAdd.
 
   How to build, from repo\bin:
     pcpp res\tests\dbg_dll_host.pcpp
@@ -35,14 +35,13 @@
 *******************************************************************************/
 
 module exe dbg_dll_host;
-@outputpath "$P:output/dbg_host";
 
 #include <windows.h>
 #include <cstdio>
 
 begin
   cppstart source
-  HMODULE LLib = LoadLibraryW(L"..\\..\\bin\\dbg_dll.dll");
+  HMODULE LLib = LoadLibraryW(L"dbg_dll.dll");
   using TDllAdd = int32_t (*)(int32_t, int32_t);
   TDllAdd LAdd = LLib ? reinterpret_cast<TDllAdd>(GetProcAddress(LLib, "DllAdd")) : nullptr;
   std::printf("host got %d\n", LAdd ? LAdd(2, 3) : -1);

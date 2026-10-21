@@ -1,0 +1,5174 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  sfml_ext.pcpp - SFML extensions: `import sfml_ext;` adds namespace sfx to
+  SFML 3 (it imports sfml). Used exactly as SFML's own types are, sf:: values
+  in and out; the plain sf:: API stays usable beside them.
+
+  sfx::RenderWindow is an sf::RenderWindow (every sf::RenderWindow call works
+  on it) with what SFML 3 lacks:
+    - DPI scaling: the window is created at its base (logical) size x the
+      monitor's scale (DPI / 96), centred on the work area, and follows a DPI
+      change (Windows: per monitor; Linux: X11's Xft.dpi, 96 when unset).
+    - A letterbox frame: startFrame() draws in base-size coordinates whatever
+      the window's size; the aspect is kept, bars outside it.
+    - The mouse in frame coordinates, the frame rate, the program's own icon
+      (the icon @exeicon gives the exe: Windows its stamped icon, Linux the
+      picture built in as the data entry pcpp/exeicon; setIcon still works).
+    - Window states: toggleFullscreen() (a borderless window over the
+      monitor), setBordersVisible(), minimize() / maximize() / restore() and
+      their queries (Windows: Win32; Linux: EWMH and Motif hints over X11).
+    - Draw helpers: lines, polylines, rectangles, circles, ellipses,
+      triangles and polygons (outlined at a thickness or filled), and text
+      that stays crisp at any scale.
+  display() hides sf::Window::display() (C++ name hiding): it adds the DPI
+  follow and the frame timing. Called through an sf::Window it is SFML's.
+
+  sfx::toSf() / fromSf() convert Math's geometry and Console's colour to
+  SFML's and back, part for part: Math.Vector2 <-> sf::Vector2f, Math.Rect
+  <-> sf::FloatRect, Console.Rgb <-> sf::Color (fromSf drops the alpha,
+  toSf gives an opaque colour).
+
+  sfx::ZipStream is an sf::InputStream over one entry of a .zip archive, with
+  or without its password: sf::Font / sf::Texture / sf::Image /
+  sf::SoundBuffer / sf::Music open their data from it (openFromStream).
+  sfx::buildZip() writes a folder's files into a new archive, optionally
+  with a password and a progress callback. Paths and entry names are UTF-8
+  text (a PaskalCPP string) on every target; a path goes through SysUtils'
+  ResolvePath, so it may start with $P: (the program's folder) or $D:.
+
+  sfx::openFromResData() / loadFromResData() open an sf::Font / sf::Music /
+  sf::Texture / sf::Image / sf::SoundBuffer from the program's built-in data
+  (@addresdata, by key), the same on every target. sfml_ext builds a default
+  font into every program that imports it: sfx::openDefaultFont().
+
+  sfx::Video plays an MPEG-1 video with its MP2 audio (pl_mpeg) from a file,
+  an sf::InputStream or a zip entry, as sf::Music plays a sound: play /
+  pause / stop, looping, volume, a status callback; update() once a frame
+  decodes by the real time passed, and it is drawn as any sf::Drawable.
+
+  Errors: SFML's error reports (sf::err()) are caught from the program's
+  start, one message per report. sfx::getLastError() gives the newest;
+  sfx::setErrorCallback() sends every message to a routine instead of stderr
+  (none set: stderr, as SFML does); sfx::setError() reports a program's own
+  error, formatted as FormatStr does, the same way.
+
+  Console (std\Console.pcpp) is imported here: an sf::Color reaches its
+  colour routines as sfx::fromSf(AColor), as in
+  SetForegroundColor(sfx::fromSf(sfx::Color::Gold)). sfx::messageBox()
+  shows a modal message box with an OK button (Windows: the system's;
+  Linux: an SFML window in the default font).
+
+  sfx::Mixer is a sound manager over SFML audio, owned by the program: music
+  streamed from a file, an sf::InputStream or a zip entry (play / pause /
+  resume / stop, looping, offset, duration, fades), sounds decoded once and
+  played as voices on a fixed set of channels (a free channel, a given one or
+  the oldest voice of no higher priority; pitch, pan, looping, a 2D position
+  with distance fading), reserved channels, a global pause that resumes only
+  what it paused, and levels 0 to 1 (master, music, sounds, each music and
+  voice) heard through Math's PerceivedVolume. Handles carry a generation, so
+  a stale one changes nothing; loading what is loaded shares it, counted.
+==============================================================================*/
+
+module unit sfml_ext;
+
+// The X11 headers a Linux build includes (Xft.dpi, the work area): vendor/linux64.
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @linklibrary "user32";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addincludepath "$P:res/libs/vendor/linux64/include";
+@else
+  @message error "sfml_ext: unsupported target";
+@endif
+
+// The built-in default font (sfx::openDefaultFont): every program importing
+// sfml_ext carries it, under the key sfx::DefaultFontKey.
+@addresdata "sfml_ext/default_font" "$P:res/assets/fonts/JetBrainsMonoRegular.ttf";
+
+import
+  sfml,
+  minizip,
+  pl_mpeg,
+  SysUtils,
+  Console,
+  Math,
+  ResData;
+
+// Public: the sfx types, SFML headers only. The OS headers stay in this unit's
+// own source below (windows.h and Xlib.h define macros SFML's names clash with).
+cpp header;
+
+#include <cstddef>
+#include <cstdint>
+#include <format>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace sfx
+{
+
+// Named colours, read as SFML's own (sf::Color::White): sfx::Color::AliceBlue.
+// The CSS colours (both Gray and Grey spellings) plus Blank (transparent
+// black), White2, Red22, ColorKey (magenta), Overlay1 / Overlay2, DimWhite,
+// DarkSlateBrown and RayWhite; Transparent is transparent WHITE (a smooth
+// texture's edge fades to white, not grey), sf::Color::Transparent is
+// transparent black.
+namespace Color
+{
+
+inline constexpr sf::Color AliceBlue            {240, 248, 255, 255};
+inline constexpr sf::Color AntiqueWhite         {250, 235, 215, 255};
+inline constexpr sf::Color Aqua                 {  0, 255, 255, 255};
+inline constexpr sf::Color Aquamarine           {127, 255, 212, 255};
+inline constexpr sf::Color Azure                {240, 255, 255, 255};
+inline constexpr sf::Color Beige                {245, 245, 220, 255};
+inline constexpr sf::Color Bisque               {255, 228, 196, 255};
+inline constexpr sf::Color Black                {  0,   0,   0, 255};
+inline constexpr sf::Color BlanchedAlmond       {255, 235, 205, 255};
+inline constexpr sf::Color Blue                 {  0,   0, 255, 255};
+inline constexpr sf::Color BlueViolet           {138,  43, 226, 255};
+inline constexpr sf::Color Brown                {165,  42,  42, 255};
+inline constexpr sf::Color BurlyWood            {222, 184, 135, 255};
+inline constexpr sf::Color CadetBlue            { 95, 158, 160, 255};
+inline constexpr sf::Color Chartreuse           {127, 255,   0, 255};
+inline constexpr sf::Color Chocolate            {210, 105,  30, 255};
+inline constexpr sf::Color Coral                {255, 127,  80, 255};
+inline constexpr sf::Color CornflowerBlue       {100, 149, 237, 255};
+inline constexpr sf::Color Cornsilk             {255, 248, 220, 255};
+inline constexpr sf::Color Crimson              {220,  20,  60, 255};
+inline constexpr sf::Color Cyan                 {  0, 255, 255, 255};
+inline constexpr sf::Color DarkBlue             {  0,   0, 139, 255};
+inline constexpr sf::Color DarkCyan             {  0, 139, 139, 255};
+inline constexpr sf::Color DarkGoldenrod        {184, 134,  11, 255};
+inline constexpr sf::Color DarkGray             {169, 169, 169, 255};
+inline constexpr sf::Color DarkGreen            {  0, 100,   0, 255};
+inline constexpr sf::Color DarkGrey             {169, 169, 169, 255};
+inline constexpr sf::Color DarkKhaki            {189, 183, 107, 255};
+inline constexpr sf::Color DarkMagenta          {139,   0, 139, 255};
+inline constexpr sf::Color DarkOliveGreen       { 85, 107,  47, 255};
+inline constexpr sf::Color DarkOrange           {255, 140,   0, 255};
+inline constexpr sf::Color DarkOrchid           {153,  50, 204, 255};
+inline constexpr sf::Color DarkRed              {139,   0,   0, 255};
+inline constexpr sf::Color DarkSalmon           {233, 150, 122, 255};
+inline constexpr sf::Color DarkSeaGreen         {143, 188, 143, 255};
+inline constexpr sf::Color DarkSlateBlue        { 72,  61, 139, 255};
+inline constexpr sf::Color DarkSlateGray        { 47,  79,  79, 255};
+inline constexpr sf::Color DarkSlateGrey        { 47,  79,  79, 255};
+inline constexpr sf::Color DarkTurquoise        {  0, 206, 209, 255};
+inline constexpr sf::Color DarkViolet           {148,   0, 211, 255};
+inline constexpr sf::Color DeepPink             {255,  20, 147, 255};
+inline constexpr sf::Color DeepSkyBlue          {  0, 191, 255, 255};
+inline constexpr sf::Color DimGray              {105, 105, 105, 255};
+inline constexpr sf::Color DimGrey              {105, 105, 105, 255};
+inline constexpr sf::Color DodgerBlue           { 30, 144, 255, 255};
+inline constexpr sf::Color Firebrick            {178,  34,  34, 255};
+inline constexpr sf::Color FloralWhite          {255, 250, 240, 255};
+inline constexpr sf::Color ForestGreen          { 34, 139,  34, 255};
+inline constexpr sf::Color Fuchsia              {255,   0, 255, 255};
+inline constexpr sf::Color Gainsboro            {220, 220, 220, 255};
+inline constexpr sf::Color GhostWhite           {248, 248, 255, 255};
+inline constexpr sf::Color Gold                 {255, 215,   0, 255};
+inline constexpr sf::Color Goldenrod            {218, 165,  32, 255};
+inline constexpr sf::Color Gray                 {128, 128, 128, 255};
+inline constexpr sf::Color Green                {  0, 128,   0, 255};
+inline constexpr sf::Color GreenYellow          {173, 255,  47, 255};
+inline constexpr sf::Color Grey                 {128, 128, 128, 255};
+inline constexpr sf::Color Honeydew             {240, 255, 240, 255};
+inline constexpr sf::Color HotPink              {255, 105, 180, 255};
+inline constexpr sf::Color IndianRed            {205,  92,  92, 255};
+inline constexpr sf::Color Indigo               { 75,   0, 130, 255};
+inline constexpr sf::Color Ivory                {255, 255, 240, 255};
+inline constexpr sf::Color Khaki                {240, 230, 140, 255};
+inline constexpr sf::Color Lavender             {230, 230, 250, 255};
+inline constexpr sf::Color LavenderBlush        {255, 240, 245, 255};
+inline constexpr sf::Color LawnGreen            {124, 252,   0, 255};
+inline constexpr sf::Color LemonChiffon         {255, 250, 205, 255};
+inline constexpr sf::Color LightBlue            {173, 216, 230, 255};
+inline constexpr sf::Color LightCoral           {240, 128, 128, 255};
+inline constexpr sf::Color LightCyan            {224, 255, 255, 255};
+inline constexpr sf::Color LightGoldenrodYellow {250, 250, 210, 255};
+inline constexpr sf::Color LightGray            {211, 211, 211, 255};
+inline constexpr sf::Color LightGreen           {144, 238, 144, 255};
+inline constexpr sf::Color LightGrey            {211, 211, 211, 255};
+inline constexpr sf::Color LightPink            {255, 182, 193, 255};
+inline constexpr sf::Color LightSalmon          {255, 160, 122, 255};
+inline constexpr sf::Color LightSeaGreen        { 32, 178, 170, 255};
+inline constexpr sf::Color LightSkyBlue         {135, 206, 250, 255};
+inline constexpr sf::Color LightSlateGray       {119, 136, 153, 255};
+inline constexpr sf::Color LightSlateGrey       {119, 136, 153, 255};
+inline constexpr sf::Color LightSteelBlue       {176, 196, 222, 255};
+inline constexpr sf::Color LightYellow          {255, 255, 224, 255};
+inline constexpr sf::Color Lime                 {  0, 255,   0, 255};
+inline constexpr sf::Color LimeGreen            { 50, 205,  50, 255};
+inline constexpr sf::Color Linen                {250, 240, 230, 255};
+inline constexpr sf::Color Magenta              {255,   0, 255, 255};
+inline constexpr sf::Color Maroon               {128,   0,   0, 255};
+inline constexpr sf::Color MediumAquamarine     {102, 205, 170, 255};
+inline constexpr sf::Color MediumBlue           {  0,   0, 205, 255};
+inline constexpr sf::Color MediumOrchid         {186,  85, 211, 255};
+inline constexpr sf::Color MediumPurple         {147, 112, 219, 255};
+inline constexpr sf::Color MediumSeaGreen       { 60, 179, 113, 255};
+inline constexpr sf::Color MediumSlateBlue      {123, 104, 238, 255};
+inline constexpr sf::Color MediumSpringGreen    {  0, 250, 154, 255};
+inline constexpr sf::Color MediumTurquoise      { 72, 209, 204, 255};
+inline constexpr sf::Color MediumVioletRed      {199,  21, 133, 255};
+inline constexpr sf::Color MidnightBlue         { 25,  25, 112, 255};
+inline constexpr sf::Color MintCream            {245, 255, 250, 255};
+inline constexpr sf::Color MistyRose            {255, 228, 225, 255};
+inline constexpr sf::Color Moccasin             {255, 228, 181, 255};
+inline constexpr sf::Color NavajoWhite          {255, 222, 173, 255};
+inline constexpr sf::Color Navy                 {  0,   0, 128, 255};
+inline constexpr sf::Color OldLace              {253, 245, 230, 255};
+inline constexpr sf::Color Olive                {128, 128,   0, 255};
+inline constexpr sf::Color OliveDrab            {107, 142,  35, 255};
+inline constexpr sf::Color Orange               {255, 165,   0, 255};
+inline constexpr sf::Color OrangeRed            {255,  69,   0, 255};
+inline constexpr sf::Color Orchid               {218, 112, 214, 255};
+inline constexpr sf::Color PaleGoldenrod        {238, 232, 170, 255};
+inline constexpr sf::Color PaleGreen            {152, 251, 152, 255};
+inline constexpr sf::Color PaleTurquoise        {175, 238, 238, 255};
+inline constexpr sf::Color PaleVioletRed        {219, 112, 147, 255};
+inline constexpr sf::Color PapayaWhip           {255, 239, 213, 255};
+inline constexpr sf::Color PeachPuff            {255, 218, 185, 255};
+inline constexpr sf::Color Peru                 {205, 133,  63, 255};
+inline constexpr sf::Color Pink                 {255, 192, 203, 255};
+inline constexpr sf::Color Plum                 {221, 160, 221, 255};
+inline constexpr sf::Color PowderBlue           {176, 224, 230, 255};
+inline constexpr sf::Color Purple               {128,   0, 128, 255};
+inline constexpr sf::Color RebeccaPurple        {102,  51, 153, 255};
+inline constexpr sf::Color Red                  {255,   0,   0, 255};
+inline constexpr sf::Color RosyBrown            {188, 143, 143, 255};
+inline constexpr sf::Color RoyalBlue            { 65, 105, 225, 255};
+inline constexpr sf::Color SaddleBrown          {139,  69,  19, 255};
+inline constexpr sf::Color Salmon               {250, 128, 114, 255};
+inline constexpr sf::Color SandyBrown           {244, 164,  96, 255};
+inline constexpr sf::Color SeaGreen             { 46, 139,  87, 255};
+inline constexpr sf::Color SeaShell             {255, 245, 238, 255};
+inline constexpr sf::Color Sienna               {160,  82,  45, 255};
+inline constexpr sf::Color Silver               {192, 192, 192, 255};
+inline constexpr sf::Color SkyBlue              {135, 206, 235, 255};
+inline constexpr sf::Color SlateBlue            {106,  90, 205, 255};
+inline constexpr sf::Color SlateGray            {112, 128, 144, 255};
+inline constexpr sf::Color SlateGrey            {112, 128, 144, 255};
+inline constexpr sf::Color Snow                 {255, 250, 250, 255};
+inline constexpr sf::Color SpringGreen          {  0, 255, 127, 255};
+inline constexpr sf::Color SteelBlue            { 70, 130, 180, 255};
+inline constexpr sf::Color Tan                  {210, 180, 140, 255};
+inline constexpr sf::Color Teal                 {  0, 128, 128, 255};
+inline constexpr sf::Color Thistle              {216, 191, 216, 255};
+inline constexpr sf::Color Tomato               {255,  99,  71, 255};
+inline constexpr sf::Color Turquoise            { 64, 224, 208, 255};
+inline constexpr sf::Color Violet               {238, 130, 238, 255};
+inline constexpr sf::Color Wheat                {245, 222, 179, 255};
+inline constexpr sf::Color White                {255, 255, 255, 255};
+inline constexpr sf::Color WhiteSmoke           {245, 245, 245, 255};
+inline constexpr sf::Color Yellow               {255, 255,   0, 255};
+inline constexpr sf::Color YellowGreen          {154, 205,  50, 255};
+inline constexpr sf::Color Blank                {  0,   0,   0,   0};
+inline constexpr sf::Color White2               {245, 245, 245, 255};
+inline constexpr sf::Color Red22                {126,  50,  63, 255};
+inline constexpr sf::Color ColorKey             {255,   0, 255, 255};
+inline constexpr sf::Color Overlay1             {  0,  32,  41, 180};
+inline constexpr sf::Color Overlay2             {  1,  27,   1, 255};
+inline constexpr sf::Color DimWhite             { 16,  16,  16,  16};
+inline constexpr sf::Color DarkSlateBrown       { 30,  31,  30, 255};
+inline constexpr sf::Color RayWhite             {245, 245, 245, 255};
+inline constexpr sf::Color Transparent          {255, 255, 255,   0};
+
+} // namespace Color
+
+// Math's geometry and SFML's are the same data: converted at the boundary,
+// part for part (Math.Vector2 <-> sf::Vector2f, Math.Rect <-> sf::FloatRect)
+[[nodiscard]] inline sf::Vector2f toSf(const ::pcpp_m_Math::Vector2& AValue)
+{
+    return {AValue.X, AValue.Y};
+}
+
+[[nodiscard]] inline ::pcpp_m_Math::Vector2 fromSf(const sf::Vector2f& AValue)
+{
+    return ::pcpp_m_Math::Vector2(AValue.x, AValue.y);
+}
+
+[[nodiscard]] inline sf::FloatRect toSf(const ::pcpp_m_Math::Rect& AValue)
+{
+    return {{AValue.X, AValue.Y}, {AValue.Width, AValue.Height}};
+}
+
+[[nodiscard]] inline ::pcpp_m_Math::Rect fromSf(const sf::FloatRect& AValue)
+{
+    return ::pcpp_m_Math::Rect(AValue.position.x, AValue.position.y, AValue.size.x, AValue.size.y);
+}
+
+// Console's colour and SFML's: red, green and blue part for part; a terminal
+// colour has no alpha (fromSf drops it, toSf gives 255)
+[[nodiscard]] inline sf::Color toSf(const ::pcpp_m_Console::Rgb& AValue)
+{
+    return {AValue.R, AValue.G, AValue.B, 255};
+}
+
+[[nodiscard]] inline ::pcpp_m_Console::Rgb fromSf(const sf::Color& AValue)
+{
+    return ::pcpp_m_Console::Rgb(AValue.r, AValue.g, AValue.b);
+}
+
+// An sf::RenderWindow with DPI scaling, a letterbox frame at a base size, the
+// mouse in frame coordinates and the frame rate.
+class RenderWindow : public sf::RenderWindow
+{
+public:
+    // The context the window is made with by default: 24-bit depth, 8-bit
+    // stencil, 8x antialiasing, OpenGL 2.1.
+    static sf::ContextSettings defaultContextSettings();
+
+    // ABaseSize = the logical size the program draws in (startFrame's
+    // coordinates); the window opens at ABaseSize x getScale(), centred on the
+    // work area (a windowed state only). 60 frames a second, no vertical sync.
+    RenderWindow(sf::Vector2u              ABaseSize,
+                 const sf::String&         ATitle,
+                 std::uint32_t             AStyle    = sf::Style::Default,
+                 sf::State                 AState    = sf::State::Windowed,
+                 const sf::ContextSettings& ASettings = defaultContextSettings());
+    ~RenderWindow() override;
+
+    [[nodiscard]] sf::Vector2u getBaseSize() const;
+
+    // The monitor's scale (DPI / 96) and DPI.
+    [[nodiscard]] float        getScale() const;
+    [[nodiscard]] unsigned int getDpi() const;
+
+    // The colour of the frame (white by default) and of the bars around it
+    // (black by default).
+    void                    setFrameColor(sf::Color AColor);
+    [[nodiscard]] sf::Color getFrameColor() const;
+    void                    setBarColor(sf::Color AColor);
+    [[nodiscard]] sf::Color getBarColor() const;
+
+    // startFrame(): the bars cleared, the letterbox view set (fitted to the
+    // window's size now), the frame filled with its colour, the mouse taken.
+    // Draw in base-size coordinates until endFrame(), which sets the default
+    // view back.
+    void                         startFrame();
+    void                         endFrame();
+    [[nodiscard]] const sf::View& getFrameView() const;
+
+    // The mouse at startFrame(), in frame coordinates, clamped to the frame.
+    [[nodiscard]] sf::Vector2i getFrameMousePosition() const;
+
+    // sf::Window::display() plus the DPI follow and the frame timing.
+    void display();
+
+    // Frames a second, measured over each second; resetFrameRate() starts over.
+    [[nodiscard]] unsigned int getFrameRate() const;
+    void                       resetFrameRate();
+
+    // Fullscreen: a borderless window over the whole monitor it is on (the
+    // context is kept); toggled back, the window returns to its place, size,
+    // borders and maximized state. A window made in sf::State::Fullscreen is
+    // SFML's exclusive mode and stays as it is.
+    void               toggleFullscreen();
+    [[nodiscard]] bool isFullscreen() const;
+
+    // The title bar and borders; the drawing area keeps its size. Shown again,
+    // they are the ones the window was made with (sf::Style::Default's when it
+    // was made with none).
+    void               setBordersVisible(bool AVisible);
+    [[nodiscard]] bool areBordersVisible() const;
+
+    // restore() leaves minimized and maximized: the window at its normal size.
+    // Each call returns once the window manager shows the state (X11 applies a
+    // request later: at most a quarter second is waited).
+    void               minimize();
+    void               maximize();
+    void               restore();
+    [[nodiscard]] bool isMinimized() const;
+    [[nodiscard]] bool isMaximized() const;
+    [[nodiscard]] bool isRestored() const;   // neither minimized nor maximized
+
+    // Drawing in the current view's coordinates (the frame's between
+    // startFrame() and endFrame()). AThickness is in those coordinates; a line
+    // or an outline is centred on its path, so an outline lies half inside,
+    // half outside the shape's edge. Circles and ellipses take their centre;
+    // a polygon is its points in order, any simple polygon (convex or not).
+    void drawLine(sf::Vector2f AFrom, sf::Vector2f ATo, sf::Color AColor, float AThickness = 1.0f);
+    void drawPolyline(std::span<const sf::Vector2f> APoints, sf::Color AColor, float AThickness = 1.0f);
+    void drawRect(const sf::FloatRect& ARect, sf::Color AColor, float AThickness = 1.0f);
+    void drawFilledRect(const sf::FloatRect& ARect, sf::Color AColor);
+    void drawCircle(sf::Vector2f ACenter, float ARadius, sf::Color AColor, float AThickness = 1.0f);
+    void drawFilledCircle(sf::Vector2f ACenter, float ARadius, sf::Color AColor);
+    void drawEllipse(sf::Vector2f ACenter, sf::Vector2f ARadii, sf::Color AColor, float AThickness = 1.0f);
+    void drawFilledEllipse(sf::Vector2f ACenter, sf::Vector2f ARadii, sf::Color AColor);
+    void drawTriangle(sf::Vector2f AP1, sf::Vector2f AP2, sf::Vector2f AP3, sf::Color AColor, float AThickness = 1.0f);
+    void drawFilledTriangle(sf::Vector2f AP1, sf::Vector2f AP2, sf::Vector2f AP3, sf::Color AColor);
+    void drawPolygon(std::span<const sf::Vector2f> APoints, sf::Color AColor, float AThickness = 1.0f);
+    void drawFilledPolygon(std::span<const sf::Vector2f> APoints, sf::Color AColor);
+
+    // AText at APosition (its top left, snapped to a pixel), ACharacterSize in
+    // the current view's coordinates. The glyphs are rendered at the size the
+    // text has on screen, so it stays crisp at any scale or window size.
+    // Returns the font's line spacing in the current view's coordinates.
+    float drawText(const sf::Font&   AFont,
+                   const sf::String& AText,
+                   sf::Vector2f      APosition,
+                   unsigned int      ACharacterSize,
+                   sf::Color         AColor);
+
+    // drawText's rule for a person's own sf::Text: its glyphs rendered at the
+    // size ACharacterSize has in the current view on screen, and its scale set
+    // so it is ACharacterSize tall in the view's coordinates (crisp at any
+    // DPI or window size). Call it with the view the text is drawn in (the
+    // frame's: after startFrame()), again when the window's size or DPI
+    // changes. The text's own scale is replaced.
+    void setCharacterSize(sf::Text& AText, unsigned int ACharacterSize) const;
+
+    // The glyph size both use: ACharacterSize x APixelsPerUnit (window pixels
+    // per view unit), rounded, at least 1.
+    [[nodiscard]] static unsigned int glyphSize(unsigned int ACharacterSize, float APixelsPerUnit);
+
+    // The rules themselves, for any size: the viewport (relative) that fits
+    // ABaseSize's aspect into AWindowSize, and ABaseSize scaled for ADpi.
+    [[nodiscard]] static sf::FloatRect letterboxViewport(sf::Vector2u AWindowSize, sf::Vector2u ABaseSize);
+    [[nodiscard]] static sf::Vector2u  scaledSize(sf::Vector2u ABaseSize, unsigned int ADpi);
+
+    // The geometry the draw calls use, appended to AVertices as
+    // sf::PrimitiveType::Triangles (the call sets it): a thick polyline (miter
+    // joins, bevelled past 4 x half the thickness; AClosed joins the last point
+    // to the first) and a filled simple polygon (ear clipping). ellipsePoints:
+    // ACount points (at least 3) around an ellipse, from angle 0.
+    static void appendPolyline(sf::VertexArray&               AVertices,
+                               std::span<const sf::Vector2f> APoints,
+                               sf::Color                      AColor,
+                               float                          AThickness,
+                               bool                           AClosed);
+    static void appendFilledPolygon(sf::VertexArray&               AVertices,
+                                    std::span<const sf::Vector2f> APoints,
+                                    sf::Color                      AColor);
+    [[nodiscard]] static std::vector<sf::Vector2f> ellipsePoints(sf::Vector2f ACenter,
+                                                                 sf::Vector2f ARadii,
+                                                                 std::size_t  ACount);
+
+private:
+    [[nodiscard]] float        pixelsPerUnit() const;
+    [[nodiscard]] std::size_t  curveSegments(sf::Vector2f ARadii) const;
+    [[nodiscard]] unsigned int queryDpi() const;
+    void                       applyScale(bool ACenter);
+    void                       captureBorderStyle();
+    void                       settle(bool (RenderWindow::*AQuery)() const, bool AWanted) const;
+
+    sf::Vector2u       m_baseSize;
+    bool               m_windowed{true};
+    unsigned int       m_dpi{96};
+    float              m_scale{1.0f};
+    sf::View           m_frameView;
+    sf::RectangleShape m_canvas;
+    sf::Color          m_barColor{sf::Color::Black};
+    sf::Vector2i       m_mouse;
+    sf::Clock          m_frameClock;
+    unsigned int       m_frameCount{0};
+    float              m_frameRate{0.0f};
+    void*              m_display{nullptr}; // Linux: this window's own X11 connection
+    bool               m_bordersVisible{true};
+    std::uint32_t      m_borderStyle{0};      // the borders shown again: Windows style bits, X11 Motif decorations
+    bool               m_fullscreen{false};   // Windows: the borderless fullscreen is on
+    std::uint32_t      m_savedStyle{0};       // Windows: the style before fullscreen
+    sf::IntRect        m_savedRect;           // Windows: the normal placement before fullscreen
+    bool               m_savedMaximized{false};
+};
+
+// An sf::InputStream over one entry of a .zip archive, stored with or without
+// its traditional PKWARE password: sf::Font / sf::Texture / sf::Image /
+// sf::SoundBuffer / sf::Music open their data from it with openFromStream.
+// The archive path and the entry name are UTF-8 text (a PaskalCPP string) on
+// every target; the archive path goes through SysUtils' ResolvePath (a $P: /
+// $D: prefix works). An entry name is matched case sensitively, as the
+// archive stores it, with '/' between folders ('\' is taken as '/': a zip
+// name never holds one). Read only forward by minizip, so a seek back starts
+// the entry again and reads up to the new position.
+class ZipStream : public sf::InputStream
+{
+public:
+    ZipStream() = default;
+    // Opens AEntry of AArchive, as open() does; throws sf::Exception when it
+    // cannot (as sf::FileInputStream's constructor does)
+    ZipStream(const std::string& AArchive, const std::string& AEntry, const std::string& APassword = {});
+    ~ZipStream() override;
+
+    ZipStream(const ZipStream&)            = delete;
+    ZipStream& operator=(const ZipStream&) = delete;
+    ZipStream(ZipStream&& AOther) noexcept;
+    ZipStream& operator=(ZipStream&& AOther) noexcept;
+
+    // Opens AEntry of AArchive, closing what was open first. An empty APassword
+    // = an entry stored without one. False, and the stream closed, when the
+    // archive or the entry does not open, the entry needs a password and none
+    // is given, or the password is wrong (the header check every unzip tool
+    // makes: about one wrong password in 256 passes it, and its data then
+    // fails to read)
+    [[nodiscard]] bool open(const std::string& AArchive, const std::string& AEntry, const std::string& APassword = {});
+    // Closes the entry and the archive. False when minizip reported an error
+    // closing them (an entry read to its end whose CRC does not match: a
+    // damaged archive or a password that passed the header check) or a read
+    // or seek failed before; true for a stream that was not open
+    bool close();
+    [[nodiscard]] bool isOpen() const;
+
+    // sf::InputStream: nullopt when the stream is not open or a read failed
+    // (damaged data, a wrong password); after a failure only close() remains
+    [[nodiscard]] std::optional<std::size_t> read(void* AData, std::size_t ASize) override;
+    // nullopt for a position past the entry's end (the end itself is fine)
+    [[nodiscard]] std::optional<std::size_t> seek(std::size_t APosition) override;
+    [[nodiscard]] std::optional<std::size_t> tell() override;
+    std::optional<std::size_t> getSize() override;
+
+private:
+    bool restart();
+
+    void*       m_zip{nullptr}; // unzFile, positioned on the entry
+    std::string m_password;
+    std::size_t m_size{0};      // the entry's uncompressed size
+    std::size_t m_position{0};
+    bool        m_failed{false};
+};
+
+// True when AStream's position is at (or past) its end: tell() >= getSize().
+// Any sf::InputStream (sf::FileInputStream, sf::MemoryInputStream,
+// sfx::ZipStream ...); false when either is unknown (nullopt: a stream not
+// open, a read that failed, a size it cannot give).
+[[nodiscard]] bool eof(sf::InputStream& AStream);
+
+// Called by buildZip() for each entry: once with APercent 0 and ANewFile true
+// before its first byte is written, then with the percent of its bytes written
+// (100 last). A PaskalCPP routine with these parameters is one.
+using ZipProgress = std::function<void(const std::string& AEntry, int APercent, bool ANewFile)>;
+
+// Writes every file under AFolder (its subfolders too) into a new AArchive,
+// deflated at the best level, each entry encrypted with APassword unless it
+// is empty, with its file's modification time, in byte order of the names.
+// An entry is named by its file's path below ARoot with '/' (ARoot empty =
+// AFolder itself): buildZip("$P:../../res/assets", "$P:../../assets.zip",
+// LPassword, "$P:../..") names them res/assets/... Every path goes
+// through SysUtils' ResolvePath ($P: / $D: work). An AArchive inside AFolder
+// is left out; an existing AArchive is replaced. False when AFolder is not
+// inside ARoot or cannot be listed, a file cannot be read or the archive
+// cannot be written (an archive begun is then incomplete).
+[[nodiscard]] bool buildZip(const std::string& AFolder,
+                            const std::string& AArchive,
+                            const std::string& APassword = {},
+                            const std::string& ARoot = {},
+                            const ZipProgress& AProgress = {});
+
+// Built-in data (@addresdata, the ResData unit): an SFML object opened from an
+// entry the program's own binary holds, by its key, the same on every target.
+// An entry's bytes live as long as the program, so a font or a music opened
+// from one may keep reading them (SFML keeps no copy of either). Each returns
+// false, the object left as it was, when the binary holds no entry AKey or
+// SFML cannot read its bytes. Named as SFML's own: open for a font or music,
+// load for a texture, an image or a sound buffer.
+[[nodiscard]] bool openFromResData(sf::Font& AFont, const std::string& AKey);
+[[nodiscard]] bool openFromResData(sf::Music& AMusic, const std::string& AKey);
+[[nodiscard]] bool loadFromResData(sf::Texture& ATexture,
+                                   const std::string& AKey,
+                                   bool ASRgb = false,
+                                   const sf::IntRect& AArea = {});
+[[nodiscard]] bool loadFromResData(sf::Image& AImage, const std::string& AKey);
+[[nodiscard]] bool loadFromResData(sf::SoundBuffer& ABuffer, const std::string& AKey);
+
+// The default font sfml_ext builds into every program that imports it
+// (JetBrains Mono Regular), under this key.
+inline constexpr const char* DefaultFontKey = "sfml_ext/default_font";
+
+// Opens the default font: openFromResData(AFont, DefaultFontKey).
+[[nodiscard]] bool openDefaultFont(sf::Font& AFont);
+
+// An MPEG-1 video (MPEG-PS with MP2 audio, through pl_mpeg) played as sf::Music
+// plays a sound: open it, play(), call update() once a frame, draw it. It is an
+// sf::Drawable and an sf::Transformable: setPosition / setScale / setOrigin
+// place it, window.draw(video) draws its current frame (nothing while stopped).
+// The audio plays through an sf::SoundStream at the video's own sample rate;
+// a video with no audio track plays silently. Each frame's Y, Cb and Cr
+// planes go to the GPU as they are and a shader turns them into RGB as it
+// draws (no RGB conversion on the CPU, 1.5 bytes per pixel uploaded instead
+// of 4); without shader support the CPU converts. Paths are UTF-8 text through
+// SysUtils' ResolvePath ($P: / $D: work), files past 2 GiB included.
+class Video : public sf::Drawable, public sf::Transformable
+{
+public:
+    // sf::SoundSource::Status' values
+    enum class Status
+    {
+        Stopped,
+        Paused,
+        Playing
+    };
+
+    // Called on every status change: play, pause, stop and the end of a video
+    // that does not loop, with the new status and the video's name (the path
+    // or entry it was opened from, or the name openFromStream was given). A
+    // PaskalCPP routine with these parameters is one.
+    using StatusCallback = std::function<void(Status AStatus, const std::string& AName)>;
+
+    Video();
+    ~Video() override;
+
+    // The audio thread holds the video: neither copied nor moved
+    Video(const Video&)            = delete;
+    Video& operator=(const Video&) = delete;
+
+    // Each open closes what was open first and leaves the video stopped at its
+    // start. False, and nothing open, when the source does not open or holds
+    // no MPEG-1 video stream.
+    [[nodiscard]] bool openFromFile(const std::string& APath);
+    // AStream must stay alive while the video is open (as for sf::Music); its
+    // size must be known (getSize)
+    [[nodiscard]] bool openFromStream(sf::InputStream& AStream, const std::string& AName = {});
+    // AEntry of AArchive, as an sfx::ZipStream opens it (the video owns it)
+    [[nodiscard]] bool openFromZip(const std::string& AArchive, const std::string& AEntry, const std::string& APassword = {});
+    // Stops and closes; a closed video draws nothing and plays nothing
+    void close();
+    [[nodiscard]] bool isOpen() const;
+
+    // Playing from where it is (the start when stopped); Paused keeps the
+    // position; Stopped goes back to the start. Each does nothing when it is
+    // already in that status, or nothing is open.
+    void play();
+    void pause();
+    void stop();
+    [[nodiscard]] Status getStatus() const;
+
+    // Decodes the video and audio up to the time passed while playing: the
+    // real time since the last update (or since play()), or AElapsed. At the
+    // end the video starts again when it loops, else it stops (the callback
+    // says so). Call once a frame, before drawing.
+    void update();
+    void update(sf::Time AElapsed);
+
+    // At the end, start again (true) or stop (false, the default)
+    void setLooping(bool ALoop);
+    [[nodiscard]] bool isLooping() const;
+    // The level a person sets: 0 (silent) to 1 (full, the default), clamped;
+    // heard through Math's PerceivedVolume, so equal steps sound equal
+    void setVolume(float AVolume);
+    [[nodiscard]] float getVolume() const;
+    void setStatusCallback(StatusCallback ACallback);
+
+    // The open video's facts; zero / empty when nothing is open
+    [[nodiscard]] const std::string& getName() const;
+    [[nodiscard]] sf::Vector2u getSize() const;
+    [[nodiscard]] float getFrameRate() const;
+    [[nodiscard]] bool hasAudio() const;
+    [[nodiscard]] unsigned int getSampleRate() const;
+    [[nodiscard]] sf::Time getDuration() const;
+    [[nodiscard]] sf::Time getPlayingOffset() const;
+    // True when frames are converted to RGB on the GPU (a shader over the
+    // frame's Y, Cb and Cr planes, as pl_mpeg's own GL player does); false =
+    // on the CPU (no shader support), the same picture
+    [[nodiscard]] bool usesShader() const;
+
+private:
+    void draw(sf::RenderTarget& ATarget, sf::RenderStates AStates) const override;
+
+    // The decoder, the audio feed and the frame; defined in this unit's source
+    // (pl_mpeg stays out of the importer's names)
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
+};
+
+// Errors. SFML reports its errors on sf::err(); this unit catches them from
+// the program's start. Each flushed write is one message (SFML ends each
+// report with std::endl), its trailing line breaks dropped; the newest one is
+// kept (getLastError). With a callback set, every message goes to it instead
+// of stderr; with none (the default) SFML's messages still reach stderr, as
+// without this unit. setError reports a program's own error the same way:
+// kept and passed to the callback, never printed. The callback may be called
+// on SFML's audio thread, and may call these routines itself.
+using ErrorCallback = std::function<void(const std::string& AMessage)>;
+
+// The callback for every message; nil (an empty callback) = none
+void setErrorCallback(ErrorCallback ACallback);
+[[nodiscard]] ErrorCallback getErrorCallback();
+// The newest message, empty when none was reported
+[[nodiscard]] std::string getLastError();
+
+namespace detail
+{
+void setErrorMessage(const std::string& AMessage);
+} // namespace detail
+
+// A program's own error, formatted as FormatStr does:
+//   sfx::setError("cannot open {}", LName);
+template <class... TArgs>
+void setError(std::format_string<::pcpp::format_arg_t<TArgs>...> AFormat, const TArgs&... AArgs)
+{
+    detail::setErrorMessage(FormatStr(AFormat, AArgs...));
+}
+
+// A message box's icon
+enum class MessageBoxType
+{
+    Info,
+    Warning,
+    Error
+};
+
+// A modal message box with an OK button; returns when it is closed (OK,
+// Enter, Escape or the close button). Windows: the system's message box;
+// Linux: a small window drawn with SFML in the default font.
+void messageBox(const std::string& ATitle, const std::string& AMessage, MessageBoxType AType = MessageBoxType::Info);
+
+// A handle to something an sfx::Mixer holds: a slot and that slot's
+// generation. A default handle is invalid; a handle whose slot was freed or
+// reused since is stale: Mixer::isValid says false, a query on it gives the
+// zero values (Stopped, level 0, pitch 1) and a change does nothing. Handles
+// of one Mixer mean nothing to another.
+template <class TTag>
+struct MixerHandle
+{
+    std::uint32_t slot{0};
+    // 0 = never valid; a slot's generation starts at 1
+    std::uint32_t generation{0};
+
+    friend bool operator==(const MixerHandle&, const MixerHandle&) = default;
+};
+
+struct MusicTag;
+struct SoundTag;
+struct VoiceTag;
+
+// A loaded music (streamed while it plays, as sf::Music)
+using MusicId = MixerHandle<MusicTag>;
+// A loaded sound (decoded into memory, as sf::SoundBuffer)
+using SoundId = MixerHandle<SoundTag>;
+// One play of a sound on a channel; stale once its channel plays another
+using VoiceId = MixerHandle<VoiceTag>;
+
+// How Mixer::play starts a sound. Every value is set before the sound starts.
+struct PlayOptions
+{
+    // 0 (silent) to 1 (full), clamped
+    float level{1.0f};
+    // 1 = as recorded; at or below 0 (or NaN) is taken as 1
+    float pitch{1.0f};
+    // -1 (left) to 1 (right), clamped; heard while the voice has no position
+    float pan{0.0f};
+    // Where the voice is (as Mixer::setPosition), from its first sample;
+    // none = plain stereo
+    std::optional<sf::Vector2f> position;
+    bool loop{false};
+    // When every unreserved channel is busy, a play takes the oldest voice
+    // whose priority is at or below its own; none = no play
+    int priority{0};
+    // -1 = any unreserved channel; 0 .. getChannelCount() - 1 = that channel,
+    // reserved or not (whatever plays there is stopped)
+    int channel{-1};
+};
+
+// A sound manager over SFML audio, owned by the program (one or more; no
+// globals). Music streams from a file, an sf::InputStream or a zip entry;
+// sounds are decoded into memory once and play on a fixed set of channels,
+// many at a time. Loading what is already loaded (the same path, the same
+// zip entry under the same password, or a stream under the same non-empty
+// name) gives the same handle and counts it: each load needs its unload,
+// unloadAll frees everything. A load that fails gives an invalid handle and
+// reports why through sfx::setError. Paths and entry names are UTF-8 text
+// through SysUtils' ResolvePath ($P: / $D: work).
+//
+// Every level is what a person sets, 0 (silent) to 1 (full), clamped, kept
+// and read back as set; it is heard through Math's PerceivedVolume, so equal
+// steps sound equal. What plays is heard at its own level x its group's level
+// (music or sounds), all under the master level (sf::Listener's global
+// volume, which every sf:: sound and sfx::Video share).
+//
+// Positions are 2D: the listener and each voice at an sf::Vector2f in the
+// program's own units (pixels, say). A voice with no position is plain
+// stereo (its pan is heard); a placed voice fades with its distance from the
+// listener by the distance model (setDistanceModel: full level within 200
+// units, about half at 400, unless set). Music is never placed: always plain
+// stereo, wherever the listener is.
+//
+// Calls are made from one thread (the main one). The Mixer stops and frees
+// everything it holds when it is destroyed; it is neither copied nor moved.
+class Mixer
+{
+public:
+    // A channel as the free-channel rule sees it (pickChannel)
+    struct ChannelState
+    {
+        bool reserved{false};
+        // playing or paused
+        bool busy{false};
+        int priority{0};
+        // the order its voice started in: lower = older
+        std::uint64_t order{0};
+    };
+
+    // AChannels channels (at least 1, at most 256). Sets the master level to 1
+    // and the listener to (0, 0): sf::Listener's global volume and position,
+    // shared by every sf:: sound, hold whatever set them last
+    explicit Mixer(unsigned int AChannels = 32);
+    ~Mixer();
+
+    // SFML's sounds point at their mixer's buffers: neither copied nor moved
+    Mixer(const Mixer&)            = delete;
+    Mixer& operator=(const Mixer&) = delete;
+
+    // Stops and unloads everything; every level back to 1, the listener back
+    // to (0, 0), no channel reserved
+    void reset();
+
+    [[nodiscard]] bool isValid(MusicId AMusic) const;
+    [[nodiscard]] bool isValid(SoundId ASound) const;
+    [[nodiscard]] bool isValid(VoiceId AVoice) const;
+
+    // Music: a file, a stream the caller keeps alive while it is loaded (its
+    // size must be known), or an entry of a zip archive (the Mixer keeps the
+    // entry open). AName names a stream for sharing and for error messages;
+    // an empty name is never shared.
+    [[nodiscard]] MusicId loadMusic(const std::string& APath);
+    [[nodiscard]] MusicId loadMusic(sf::InputStream& AStream, const std::string& AName = {});
+    [[nodiscard]] MusicId loadMusicFromZip(const std::string& AArchive, const std::string& AEntry, const std::string& APassword = {});
+    // One load less; at none the music stops and is freed
+    void unload(MusicId AMusic);
+
+    // From the start (it was playing: again from the start), at ALevel,
+    // looping or not; a fade on it ends
+    void play(MusicId AMusic, float ALevel = 1.0f, bool ALoop = false);
+    // Stopped goes back to the start; a fade on it ends
+    void stop(MusicId AMusic);
+    // Paused keeps the position; resume plays on from it (only when paused)
+    void pause(MusicId AMusic);
+    void resume(MusicId AMusic);
+    [[nodiscard]] sf::SoundSource::Status getStatus(MusicId AMusic) const;
+    void setLooping(MusicId AMusic, bool ALoop);
+    [[nodiscard]] bool isLooping(MusicId AMusic) const;
+    // A fade on it ends
+    void setLevel(MusicId AMusic, float ALevel);
+    [[nodiscard]] float getLevel(MusicId AMusic) const;
+    void setPlayingOffset(MusicId AMusic, sf::Time AOffset);
+    [[nodiscard]] sf::Time getPlayingOffset(MusicId AMusic) const;
+    [[nodiscard]] sf::Time getDuration(MusicId AMusic) const;
+
+    // Fades: the level moves in a straight line (equal steps of loudness) to
+    // ALevel over ADuration, advanced by update() while the music plays.
+    // fadeIn plays it from the start at 0 and fades up; fadeOut fades down and
+    // stops it at 0. A zero duration sets the level at once.
+    void fadeTo(MusicId AMusic, float ALevel, sf::Time ADuration);
+    void fadeIn(MusicId AMusic, sf::Time ADuration, float ALevel = 1.0f, bool ALoop = false);
+    void fadeOut(MusicId AMusic, sf::Time ADuration);
+    [[nodiscard]] bool isFading(MusicId AMusic) const;
+    // Advances the fades by the time passed; call once a frame
+    void update(sf::Time AElapsed);
+
+    // Sounds: a file, a stream (read whole while loading) or a zip entry.
+    // AName as for music.
+    [[nodiscard]] SoundId loadSound(const std::string& APath);
+    [[nodiscard]] SoundId loadSound(sf::InputStream& AStream, const std::string& AName = {});
+    [[nodiscard]] SoundId loadSoundFromZip(const std::string& AArchive, const std::string& AEntry, const std::string& APassword = {});
+    // One load less; at none its voices stop and it is freed
+    void unload(SoundId ASound);
+    [[nodiscard]] sf::Time getDuration(SoundId ASound) const;
+
+    // Stops and frees every music and sound (handles go stale); levels,
+    // the listener and reserved channels stay
+    void unloadAll();
+
+    // Plays ASound on a channel chosen by AOptions (see PlayOptions and
+    // pickChannel). An invalid VoiceId when ASound is not valid or no
+    // channel may take it.
+    [[nodiscard]] VoiceId play(SoundId ASound, const PlayOptions& AOptions = {});
+    void stop(VoiceId AVoice);
+    void pause(VoiceId AVoice);
+    void resume(VoiceId AVoice);
+    [[nodiscard]] sf::SoundSource::Status getStatus(VoiceId AVoice) const;
+    void setLevel(VoiceId AVoice, float ALevel);
+    [[nodiscard]] float getLevel(VoiceId AVoice) const;
+    // At or below 0 (or NaN): no change
+    void setPitch(VoiceId AVoice, float APitch);
+    [[nodiscard]] float getPitch(VoiceId AVoice) const;
+    void setPan(VoiceId AVoice, float APan);
+    [[nodiscard]] float getPan(VoiceId AVoice) const;
+    void setLooping(VoiceId AVoice, bool ALoop);
+    [[nodiscard]] bool isLooping(VoiceId AVoice) const;
+    // Placing a voice turns distance fading on; clearPosition turns it off
+    // (plain stereo again)
+    void setPosition(VoiceId AVoice, sf::Vector2f APosition);
+    void clearPosition(VoiceId AVoice);
+    [[nodiscard]] bool hasPosition(VoiceId AVoice) const;
+    [[nodiscard]] sf::Vector2f getPosition(VoiceId AVoice) const;
+    // The voice's own distance model (see setDistanceModel): the min distance
+    // (above 0), the attenuation (0 = no fading) and the max distance past
+    // which it fades no further; a value out of range changes nothing
+    void setMinDistance(VoiceId AVoice, float ADistance);
+    [[nodiscard]] float getMinDistance(VoiceId AVoice) const;
+    void setMaxDistance(VoiceId AVoice, float ADistance);
+    [[nodiscard]] float getMaxDistance(VoiceId AVoice) const;
+    void setAttenuation(VoiceId AVoice, float AAttenuation);
+    [[nodiscard]] float getAttenuation(VoiceId AVoice) const;
+    // A position relative to the listener (it moves with the listener)
+    void setRelativeToListener(VoiceId AVoice, bool ARelative);
+    [[nodiscard]] bool isRelativeToListener(VoiceId AVoice) const;
+
+    // Channels 0 .. getChannelCount() - 1. A reserved channel is left out of
+    // the free-channel choice (a play names it to use it). A channel outside
+    // the range does nothing and is reported through sfx::setError.
+    [[nodiscard]] unsigned int getChannelCount() const;
+    void setReserved(int AChannel, bool AReserved);
+    [[nodiscard]] bool isReserved(int AChannel) const;
+    void stopChannel(int AChannel);
+    void pauseChannel(int AChannel);
+    void resumeChannel(int AChannel);
+    // The newest voice the channel played (it may have stopped since); an
+    // invalid VoiceId when it played none
+    [[nodiscard]] VoiceId getVoice(int AChannel) const;
+
+    // Stops every voice and every music
+    void stopAll();
+    void stopAllSounds();
+    void stopAllMusic();
+    // Pauses what plays now and keeps exactly those; resume plays on only
+    // those still paused (what was paused before, or paused, stopped or
+    // started since by the program, is left as it is). Plays after a pause
+    // start as usual.
+    void pauseAll();
+    void resumeAll();
+    void pauseAllSounds();
+    void resumeAllSounds();
+    void pauseAllMusic();
+    void resumeAllMusic();
+
+    // Levels 0 .. 1: master (sf::Listener's global volume), the music group,
+    // the sounds group
+    void setMasterLevel(float ALevel);
+    [[nodiscard]] float getMasterLevel() const;
+    void setMusicLevel(float ALevel);
+    [[nodiscard]] float getMusicLevel() const;
+    void setSoundLevel(float ALevel);
+    [[nodiscard]] float getSoundLevel() const;
+    // The listener's 2D position (sf::Listener, shared by every sf:: sound)
+    void setListenerPosition(sf::Vector2f APosition);
+    [[nodiscard]] sf::Vector2f getListenerPosition() const;
+    // The distance model every voice starts with, in the program's units: a
+    // placed voice is heard at full level within AMinDistance (above 0) and
+    // past it at distanceGain (SFML's inverse model; AAttenuation 0 = no
+    // fading, larger = faster). Defaults 200 and 1: half the level at 400,
+    // a quarter at 800. A value out of range keeps the old one; voices
+    // started before keep theirs (setMinDistance / setAttenuation change one)
+    void setDistanceModel(float AMinDistance, float AAttenuation);
+    [[nodiscard]] float getDefaultMinDistance() const;
+    [[nodiscard]] float getDefaultAttenuation() const;
+
+    // The rules, without an audio device:
+    // The channel a play takes: ARequested when it is a channel (reserved or
+    // not); for -1 the first unreserved channel that is not busy, else the
+    // unreserved busy one with the lowest order whose priority is at or below
+    // APriority; -1 when none (or ARequested is neither -1 nor a channel)
+    [[nodiscard]] static int pickChannel(std::span<const ChannelState> AChannels, int ARequested, int APriority);
+    // A level kept in 0 .. 1 (NaN = 0)
+    [[nodiscard]] static float clampLevel(float ALevel);
+    // The SFML volume (0 .. 100) heard for a level in a group at AGroup
+    [[nodiscard]] static float toVolume(float ALevel, float AGroup);
+    // A fade's level after AElapsed of ADuration (AElapsed at or past the end,
+    // or no duration: ATo)
+    [[nodiscard]] static float fadeLevel(float AFrom, float ATo, sf::Time ADuration, sf::Time AElapsed);
+    // A 2D position in SFML's 3D audio space: (x, y) -> (x, 0, y)
+    [[nodiscard]] static sf::Vector3f toAudioSpace(sf::Vector2f APosition);
+    // The gain (0 .. 1) a placed voice is heard at ADistance from the
+    // listener: miniaudio's inverse model, the one SFML runs:
+    // min / (min + attenuation x ((distance clamped to min .. max) - min));
+    // 1 when the min distance is not below the max
+    [[nodiscard]] static float distanceGain(float ADistance, float AMinDistance, float AAttenuation,
+                                            // in brackets: an importer's windows.h may define max
+                                            float AMaxDistance = (std::numeric_limits<float>::max)());
+
+private:
+    // The slots and channels; defined in this unit's source
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
+};
+
+} // namespace sfx
+
+// Private: the definitions and the OS calls, this unit's own translation unit.
+cpp source;
+
+#include <algorithm>
+#include <chrono>
+#include <climits>
+#include <cmath>
+#include <cstdlib>
+#include <ctime>
+#include <filesystem>
+#include <fstream>
+#include <numbers>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <X11/Xlib.h>
+#include <X11/Xresource.h>
+#endif
+
+// minizip's own PKWARE key schedule (init_keys / zdecode), for ZipStream's
+// password check: the header part already included zlib.h through minizip
+#include "crypt.h"
+
+namespace
+{
+
+constexpr unsigned int kBaseDpi = 96;
+
+#ifdef _WIN32
+
+// GetDpiForWindow (Windows 10 1607+) is looked up: per monitor once SFML made
+// the process per-monitor DPI aware (it does so before its first window).
+// Older systems: the screen's logical DPI.
+unsigned int windowDpi(HWND AWindow)
+{
+    using GetDpiForWindowFn = UINT(WINAPI*)(HWND);
+    static const auto LGetDpiForWindow = reinterpret_cast<GetDpiForWindowFn>(
+        reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetDpiForWindow")));
+
+    if (LGetDpiForWindow != nullptr)
+    {
+        const UINT LDpi = LGetDpiForWindow(AWindow);
+        if (LDpi != 0)
+            return LDpi;
+    }
+
+    unsigned int LResult = kBaseDpi;
+    HDC LDc = GetDC(AWindow);
+    if (LDc != nullptr)
+    {
+        const int LDpi = GetDeviceCaps(LDc, LOGPIXELSY);
+        if (LDpi > 0)
+            LResult = static_cast<unsigned int>(LDpi);
+        ReleaseDC(AWindow, LDc);
+    }
+    return LResult;
+}
+
+// The work area of the monitor the window is on.
+bool windowWorkArea(HWND AWindow, sf::Vector2i& APosition, sf::Vector2i& ASize)
+{
+    MONITORINFO LInfo{};
+    LInfo.cbSize = sizeof(LInfo);
+    if (!GetMonitorInfoW(MonitorFromWindow(AWindow, MONITOR_DEFAULTTONEAREST), &LInfo))
+        return false;
+    APosition = {LInfo.rcWork.left, LInfo.rcWork.top};
+    ASize     = {LInfo.rcWork.right - LInfo.rcWork.left, LInfo.rcWork.bottom - LInfo.rcWork.top};
+    return true;
+}
+
+// The icon @exeicon stamps (resource MAINICON); none stamped = SFML's default.
+void setProgramIcon(HWND AWindow)
+{
+    HICON LIcon = LoadIconW(GetModuleHandleW(nullptr), L"MAINICON");
+    if (LIcon == nullptr)
+        return;
+    SendMessageW(AWindow, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(LIcon));
+    SendMessageW(AWindow, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(LIcon));
+}
+
+// The style bits that make a title bar and borders (sf::Style::Default's set).
+constexpr LONG kBorderBits = WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+
+// The outer rectangle for a client rectangle under AStyle, at the window's own
+// DPI (AdjustWindowRectExForDpi, Windows 10 1607+, looked up as GetDpiForWindow).
+void outerRect(HWND AWindow, RECT& ARect, LONG AStyle)
+{
+    using AdjustForDpiFn = BOOL(WINAPI*)(LPRECT, DWORD, BOOL, DWORD, UINT);
+    static const auto LAdjustForDpi = reinterpret_cast<AdjustForDpiFn>(
+        reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "AdjustWindowRectExForDpi")));
+
+    const DWORD LExStyle = static_cast<DWORD>(GetWindowLongW(AWindow, GWL_EXSTYLE));
+    if (LAdjustForDpi != nullptr)
+        LAdjustForDpi(&ARect, static_cast<DWORD>(AStyle), FALSE, LExStyle, windowDpi(AWindow));
+    else
+        AdjustWindowRectEx(&ARect, static_cast<DWORD>(AStyle), FALSE, LExStyle);
+}
+
+// A new style; the client area keeps its place and size. A maximized or
+// minimized window is laid out again by the system.
+void setStyleKeepClient(HWND AWindow, LONG AStyle)
+{
+    if (IsZoomed(AWindow) || IsIconic(AWindow))
+    {
+        SetWindowLongW(AWindow, GWL_STYLE, AStyle);
+        SetWindowPos(AWindow, nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        return;
+    }
+
+    RECT LClient{};
+    GetClientRect(AWindow, &LClient);
+    POINT LOrigin{0, 0};
+    ClientToScreen(AWindow, &LOrigin);
+
+    SetWindowLongW(AWindow, GWL_STYLE, AStyle);
+    RECT LOuter{LOrigin.x, LOrigin.y, LOrigin.x + LClient.right, LOrigin.y + LClient.bottom};
+    outerRect(AWindow, LOuter, AStyle);
+    SetWindowPos(AWindow, nullptr, LOuter.left, LOuter.top, LOuter.right - LOuter.left,
+                 LOuter.bottom - LOuter.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
+#else
+
+// ICCCM WM_STATE: the state a minimized window is in.
+constexpr long kIconicState = 3;
+
+// Motif window manager hints (MwmUtil.h): 5 items, flags first; flag bit 1 =
+// the decorations item is set, decorations bit 0 = all of them.
+constexpr int           kMwmHintsItems       = 5;
+constexpr unsigned long kMwmHintsDecorations = 1UL << 1;
+constexpr unsigned long kMwmDecorAll         = 1UL << 0;
+
+// The data entry @exeicon builds into a Linux exe (PaskalCPP's reserved key):
+// width and height as uint32 little endian, then width x height RGBA pixels,
+// rows top down (what sf::Window::setIcon takes).
+constexpr const char*   kExeIconKey          = "pcpp/exeicon";
+constexpr std::int64_t  kExeIconHeader       = 8;
+
+// A uint32 stored little endian, byte by byte (any alignment, any host)
+std::uint32_t iconWord(const std::uint8_t* AData)
+{
+    return static_cast<std::uint32_t>(AData[0]) |
+           (static_cast<std::uint32_t>(AData[1]) << 8) |
+           (static_cast<std::uint32_t>(AData[2]) << 16) |
+           (static_cast<std::uint32_t>(AData[3]) << 24);
+}
+
+// _NET_WM_ICON of AWindow from APixels (RGBA rows, top down): width, height,
+// then one ARGB value per pixel (A high byte, B low), format 32 = a long each.
+// SFML writes it only when the window manager lists _NET_WM_ICON in
+// _NET_SUPPORTED; a manager that draws it without listing it (WSLg's Weston
+// frames read it) then showed no icon. Written whatever the manager lists:
+// EWMH lets a client set it, and a manager that does not use it ignores it.
+void setNetWmIcon(Display* ADisplay, ::Window AWindow, std::uint32_t AWidth, std::uint32_t AHeight,
+                  const std::uint8_t* APixels)
+{
+    const std::size_t LCount = static_cast<std::size_t>(AWidth) * AHeight;
+    std::vector<unsigned long> LData(2 + LCount);
+    LData[0] = AWidth;
+    LData[1] = AHeight;
+    for (std::size_t LIndex = 0; LIndex < LCount; ++LIndex)
+    {
+        const std::uint8_t* LPixel = APixels + LIndex * 4;
+        LData[2 + LIndex] = (static_cast<unsigned long>(LPixel[3]) << 24) |
+                            (static_cast<unsigned long>(LPixel[0]) << 16) |
+                            (static_cast<unsigned long>(LPixel[1]) << 8) |
+                            static_cast<unsigned long>(LPixel[2]);
+    }
+    // CARDINAL is a predefined atom (XA_CARDINAL; Xatom.h is not in linux64\include)
+    const Atom LNetIcon  = XInternAtom(ADisplay, "_NET_WM_ICON", False);
+    const Atom LCardinal = XInternAtom(ADisplay, "CARDINAL", False);
+    XChangeProperty(ADisplay, AWindow, LNetIcon, LCardinal, 32, PropModeReplace,
+                    reinterpret_cast<const unsigned char*>(LData.data()), static_cast<int>(LData.size()));
+    XFlush(ADisplay);
+}
+
+// The icon @exeicon built in (entry pcpp/exeicon); none built in, or an entry
+// too short for its own size, = the window manager's default icon. SFML sets
+// the ICCCM icon (and _NET_WM_ICON when listed); _NET_WM_ICON is written on
+// ADisplay too (nil = no connection: SFML's part only).
+void setProgramIcon(sf::WindowBase& AWindow, Display* ADisplay)
+{
+    const ::pcpp_m_ResData::ResDataEntry LEntry = ::pcpp_m_ResData::FindResData(kExeIconKey);
+    if (LEntry.Data == nullptr || LEntry.Size < kExeIconHeader)
+        return;
+
+    const std::uint32_t LWidth  = iconWord(LEntry.Data);
+    const std::uint32_t LHeight = iconWord(LEntry.Data + 4);
+    if (LWidth == 0 || LHeight == 0)
+        return;
+
+    // The pixels the entry holds, counted without overflow: width x height
+    // may not pass them (a product of two uint32 can pass 64 bits x 4)
+    const std::uint64_t LPixels = static_cast<std::uint64_t>(LEntry.Size - kExeIconHeader) / 4;
+    if (LWidth > LPixels / LHeight)
+        return;
+
+    AWindow.setIcon(sf::Vector2u(LWidth, LHeight), LEntry.Data + kExeIconHeader);
+    if (ADisplay != nullptr)
+        setNetWmIcon(ADisplay, static_cast<::Window>(AWindow.getNativeHandle()), LWidth, LHeight,
+                     LEntry.Data + kExeIconHeader);
+}
+
+// EWMH _NET_WM_STATE actions.
+constexpr long kNetWmStateRemove = 0;
+constexpr long kNetWmStateAdd    = 1;
+
+// AWindow's property AName (format 32 / 8 data), or nullptr; XFree it.
+unsigned char* windowProperty(Display* ADisplay, ::Window AWindow, const char* AName, unsigned long& ACount)
+{
+    ACount = 0;
+    const Atom LName = XInternAtom(ADisplay, AName, True);
+    if (LName == None)
+        return nullptr;
+
+    Atom           LType   = None;
+    int            LFormat = 0;
+    unsigned long  LAfter  = 0;
+    unsigned char* LData   = nullptr;
+    if (XGetWindowProperty(ADisplay, AWindow, LName, 0, 1L << 24, False,
+                           AnyPropertyType, &LType, &LFormat, &ACount, &LAfter, &LData) != Success)
+        return nullptr;
+    return LData;
+}
+
+// The root window's property AName, or nullptr; XFree it.
+unsigned char* rootProperty(Display* ADisplay, const char* AName, unsigned long& ACount)
+{
+    return windowProperty(ADisplay, DefaultRootWindow(ADisplay), AName, ACount);
+}
+
+// AState (an atom name) in AWindow's _NET_WM_STATE: what the window manager set.
+bool x11HasState(Display* ADisplay, ::Window AWindow, const char* AState)
+{
+    const Atom LState = XInternAtom(ADisplay, AState, True);
+    if (LState == None)
+        return false;
+
+    unsigned long  LCount = 0;
+    unsigned char* LData  = windowProperty(ADisplay, AWindow, "_NET_WM_STATE", LCount);
+    if (LData == nullptr)
+        return false;
+
+    // Format 32 data arrives as long per item (Atom is an unsigned long)
+    const Atom* LItems = reinterpret_cast<const Atom*>(LData);
+    bool        LFound = false;
+    for (unsigned long LIndex = 0; LIndex < LCount; ++LIndex)
+    {
+        if (LItems[LIndex] == LState)
+        {
+            LFound = true;
+            break;
+        }
+    }
+    XFree(LData);
+    return LFound;
+}
+
+// Minimized: ICCCM's WM_STATE is iconic, or EWMH's hidden state is set.
+bool x11Iconic(Display* ADisplay, ::Window AWindow)
+{
+    bool           LIconic = false;
+    unsigned long  LCount  = 0;
+    unsigned char* LData   = windowProperty(ADisplay, AWindow, "WM_STATE", LCount);
+    if (LData != nullptr)
+    {
+        LIconic = LCount >= 1 && reinterpret_cast<const long*>(LData)[0] == kIconicState;
+        XFree(LData);
+    }
+    return LIconic || x11HasState(ADisplay, AWindow, "_NET_WM_STATE_HIDDEN");
+}
+
+// A client message about AWindow to the window manager (sent to the root window).
+void x11SendRoot(Display* ADisplay, ::Window AWindow, const char* AType, long AFirst, long ASecond, long AThird)
+{
+    XEvent LEvent{};
+    LEvent.xclient.type         = ClientMessage;
+    LEvent.xclient.window       = AWindow;
+    LEvent.xclient.message_type = XInternAtom(ADisplay, AType, False);
+    LEvent.xclient.format       = 32;
+    LEvent.xclient.data.l[0]    = AFirst;
+    LEvent.xclient.data.l[1]    = ASecond;
+    LEvent.xclient.data.l[2]    = AThird;
+    LEvent.xclient.data.l[3]    = 1; // the source: an application
+    XSendEvent(ADisplay, DefaultRootWindow(ADisplay), False,
+               SubstructureRedirectMask | SubstructureNotifyMask, &LEvent);
+    XFlush(ADisplay);
+}
+
+// Adds or removes one or two _NET_WM_STATE atoms (ASecond may be nullptr).
+void x11SendState(Display* ADisplay, ::Window AWindow, long AAction, const char* AFirst, const char* ASecond)
+{
+    const long LFirst  = static_cast<long>(XInternAtom(ADisplay, AFirst, False));
+    const long LSecond = ASecond != nullptr ? static_cast<long>(XInternAtom(ADisplay, ASecond, False)) : 0;
+    x11SendRoot(ADisplay, AWindow, "_NET_WM_STATE", AAction, LFirst, LSecond);
+}
+
+// A minimized window shown again: mapped (ICCCM) and activated (EWMH).
+void x11Deiconify(Display* ADisplay, ::Window AWindow)
+{
+    XMapRaised(ADisplay, AWindow);
+    x11SendRoot(ADisplay, AWindow, "_NET_ACTIVE_WINDOW", 1, CurrentTime, 0);
+}
+
+// AWindow's Motif hints into AHints; false = none set (AHints left zero).
+bool x11ReadMotifHints(Display* ADisplay, ::Window AWindow, unsigned long (&AHints)[kMwmHintsItems])
+{
+    unsigned long  LCount = 0;
+    unsigned char* LData  = windowProperty(ADisplay, AWindow, "_MOTIF_WM_HINTS", LCount);
+    if (LData == nullptr)
+        return false;
+
+    const unsigned long* LItems = reinterpret_cast<const unsigned long*>(LData);
+    for (unsigned long LIndex = 0; LIndex < LCount && LIndex < kMwmHintsItems; ++LIndex)
+        AHints[LIndex] = LItems[LIndex];
+    XFree(LData);
+    return LCount > 0;
+}
+
+void x11WriteMotifHints(Display* ADisplay, ::Window AWindow, const unsigned long (&AHints)[kMwmHintsItems])
+{
+    const Atom LHints = XInternAtom(ADisplay, "_MOTIF_WM_HINTS", False);
+    XChangeProperty(ADisplay, AWindow, LHints, LHints, 32, PropModeReplace,
+                    reinterpret_cast<const unsigned char*>(AHints), kMwmHintsItems);
+    XFlush(ADisplay);
+}
+
+// Xft.dpi from the X resources (the RESOURCE_MANAGER property, read each time,
+// so a changed setting is seen); 96 when unset.
+unsigned int x11Dpi(Display* ADisplay)
+{
+    if (ADisplay == nullptr)
+        return kBaseDpi;
+
+    unsigned int   LResult = kBaseDpi;
+    unsigned long  LCount  = 0;
+    unsigned char* LData   = rootProperty(ADisplay, "RESOURCE_MANAGER", LCount);
+    if (LData == nullptr)
+        return LResult;
+
+    XrmDatabase LDatabase = XrmGetStringDatabase(reinterpret_cast<const char*>(LData));
+    if (LDatabase != nullptr)
+    {
+        char*    LType = nullptr;
+        XrmValue LValue{};
+        if (XrmGetResource(LDatabase, "Xft.dpi", "Xft.Dpi", &LType, &LValue) && LValue.addr != nullptr)
+        {
+            const double LDpi = std::strtod(LValue.addr, nullptr);
+            if (LDpi >= 1.0)
+                LResult = static_cast<unsigned int>(std::lround(LDpi));
+        }
+        XrmDestroyDatabase(LDatabase);
+    }
+    XFree(LData);
+    return LResult;
+}
+
+// The work area from the window manager (_NET_WORKAREA of the first desktop).
+bool x11WorkArea(Display* ADisplay, sf::Vector2i& APosition, sf::Vector2i& ASize)
+{
+    if (ADisplay == nullptr)
+        return false;
+
+    unsigned long  LCount = 0;
+    unsigned char* LData  = rootProperty(ADisplay, "_NET_WORKAREA", LCount);
+    if (LData == nullptr)
+        return false;
+
+    // Format 32 data arrives as long per item (Xlib's rule)
+    const long* LItems = reinterpret_cast<const long*>(LData);
+    const bool  LFound = LCount >= 4 && LItems[2] > 0 && LItems[3] > 0;
+    if (LFound)
+    {
+        APosition = {static_cast<int>(LItems[0]), static_cast<int>(LItems[1])};
+        ASize     = {static_cast<int>(LItems[2]), static_cast<int>(LItems[3])};
+    }
+    XFree(LData);
+    return LFound;
+}
+
+#endif
+
+} // namespace
+
+sf::ContextSettings sfx::RenderWindow::defaultContextSettings()
+{
+    sf::ContextSettings LSettings;
+    LSettings.depthBits         = 24;
+    LSettings.stencilBits       = 8;
+    LSettings.antiAliasingLevel = 8;
+    LSettings.majorVersion      = 2;
+    LSettings.minorVersion      = 1;
+    return LSettings;
+}
+
+sfx::RenderWindow::RenderWindow(sf::Vector2u              ABaseSize,
+                                const sf::String&         ATitle,
+                                std::uint32_t             AStyle,
+                                sf::State                 AState,
+                                const sf::ContextSettings& ASettings) :
+    sf::RenderWindow(sf::VideoMode(ABaseSize), ATitle, AStyle, AState, ASettings),
+    m_baseSize(ABaseSize),
+    m_windowed(AState == sf::State::Windowed),
+    m_frameView(sf::FloatRect({0.0f, 0.0f}, sf::Vector2f(ABaseSize))),
+    m_canvas(sf::Vector2f(ABaseSize))
+{
+#ifdef _WIN32
+    setProgramIcon(getNativeHandle());
+#else
+    XrmInitialize();
+    m_display = XOpenDisplay(nullptr);
+    setProgramIcon(*this, static_cast<Display*>(m_display));
+#endif
+    captureBorderStyle();
+
+    m_canvas.setFillColor(sf::Color::White);
+    setFramerateLimit(60);
+    setVerticalSyncEnabled(false);
+
+    m_dpi = queryDpi();
+    applyScale(true);
+    m_frameClock.restart();
+}
+
+sfx::RenderWindow::~RenderWindow()
+{
+#ifndef _WIN32
+    if (m_display != nullptr)
+        XCloseDisplay(static_cast<Display*>(m_display));
+#endif
+}
+
+sf::Vector2u sfx::RenderWindow::getBaseSize() const
+{
+    return m_baseSize;
+}
+
+float sfx::RenderWindow::getScale() const
+{
+    return m_scale;
+}
+
+unsigned int sfx::RenderWindow::getDpi() const
+{
+    return m_dpi;
+}
+
+void sfx::RenderWindow::setFrameColor(sf::Color AColor)
+{
+    m_canvas.setFillColor(AColor);
+}
+
+sf::Color sfx::RenderWindow::getFrameColor() const
+{
+    return m_canvas.getFillColor();
+}
+
+void sfx::RenderWindow::setBarColor(sf::Color AColor)
+{
+    m_barColor = AColor;
+}
+
+sf::Color sfx::RenderWindow::getBarColor() const
+{
+    return m_barColor;
+}
+
+void sfx::RenderWindow::startFrame()
+{
+    // The letterbox follows the window's size as it is now (a resize needs no call)
+    m_frameView.setViewport(letterboxViewport(getSize(), m_baseSize));
+
+    // The bars: the whole window, through the default view
+    setView(getDefaultView());
+    clear(m_barColor);
+
+    setView(m_frameView);
+    draw(m_canvas);
+
+    // The mouse in frame coordinates, clamped to the frame
+    const sf::Vector2f LWorld = mapPixelToCoords(sf::Mouse::getPosition(*this), m_frameView);
+    const float LMaxX = static_cast<float>(m_baseSize.x > 0 ? m_baseSize.x - 1 : 0);
+    const float LMaxY = static_cast<float>(m_baseSize.y > 0 ? m_baseSize.y - 1 : 0);
+    m_mouse.x = static_cast<int>(std::lround(std::clamp(LWorld.x, 0.0f, LMaxX)));
+    m_mouse.y = static_cast<int>(std::lround(std::clamp(LWorld.y, 0.0f, LMaxY)));
+}
+
+void sfx::RenderWindow::endFrame()
+{
+    setView(getDefaultView());
+}
+
+const sf::View& sfx::RenderWindow::getFrameView() const
+{
+    return m_frameView;
+}
+
+sf::Vector2i sfx::RenderWindow::getFrameMousePosition() const
+{
+    return m_mouse;
+}
+
+void sfx::RenderWindow::display()
+{
+    // The frame rate, over each second
+    bool LSecondPassed = false;
+    ++m_frameCount;
+    const sf::Time LElapsed = m_frameClock.getElapsedTime();
+    if (LElapsed.asMilliseconds() >= 1000)
+    {
+        m_frameRate  = static_cast<float>(m_frameCount) / LElapsed.asSeconds();
+        m_frameCount = 0;
+        m_frameClock.restart();
+        LSecondPassed = true;
+    }
+
+    // The DPI follow: each frame on Windows (a cheap call; a move to another
+    // monitor), once a second on X11 (a round trip to the server)
+#ifdef _WIN32
+    const bool LCheck = true;
+#else
+    const bool LCheck = LSecondPassed;
+#endif
+    if (LCheck && isOpen())
+    {
+        const unsigned int LDpi = queryDpi();
+        if (LDpi != m_dpi)
+        {
+            m_dpi = LDpi;
+            applyScale(false);
+        }
+    }
+
+    sf::RenderWindow::display();
+}
+
+unsigned int sfx::RenderWindow::getFrameRate() const
+{
+    return static_cast<unsigned int>(std::lround(m_frameRate));
+}
+
+void sfx::RenderWindow::resetFrameRate()
+{
+    m_frameRate  = 0.0f;
+    m_frameCount = 0;
+    m_frameClock.restart();
+}
+
+void sfx::RenderWindow::toggleFullscreen()
+{
+    // SFML's exclusive fullscreen has no windowed place to return to
+    if (!m_windowed)
+        return;
+
+#ifdef _WIN32
+    HWND LWnd = getNativeHandle();
+    if (!m_fullscreen)
+    {
+        WINDOWPLACEMENT LPlace{};
+        LPlace.length = sizeof(LPlace);
+        MONITORINFO LInfo{};
+        LInfo.cbSize = sizeof(LInfo);
+        if (!GetWindowPlacement(LWnd, &LPlace) ||
+            !GetMonitorInfoW(MonitorFromWindow(LWnd, MONITOR_DEFAULTTONEAREST), &LInfo))
+            return;
+
+        // Kept for the way back: the style (borders as setBordersVisible left
+        // them), the normal place and whether it was maximized
+        const LONG LStyle = GetWindowLongW(LWnd, GWL_STYLE);
+        const RECT LNormal = LPlace.rcNormalPosition;
+        m_savedStyle     = static_cast<std::uint32_t>(LStyle & ~(WS_MAXIMIZE | WS_MINIMIZE));
+        m_savedRect      = sf::IntRect({LNormal.left, LNormal.top},
+                                       {LNormal.right - LNormal.left, LNormal.bottom - LNormal.top});
+        m_savedMaximized = IsZoomed(LWnd) != FALSE;
+        m_fullscreen     = true;
+
+        // No borders, not maximized, over the whole monitor
+        const RECT& LMonitor = LInfo.rcMonitor;
+        SetWindowLongW(LWnd, GWL_STYLE, LStyle & ~(kBorderBits | WS_MAXIMIZE));
+        SetWindowPos(LWnd, HWND_TOP, LMonitor.left, LMonitor.top, LMonitor.right - LMonitor.left,
+                     LMonitor.bottom - LMonitor.top, SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    }
+    else
+    {
+        m_fullscreen = false;
+        SetWindowLongW(LWnd, GWL_STYLE, static_cast<LONG>(m_savedStyle));
+
+        WINDOWPLACEMENT LPlace{};
+        LPlace.length = sizeof(LPlace);
+        GetWindowPlacement(LWnd, &LPlace);
+        LPlace.flags            = 0;
+        LPlace.showCmd          = m_savedMaximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
+        LPlace.rcNormalPosition = {m_savedRect.position.x, m_savedRect.position.y,
+                                   m_savedRect.position.x + m_savedRect.size.x,
+                                   m_savedRect.position.y + m_savedRect.size.y};
+        SetWindowPlacement(LWnd, &LPlace);
+        SetWindowPos(LWnd, nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    }
+#else
+    Display* LDisplay = static_cast<Display*>(m_display);
+    if (LDisplay == nullptr)
+        return;
+
+    // The window manager keeps the place, size and decorations for the way back
+    const bool LWanted = !isFullscreen();
+    x11SendState(LDisplay, static_cast<::Window>(getNativeHandle()),
+                 LWanted ? kNetWmStateAdd : kNetWmStateRemove, "_NET_WM_STATE_FULLSCREEN", nullptr);
+    settle(&RenderWindow::isFullscreen, LWanted);
+#endif
+}
+
+bool sfx::RenderWindow::isFullscreen() const
+{
+    if (!m_windowed)
+        return true;
+#ifdef _WIN32
+    return m_fullscreen;
+#else
+    Display* LDisplay = static_cast<Display*>(m_display);
+    return LDisplay != nullptr &&
+           x11HasState(LDisplay, static_cast<::Window>(getNativeHandle()), "_NET_WM_STATE_FULLSCREEN");
+#endif
+}
+
+void sfx::RenderWindow::setBordersVisible(bool AVisible)
+{
+    m_bordersVisible = AVisible;
+
+#ifdef _WIN32
+    if (m_fullscreen)
+    {
+        // Applied when fullscreen ends
+        const LONG LSaved = static_cast<LONG>(m_savedStyle) & ~kBorderBits;
+        m_savedStyle = static_cast<std::uint32_t>(AVisible ? LSaved | static_cast<LONG>(m_borderStyle) : LSaved);
+        return;
+    }
+
+    HWND       LWnd   = getNativeHandle();
+    const LONG LStyle = GetWindowLongW(LWnd, GWL_STYLE) & ~kBorderBits;
+    setStyleKeepClient(LWnd, AVisible ? LStyle | static_cast<LONG>(m_borderStyle) : LStyle);
+#else
+    Display* LDisplay = static_cast<Display*>(m_display);
+    if (LDisplay == nullptr)
+        return;
+
+    // SFML's other hints (the functions) are kept; only the decorations change
+    const ::Window LWindow = static_cast<::Window>(getNativeHandle());
+    unsigned long  LHints[kMwmHintsItems] = {};
+    x11ReadMotifHints(LDisplay, LWindow, LHints);
+    LHints[0] |= kMwmHintsDecorations;
+    LHints[2] = AVisible ? m_borderStyle : 0;
+    x11WriteMotifHints(LDisplay, LWindow, LHints);
+#endif
+}
+
+bool sfx::RenderWindow::areBordersVisible() const
+{
+    return m_bordersVisible;
+}
+
+void sfx::RenderWindow::minimize()
+{
+#ifdef _WIN32
+    ShowWindow(getNativeHandle(), SW_MINIMIZE);
+#else
+    Display* LDisplay = static_cast<Display*>(m_display);
+    if (LDisplay == nullptr)
+        return;
+
+    XIconifyWindow(LDisplay, static_cast<::Window>(getNativeHandle()), DefaultScreen(LDisplay));
+    XFlush(LDisplay);
+    settle(&RenderWindow::isMinimized, true);
+#endif
+}
+
+void sfx::RenderWindow::maximize()
+{
+#ifdef _WIN32
+    ShowWindow(getNativeHandle(), SW_MAXIMIZE);
+#else
+    Display* LDisplay = static_cast<Display*>(m_display);
+    if (LDisplay == nullptr)
+        return;
+
+    // A minimized window is shown first: Windows' SW_MAXIMIZE does both
+    const ::Window LWindow = static_cast<::Window>(getNativeHandle());
+    if (x11Iconic(LDisplay, LWindow))
+        x11Deiconify(LDisplay, LWindow);
+    x11SendState(LDisplay, LWindow, kNetWmStateAdd, "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ");
+    settle(&RenderWindow::isMaximized, true);
+#endif
+}
+
+void sfx::RenderWindow::restore()
+{
+#ifdef _WIN32
+    // SW_RESTORE from minimized may return to maximized: a second one leaves it
+    HWND LWnd = getNativeHandle();
+    if (IsIconic(LWnd))
+        ShowWindow(LWnd, SW_RESTORE);
+    if (IsZoomed(LWnd))
+        ShowWindow(LWnd, SW_RESTORE);
+#else
+    Display* LDisplay = static_cast<Display*>(m_display);
+    if (LDisplay == nullptr)
+        return;
+
+    const ::Window LWindow = static_cast<::Window>(getNativeHandle());
+    if (x11Iconic(LDisplay, LWindow))
+        x11Deiconify(LDisplay, LWindow);
+    x11SendState(LDisplay, LWindow, kNetWmStateRemove, "_NET_WM_STATE_MAXIMIZED_VERT", "_NET_WM_STATE_MAXIMIZED_HORZ");
+    settle(&RenderWindow::isRestored, true);
+#endif
+}
+
+bool sfx::RenderWindow::isMinimized() const
+{
+#ifdef _WIN32
+    return IsIconic(getNativeHandle()) != FALSE;
+#else
+    Display* LDisplay = static_cast<Display*>(m_display);
+    return LDisplay != nullptr && x11Iconic(LDisplay, static_cast<::Window>(getNativeHandle()));
+#endif
+}
+
+bool sfx::RenderWindow::isMaximized() const
+{
+#ifdef _WIN32
+    return IsZoomed(getNativeHandle()) != FALSE;
+#else
+    Display* LDisplay = static_cast<Display*>(m_display);
+    if (LDisplay == nullptr)
+        return false;
+
+    const ::Window LWindow = static_cast<::Window>(getNativeHandle());
+    return x11HasState(LDisplay, LWindow, "_NET_WM_STATE_MAXIMIZED_VERT") &&
+           x11HasState(LDisplay, LWindow, "_NET_WM_STATE_MAXIMIZED_HORZ");
+#endif
+}
+
+bool sfx::RenderWindow::isRestored() const
+{
+    return !isMinimized() && !isMaximized();
+}
+
+void sfx::RenderWindow::captureBorderStyle()
+{
+#ifdef _WIN32
+    // The window's own border bits; none = sf::Style::Default's
+    const LONG LStyle = GetWindowLongW(getNativeHandle(), GWL_STYLE);
+    m_bordersVisible  = (LStyle & kBorderBits) != 0;
+    m_borderStyle     = static_cast<std::uint32_t>(m_bordersVisible ? (LStyle & kBorderBits) : kBorderBits);
+#else
+    // The decorations SFML asked for; none set = all of them (the WM's default)
+    m_bordersVisible = true;
+    m_borderStyle    = static_cast<std::uint32_t>(kMwmDecorAll);
+
+    Display* LDisplay = static_cast<Display*>(m_display);
+    if (LDisplay == nullptr)
+        return;
+
+    unsigned long LHints[kMwmHintsItems] = {};
+    if (x11ReadMotifHints(LDisplay, static_cast<::Window>(getNativeHandle()), LHints) &&
+        (LHints[0] & kMwmHintsDecorations) != 0)
+    {
+        m_bordersVisible = LHints[2] != 0;
+        if (m_bordersVisible)
+            m_borderStyle = static_cast<std::uint32_t>(LHints[2]);
+    }
+#endif
+}
+
+void sfx::RenderWindow::settle(bool (RenderWindow::*AQuery)() const, bool AWanted) const
+{
+#ifdef _WIN32
+    // Windows applies a state in the call itself
+    (void)AQuery;
+    (void)AWanted;
+#else
+    Display* LDisplay = static_cast<Display*>(m_display);
+    if (LDisplay == nullptr)
+        return;
+
+    // 50 x 5 ms: the quarter second the class promises at most
+    for (int LTry = 0; LTry < 50; ++LTry)
+    {
+        XSync(LDisplay, False);
+        if ((this->*AQuery)() == AWanted)
+            return;
+        sf::sleep(sf::milliseconds(5));
+    }
+#endif
+}
+
+sf::FloatRect sfx::RenderWindow::letterboxViewport(sf::Vector2u AWindowSize, sf::Vector2u ABaseSize)
+{
+    sf::FloatRect LViewport({0.0f, 0.0f}, {1.0f, 1.0f});
+    if (AWindowSize.x == 0 || AWindowSize.y == 0 || ABaseSize.x == 0 || ABaseSize.y == 0)
+        return LViewport;
+
+    const float LWindowRatio = static_cast<float>(AWindowSize.x) / static_cast<float>(AWindowSize.y);
+    const float LBaseRatio   = static_cast<float>(ABaseSize.x) / static_cast<float>(ABaseSize.y);
+
+    if (LWindowRatio >= LBaseRatio)
+    {
+        // Wider than the frame: bars left and right
+        LViewport.size.x     = LBaseRatio / LWindowRatio;
+        LViewport.position.x = (1.0f - LViewport.size.x) / 2.0f;
+    }
+    else
+    {
+        // Taller than the frame: bars above and below
+        LViewport.size.y     = LWindowRatio / LBaseRatio;
+        LViewport.position.y = (1.0f - LViewport.size.y) / 2.0f;
+    }
+    return LViewport;
+}
+
+sf::Vector2u sfx::RenderWindow::scaledSize(sf::Vector2u ABaseSize, unsigned int ADpi)
+{
+    const double LScale = static_cast<double>(ADpi) / kBaseDpi;
+    return {static_cast<unsigned int>(std::lround(ABaseSize.x * LScale)),
+            static_cast<unsigned int>(std::lround(ABaseSize.y * LScale))};
+}
+
+unsigned int sfx::RenderWindow::queryDpi() const
+{
+#ifdef _WIN32
+    return windowDpi(getNativeHandle());
+#else
+    return x11Dpi(static_cast<Display*>(m_display));
+#endif
+}
+
+void sfx::RenderWindow::applyScale(bool ACenter)
+{
+    m_scale = static_cast<float>(m_dpi) / kBaseDpi;
+
+    // Only a window at its normal size is resized: a fullscreen one (SFML's
+    // exclusive mode or toggleFullscreen's) keeps the monitor, a maximized or
+    // minimized one is the system's
+    if (!m_windowed || isFullscreen() || !isRestored())
+        return;
+
+    const sf::Vector2u LSize = scaledSize(m_baseSize, m_dpi);
+    setSize(LSize);
+    if (!ACenter)
+        return;
+
+    sf::Vector2i LAreaPos;
+    sf::Vector2i LAreaSize;
+#ifdef _WIN32
+    bool LHaveArea = windowWorkArea(getNativeHandle(), LAreaPos, LAreaSize);
+#else
+    bool LHaveArea = x11WorkArea(static_cast<Display*>(m_display), LAreaPos, LAreaSize);
+#endif
+    if (!LHaveArea)
+    {
+        const sf::Vector2u LDesktop = sf::VideoMode::getDesktopMode().size;
+        LAreaPos  = {0, 0};
+        LAreaSize = sf::Vector2i(LDesktop);
+    }
+
+    // Centred; a window larger than the area starts at its top left
+    const sf::Vector2i LWindow(LSize);
+    setPosition({LAreaPos.x + std::max(0, (LAreaSize.x - LWindow.x) / 2),
+                 LAreaPos.y + std::max(0, (LAreaSize.y - LWindow.y) / 2)});
+}
+
+// Draw helpers: the geometry (static, no window) and the draw calls over it.
+
+namespace
+{
+
+// A joint whose miter would reach past this many half thicknesses from its
+// point is bevelled instead (SVG's default miter limit)
+constexpr float kMiterLimit = 4.0f;
+
+// APoints without a point equal to the one before it (and, when AClosed, a
+// last point equal to the first): a zero-length edge has no direction
+std::vector<sf::Vector2f> withoutRepeats(std::span<const sf::Vector2f> APoints, bool AClosed)
+{
+    std::vector<sf::Vector2f> LPoints;
+    LPoints.reserve(APoints.size());
+    for (const sf::Vector2f& LPoint : APoints)
+    {
+        if (LPoints.empty() || LPoints.back() != LPoint)
+            LPoints.push_back(LPoint);
+    }
+    if (AClosed && LPoints.size() > 1 && LPoints.back() == LPoints.front())
+        LPoints.pop_back();
+    return LPoints;
+}
+
+void appendTriangle(sf::VertexArray& AVertices,
+                    sf::Vector2f     AP1,
+                    sf::Vector2f     AP2,
+                    sf::Vector2f     AP3,
+                    sf::Color        AColor)
+{
+    AVertices.append(sf::Vertex{AP1, AColor});
+    AVertices.append(sf::Vertex{AP2, AColor});
+    AVertices.append(sf::Vertex{AP3, AColor});
+}
+
+} // namespace
+
+void sfx::RenderWindow::appendPolyline(sf::VertexArray&               AVertices,
+                                       std::span<const sf::Vector2f> APoints,
+                                       sf::Color                      AColor,
+                                       float                          AThickness,
+                                       bool                           AClosed)
+{
+    AVertices.setPrimitiveType(sf::PrimitiveType::Triangles);
+    if (!(AThickness > 0.0f))
+        return;
+
+    const std::vector<sf::Vector2f> LPoints = withoutRepeats(APoints, AClosed);
+    const std::size_t               LCount  = LPoints.size();
+    if (LCount < 2)
+        return;
+
+    // Two points closed would be one segment drawn twice: drawn once, open
+    const bool        LClosed   = AClosed && LCount > 2;
+    const std::size_t LSegments = LClosed ? LCount : LCount - 1;
+    const float       LHalf     = AThickness / 2.0f;
+
+    // Each segment's direction and its left normal (the left side = + normal)
+    std::vector<sf::Vector2f> LDirs(LSegments);
+    std::vector<sf::Vector2f> LNormals(LSegments);
+    for (std::size_t LSeg = 0; LSeg < LSegments; ++LSeg)
+    {
+        const sf::Vector2f LEdge = LPoints[(LSeg + 1) % LCount] - LPoints[LSeg];
+        LDirs[LSeg]    = LEdge / LEdge.length();
+        LNormals[LSeg] = {-LDirs[LSeg].y, LDirs[LSeg].x};
+    }
+
+    // Each segment's corners, left and right at its start and its end: square
+    // where the path ends, moved to the shared miter points at a joint
+    std::vector<sf::Vector2f> LStartL(LSegments);
+    std::vector<sf::Vector2f> LStartR(LSegments);
+    std::vector<sf::Vector2f> LEndL(LSegments);
+    std::vector<sf::Vector2f> LEndR(LSegments);
+    for (std::size_t LSeg = 0; LSeg < LSegments; ++LSeg)
+    {
+        const sf::Vector2f LFrom = LPoints[LSeg];
+        const sf::Vector2f LTo   = LPoints[(LSeg + 1) % LCount];
+        LStartL[LSeg] = LFrom + LNormals[LSeg] * LHalf;
+        LStartR[LSeg] = LFrom - LNormals[LSeg] * LHalf;
+        LEndL[LSeg]   = LTo + LNormals[LSeg] * LHalf;
+        LEndR[LSeg]   = LTo - LNormals[LSeg] * LHalf;
+    }
+
+    // The joints: every point of a closed path, the inner points of an open one.
+    // Point LJoint ends segment LIn and starts segment LOut.
+    std::vector<sf::Vector2f> LBevels; // three points per bevelled joint
+    const std::size_t         LFirst = LClosed ? 0 : 1;
+    const std::size_t         LEnd   = LClosed ? LCount : LCount - 1;
+    for (std::size_t LJoint = LFirst; LJoint < LEnd; ++LJoint)
+    {
+        const std::size_t  LIn     = (LJoint + LSegments - 1) % LSegments;
+        const std::size_t  LOut    = LJoint % LSegments;
+        const sf::Vector2f LPoint  = LPoints[LJoint];
+        const sf::Vector2f LSum    = LNormals[LIn] + LNormals[LOut];
+        const float        LLength = LSum.length();
+        bool               LMitered = false;
+
+        if (LLength > 1e-6f)
+        {
+            // The miter bisects the two normals; its reach keeps both edges
+            // at half the thickness from their segments
+            const sf::Vector2f LMiter = LSum / LLength;
+            const float        LReach = LHalf / LMiter.dot(LNormals[LIn]);
+            if (LReach <= kMiterLimit * LHalf)
+            {
+                LEndL[LIn]    = LPoint + LMiter * LReach;
+                LEndR[LIn]    = LPoint - LMiter * LReach;
+                LStartL[LOut] = LEndL[LIn];
+                LStartR[LOut] = LEndR[LIn];
+                LMitered      = true;
+            }
+        }
+
+        if (!LMitered)
+        {
+            // Bevel: both segments end square; the gap on the outer side of
+            // the turn (away from the side it turns to) is filled
+            const float LSide = LDirs[LIn].cross(LDirs[LOut]) > 0.0f ? -1.0f : 1.0f;
+            LBevels.push_back(LPoint);
+            LBevels.push_back(LPoint + LNormals[LIn] * (LHalf * LSide));
+            LBevels.push_back(LPoint + LNormals[LOut] * (LHalf * LSide));
+        }
+    }
+
+    for (std::size_t LSeg = 0; LSeg < LSegments; ++LSeg)
+    {
+        appendTriangle(AVertices, LStartL[LSeg], LStartR[LSeg], LEndR[LSeg], AColor);
+        appendTriangle(AVertices, LStartL[LSeg], LEndR[LSeg], LEndL[LSeg], AColor);
+    }
+    for (std::size_t LIndex = 0; LIndex + 2 < LBevels.size(); LIndex += 3)
+        appendTriangle(AVertices, LBevels[LIndex], LBevels[LIndex + 1], LBevels[LIndex + 2], AColor);
+}
+
+void sfx::RenderWindow::appendFilledPolygon(sf::VertexArray&               AVertices,
+                                            std::span<const sf::Vector2f> APoints,
+                                            sf::Color                      AColor)
+{
+    AVertices.setPrimitiveType(sf::PrimitiveType::Triangles);
+
+    const std::vector<sf::Vector2f> LPoints = withoutRepeats(APoints, true);
+    const std::size_t               LCount  = LPoints.size();
+    if (LCount < 3)
+        return;
+
+    // Twice the signed area; its sign is the winding every turn is read in
+    float LArea = 0.0f;
+    for (std::size_t LIndex = 0; LIndex < LCount; ++LIndex)
+        LArea += LPoints[LIndex].cross(LPoints[(LIndex + 1) % LCount]);
+    if (LArea == 0.0f)
+        return;
+    const float LWinding = LArea > 0.0f ? 1.0f : -1.0f;
+
+    // The turn at corner AB (> 0: convex), and whether AP lies in triangle
+    // ABC or on its edge
+    const auto LTurnAt = [&](std::size_t AA, std::size_t AB, std::size_t AC)
+    {
+        return (LPoints[AB] - LPoints[AA]).cross(LPoints[AC] - LPoints[AB]) * LWinding;
+    };
+    const auto LInside = [&](sf::Vector2f AP, std::size_t AA, std::size_t AB, std::size_t AC)
+    {
+        const sf::Vector2f LA = LPoints[AA];
+        const sf::Vector2f LB = LPoints[AB];
+        const sf::Vector2f LC = LPoints[AC];
+        return (LB - LA).cross(AP - LA) * LWinding >= 0.0f &&
+               (LC - LB).cross(AP - LB) * LWinding >= 0.0f &&
+               (LA - LC).cross(AP - LC) * LWinding >= 0.0f;
+    };
+
+    std::vector<std::size_t> LCorners(LCount);
+    bool                     LConvex = true;
+    for (std::size_t LIndex = 0; LIndex < LCount; ++LIndex)
+    {
+        LCorners[LIndex] = LIndex;
+        if (LTurnAt((LIndex + LCount - 1) % LCount, LIndex, (LIndex + 1) % LCount) < 0.0f)
+            LConvex = false;
+    }
+
+    // A concave polygon: cut ears (a convex corner whose triangle holds no
+    // other corner) until three corners are left
+    while (!LConvex && LCorners.size() > 3)
+    {
+        const std::size_t LLeft = LCorners.size();
+        bool              LCut  = false;
+        for (std::size_t LK = 0; LK < LLeft && !LCut; ++LK)
+        {
+            const std::size_t LA = LCorners[(LK + LLeft - 1) % LLeft];
+            const std::size_t LB = LCorners[LK];
+            const std::size_t LC = LCorners[(LK + 1) % LLeft];
+            if (LTurnAt(LA, LB, LC) <= 0.0f)
+                continue;
+
+            bool LEar = true;
+            for (const std::size_t LQ : LCorners)
+            {
+                const sf::Vector2f LP = LPoints[LQ];
+                if (LP == LPoints[LA] || LP == LPoints[LB] || LP == LPoints[LC])
+                    continue;
+                if (LInside(LP, LA, LB, LC))
+                {
+                    LEar = false;
+                    break;
+                }
+            }
+            if (LEar)
+            {
+                appendTriangle(AVertices, LPoints[LA], LPoints[LB], LPoints[LC], AColor);
+                LCorners.erase(LCorners.begin() + static_cast<std::ptrdiff_t>(LK));
+                LCut = true;
+            }
+        }
+
+        // No ear left (a self-crossing outline): the rest as a fan
+        if (!LCut)
+            break;
+    }
+
+    // A convex polygon, or what the ears left: a fan from its first corner
+    for (std::size_t LK = 1; LK + 1 < LCorners.size(); ++LK)
+        appendTriangle(AVertices, LPoints[LCorners[0]], LPoints[LCorners[LK]], LPoints[LCorners[LK + 1]], AColor);
+}
+
+std::vector<sf::Vector2f> sfx::RenderWindow::ellipsePoints(sf::Vector2f ACenter, sf::Vector2f ARadii, std::size_t ACount)
+{
+    const std::size_t         LCount = std::max<std::size_t>(ACount, 3);
+    std::vector<sf::Vector2f> LPoints;
+    LPoints.reserve(LCount);
+    for (std::size_t LIndex = 0; LIndex < LCount; ++LIndex)
+    {
+        const float LAngle = 2.0f * std::numbers::pi_v<float> * static_cast<float>(LIndex) /
+                             static_cast<float>(LCount);
+        LPoints.push_back({ACenter.x + ARadii.x * std::cos(LAngle), ACenter.y + ARadii.y * std::sin(LAngle)});
+    }
+    return LPoints;
+}
+
+float sfx::RenderWindow::pixelsPerUnit() const
+{
+    // The current view's width in window pixels over its width in coordinates
+    const sf::View&   LView     = getView();
+    const sf::IntRect LViewport = getViewport(LView);
+    const float       LWidth    = std::abs(LView.getSize().x);
+    if (LWidth <= 0.0f || LViewport.size.x <= 0)
+        return 1.0f;
+    return static_cast<float>(LViewport.size.x) / LWidth;
+}
+
+std::size_t sfx::RenderWindow::curveSegments(sf::Vector2f ARadii) const
+{
+    // A chord of about 4 pixels on screen, 16 to 256 of them
+    const float LRadius = std::max(std::abs(ARadii.x), std::abs(ARadii.y)) * pixelsPerUnit();
+    const float LCount  = std::ceil(2.0f * std::numbers::pi_v<float> * LRadius / 4.0f);
+    return static_cast<std::size_t>(std::clamp(LCount, 16.0f, 256.0f));
+}
+
+void sfx::RenderWindow::drawLine(sf::Vector2f AFrom, sf::Vector2f ATo, sf::Color AColor, float AThickness)
+{
+    const sf::Vector2f LPoints[] = {AFrom, ATo};
+    drawPolyline(LPoints, AColor, AThickness);
+}
+
+void sfx::RenderWindow::drawPolyline(std::span<const sf::Vector2f> APoints, sf::Color AColor, float AThickness)
+{
+    sf::VertexArray LVertices;
+    appendPolyline(LVertices, APoints, AColor, AThickness, false);
+    draw(LVertices);
+}
+
+void sfx::RenderWindow::drawRect(const sf::FloatRect& ARect, sf::Color AColor, float AThickness)
+{
+    const sf::Vector2f LCorners[] = {ARect.position,
+                                     ARect.position + sf::Vector2f(ARect.size.x, 0.0f),
+                                     ARect.position + ARect.size,
+                                     ARect.position + sf::Vector2f(0.0f, ARect.size.y)};
+    drawPolygon(LCorners, AColor, AThickness);
+}
+
+void sfx::RenderWindow::drawFilledRect(const sf::FloatRect& ARect, sf::Color AColor)
+{
+    const sf::Vector2f LCorners[] = {ARect.position,
+                                     ARect.position + sf::Vector2f(ARect.size.x, 0.0f),
+                                     ARect.position + ARect.size,
+                                     ARect.position + sf::Vector2f(0.0f, ARect.size.y)};
+    drawFilledPolygon(LCorners, AColor);
+}
+
+void sfx::RenderWindow::drawCircle(sf::Vector2f ACenter, float ARadius, sf::Color AColor, float AThickness)
+{
+    drawEllipse(ACenter, {ARadius, ARadius}, AColor, AThickness);
+}
+
+void sfx::RenderWindow::drawFilledCircle(sf::Vector2f ACenter, float ARadius, sf::Color AColor)
+{
+    drawFilledEllipse(ACenter, {ARadius, ARadius}, AColor);
+}
+
+void sfx::RenderWindow::drawEllipse(sf::Vector2f ACenter, sf::Vector2f ARadii, sf::Color AColor, float AThickness)
+{
+    const std::vector<sf::Vector2f> LPoints = ellipsePoints(ACenter, ARadii, curveSegments(ARadii));
+    drawPolygon(LPoints, AColor, AThickness);
+}
+
+void sfx::RenderWindow::drawFilledEllipse(sf::Vector2f ACenter, sf::Vector2f ARadii, sf::Color AColor)
+{
+    const std::vector<sf::Vector2f> LPoints = ellipsePoints(ACenter, ARadii, curveSegments(ARadii));
+    drawFilledPolygon(LPoints, AColor);
+}
+
+void sfx::RenderWindow::drawTriangle(sf::Vector2f AP1, sf::Vector2f AP2, sf::Vector2f AP3, sf::Color AColor, float AThickness)
+{
+    const sf::Vector2f LPoints[] = {AP1, AP2, AP3};
+    drawPolygon(LPoints, AColor, AThickness);
+}
+
+void sfx::RenderWindow::drawFilledTriangle(sf::Vector2f AP1, sf::Vector2f AP2, sf::Vector2f AP3, sf::Color AColor)
+{
+    const sf::Vector2f LPoints[] = {AP1, AP2, AP3};
+    drawFilledPolygon(LPoints, AColor);
+}
+
+void sfx::RenderWindow::drawPolygon(std::span<const sf::Vector2f> APoints, sf::Color AColor, float AThickness)
+{
+    sf::VertexArray LVertices;
+    appendPolyline(LVertices, APoints, AColor, AThickness, true);
+    draw(LVertices);
+}
+
+void sfx::RenderWindow::drawFilledPolygon(std::span<const sf::Vector2f> APoints, sf::Color AColor)
+{
+    sf::VertexArray LVertices;
+    appendFilledPolygon(LVertices, APoints, AColor);
+    draw(LVertices);
+}
+
+float sfx::RenderWindow::drawText(const sf::Font&   AFont,
+                                  const sf::String& AText,
+                                  sf::Vector2f      APosition,
+                                  unsigned int      ACharacterSize,
+                                  sf::Color         AColor)
+{
+    // The glyphs at the size the text has in window pixels, the text scaled
+    // back by the same factor: one glyph pixel per window pixel
+    const float        LFactor = pixelsPerUnit();
+    const unsigned int LGlyphs = glyphSize(ACharacterSize, LFactor);
+
+    sf::Text LText(AFont, AText, LGlyphs);
+    LText.setFillColor(AColor);
+    LText.setScale({1.0f / LFactor, 1.0f / LFactor});
+    // The top left on a whole pixel, so no glyph is resampled between two
+    LText.setPosition(mapPixelToCoords(mapCoordsToPixel(APosition)));
+    draw(LText);
+
+    return AFont.getLineSpacing(LGlyphs) / LFactor;
+}
+
+void sfx::RenderWindow::setCharacterSize(sf::Text& AText, unsigned int ACharacterSize) const
+{
+    // drawText's rule: glyphs at the on-screen size, scaled back by the factor
+    const float LFactor = pixelsPerUnit();
+    AText.setCharacterSize(glyphSize(ACharacterSize, LFactor));
+    AText.setScale({1.0f / LFactor, 1.0f / LFactor});
+}
+
+unsigned int sfx::RenderWindow::glyphSize(unsigned int ACharacterSize, float APixelsPerUnit)
+{
+    // A factor that is no positive number (an empty view) counts as 1
+    const float LFactor = (APixelsPerUnit > 0.0f) ? APixelsPerUnit : 1.0f;
+    return std::max(1u, static_cast<unsigned int>(std::lround(ACharacterSize * LFactor)));
+}
+
+#include <utility>
+#include <SFML/System/Exception.hpp>
+
+namespace
+{
+
+// minizip reads and writes in chunks of this size
+constexpr std::size_t kZipChunk = 64 * 1024;
+
+// The traditional PKWARE encryption header in front of an entry's data
+constexpr int kZipCryptHeaderLen = 12;
+
+// UTF-8 text as a path, never through the ANSI code page (Windows)
+std::filesystem::path zipUtf8Path(const std::string& AText)
+{
+    return std::filesystem::path(std::u8string(AText.begin(), AText.end()));
+}
+
+// A path as UTF-8 text with '/' between folders
+std::string zipPathText(const std::filesystem::path& APath)
+{
+    const std::u8string LText = APath.generic_u8string();
+    return std::string(LText.begin(), LText.end());
+}
+
+// A path an sfx caller hands over: SysUtils' ResolvePath ($P: / $D: prefixes,
+// the current folder for a relative one), the unit this unit imports
+std::string zipResolve(const std::string& APath)
+{
+    return ::pcpp_m_SysUtils::ResolvePath(APath);
+}
+
+// An entry name as a zip stores it: '/' between folders ('\' never occurs in one)
+std::string zipEntryName(const std::string& AEntry)
+{
+    std::string LResult = AEntry;
+    std::replace(LResult.begin(), LResult.end(), '\\', '/');
+    return LResult;
+}
+
+bool zipIsAscii(const std::string& AText)
+{
+    for (const char LChar : AText)
+    {
+        if (static_cast<unsigned char>(LChar) >= 0x80)
+            return false;
+    }
+    return true;
+}
+
+// AFile's modification time in minizip's local date form; 1980-01-01 (the
+// earliest date an entry holds) when it cannot be read or lies before it
+tm_zip zipFileTime(const std::filesystem::path& AFile)
+{
+    tm_zip LResult{};
+    LResult.tm_mday = 1;
+    LResult.tm_year = 1980;
+
+    std::error_code LError;
+    const std::filesystem::file_time_type LWritten = std::filesystem::last_write_time(AFile, LError);
+    if (LError)
+        return LResult;
+
+    // zig's libc++ has no std::chrono::clock_cast: the file clock's time moved
+    // to the system clock by the two clocks' offset now (microseconds off; a
+    // zip entry's date holds 2-second steps)
+    const auto LSystem = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+        LWritten - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
+    const std::time_t LTime = std::chrono::system_clock::to_time_t(LSystem);
+    std::tm LLocal{};
+#ifdef _WIN32
+    if (localtime_s(&LLocal, &LTime) != 0)
+        return LResult;
+#else
+    if (localtime_r(&LTime, &LLocal) == nullptr)
+        return LResult;
+#endif
+    if (LLocal.tm_year + 1900 < 1980)
+        return LResult;
+
+    LResult.tm_sec  = LLocal.tm_sec;
+    LResult.tm_min  = LLocal.tm_min;
+    LResult.tm_hour = LLocal.tm_hour;
+    LResult.tm_mday = LLocal.tm_mday;
+    LResult.tm_mon  = LLocal.tm_mon;
+    LResult.tm_year = LLocal.tm_year + 1900;
+    return LResult;
+}
+
+// The PKWARE password check: an encrypted entry's 12-byte header, decrypted
+// with the password, ends in the high byte of the entry's CRC (of its DOS time
+// when general purpose bit 3 puts the CRC after the data). AZip is on the
+// entry; the entry is opened raw to read the header and closed again.
+bool zipPasswordFits(unzFile AZip, const unz_file_info64& AInfo, const std::string& APassword)
+{
+    unsigned char LHeader[kZipCryptHeaderLen];
+    int           LGot;
+    int           LClosed;
+
+    // Raw and without a password, minizip hands out the stored bytes from the
+    // start of the data: the encryption header comes first
+    if (unzOpenCurrentFile2(AZip, nullptr, nullptr, 1) != UNZ_OK)
+        return false;
+    LGot    = unzReadCurrentFile(AZip, LHeader, kZipCryptHeaderLen);
+    LClosed = unzCloseCurrentFile(AZip);
+    if (LGot != kZipCryptHeaderLen || LClosed != UNZ_OK)
+        return false;
+
+    unsigned long  LKeys[3];
+    const z_crc_t* LTable = get_crc_table();
+    int            LLast  = 0;
+    init_keys(APassword.c_str(), LKeys, LTable);
+    for (const unsigned char LByte : LHeader)
+    {
+        // zdecode decrypts its last argument in place and moves the keys on
+        int LPlain = LByte;
+        zdecode(LKeys, LTable, LPlain);
+        LLast = LPlain & 0xff;
+    }
+
+    unsigned long LCheck;
+    if ((AInfo.flag & 0x8) != 0)
+        LCheck = (AInfo.dosDate >> 8) & 0xff;
+    else
+        LCheck = (AInfo.crc >> 24) & 0xff;
+    return static_cast<unsigned long>(LLast) == LCheck;
+}
+
+// Writes AFile as the entry AName: its CRC read in a first pass (the password
+// header needs it before the data), then its bytes. False when the file
+// cannot be read, changed between the passes, or the entry cannot be written.
+bool zipAddFile(zipFile                     AZip,
+                const std::filesystem::path& AFile,
+                const std::string&           AName,
+                const std::string&           APassword,
+                const sfx::ZipProgress&      AProgress)
+{
+    std::ifstream     LIn(AFile, std::ios::binary);
+    std::vector<char> LBuffer(kZipChunk);
+    uLong             LCrc  = crc32(0L, Z_NULL, 0);
+    std::uint64_t     LSize = 0;
+
+    if (!LIn)
+        return false;
+    while (LIn)
+    {
+        LIn.read(LBuffer.data(), static_cast<std::streamsize>(LBuffer.size()));
+        const std::streamsize LGot = LIn.gcount();
+        if (LGot > 0)
+        {
+            LCrc = crc32(LCrc, reinterpret_cast<const Bytef*>(LBuffer.data()), static_cast<uInt>(LGot));
+            LSize += static_cast<std::uint64_t>(LGot);
+        }
+    }
+    // The end of the file sets failbit too; badbit is a read error
+    if (LIn.bad())
+        return false;
+    LIn.clear();
+    LIn.seekg(0);
+    if (!LIn)
+        return false;
+
+    zip_fileinfo LInfo{};
+    LInfo.tmz_date = zipFileTime(AFile);
+
+    const char* LPassword = nullptr;
+    if (!APassword.empty())
+        LPassword = APassword.c_str();
+    // General purpose bit 11: the name is UTF-8 (set when it holds a non-ASCII byte)
+    uLong LFlags = 0;
+    if (!zipIsAscii(AName))
+        LFlags = 1u << 11;
+    int LZip64 = 0;
+    if (LSize >= 0xffffffffull)
+        LZip64 = 1;
+
+    if (zipOpenNewFileInZip4_64(AZip, AName.c_str(), &LInfo, nullptr, 0, nullptr, 0, nullptr,
+                                Z_DEFLATED, Z_BEST_COMPRESSION, 0, -MAX_WBITS, DEF_MEM_LEVEL,
+                                Z_DEFAULT_STRATEGY, LPassword, LCrc, 0, LFlags, LZip64) != ZIP_OK)
+        return false;
+
+    if (AProgress)
+        AProgress(AName, 0, true);
+
+    bool          LOk   = true;
+    std::uint64_t LDone = 0;
+    while (LOk && LIn)
+    {
+        LIn.read(LBuffer.data(), static_cast<std::streamsize>(LBuffer.size()));
+        const std::streamsize LGot = LIn.gcount();
+        if (LGot <= 0)
+            continue;
+        if (zipWriteInFileInZip(AZip, LBuffer.data(), static_cast<unsigned int>(LGot)) != ZIP_OK)
+        {
+            LOk = false;
+            continue;
+        }
+        LDone += static_cast<std::uint64_t>(LGot);
+        if (AProgress)
+            AProgress(AName, static_cast<int>(LDone * 100 / LSize), false);
+    }
+    // A read error, or a file whose size changed since its CRC was taken
+    if (LIn.bad() || LDone != LSize)
+        LOk = false;
+    if (LOk && LSize == 0 && AProgress)
+        AProgress(AName, 100, false);
+
+    // Called whatever the writes gave: the entry is always closed
+    if (zipCloseFileInZip(AZip) != ZIP_OK)
+        LOk = false;
+    return LOk;
+}
+
+} // namespace
+
+sfx::ZipStream::ZipStream(const std::string& AArchive, const std::string& AEntry, const std::string& APassword)
+{
+    if (!open(AArchive, AEntry, APassword))
+        throw sf::Exception("Failed to open zip entry \"" + AEntry + "\" of \"" + AArchive + "\"");
+}
+
+sfx::ZipStream::~ZipStream()
+{
+    close();
+}
+
+sfx::ZipStream::ZipStream(ZipStream&& AOther) noexcept :
+m_zip(std::exchange(AOther.m_zip, nullptr)),
+m_password(std::move(AOther.m_password)),
+m_size(std::exchange(AOther.m_size, 0)),
+m_position(std::exchange(AOther.m_position, 0)),
+m_failed(std::exchange(AOther.m_failed, false))
+{
+}
+
+sfx::ZipStream& sfx::ZipStream::operator=(ZipStream&& AOther) noexcept
+{
+    if (this != &AOther)
+    {
+        close();
+        m_zip      = std::exchange(AOther.m_zip, nullptr);
+        m_password = std::move(AOther.m_password);
+        m_size     = std::exchange(AOther.m_size, 0);
+        m_position = std::exchange(AOther.m_position, 0);
+        m_failed   = std::exchange(AOther.m_failed, false);
+    }
+    return *this;
+}
+
+bool sfx::ZipStream::open(const std::string& AArchive, const std::string& AEntry, const std::string& APassword)
+{
+    close();
+
+    // The UTF-8 file functions: zipOpen64's own read the path in the ANSI code page on Windows
+    const std::string LArchive = zipResolve(AArchive);
+    const std::string LEntry   = zipEntryName(AEntry);
+    zlib_filefunc64_def LFuncs;
+    fill_utf8_filefunc64(&LFuncs);
+    unzFile LZip = unzOpen2_64(LArchive.c_str(), &LFuncs);
+    if (LZip == nullptr)
+        return false;
+
+    // 1 = case sensitive on every target (0 follows the OS: insensitive on Windows only)
+    unz_file_info64 LInfo{};
+    if (unzLocateFile(LZip, LEntry.c_str(), 1) != UNZ_OK ||
+        unzGetCurrentFileInfo64(LZip, &LInfo, nullptr, 0, nullptr, 0, nullptr, 0) != UNZ_OK)
+    {
+        unzClose(LZip);
+        return false;
+    }
+
+    // minizip decrypts whatever it is given a password for, even an entry
+    // stored without one: the password is kept for an encrypted entry only
+    const bool LEncrypted = (LInfo.flag & 0x1) != 0;
+    std::string LPassword;
+    if (LEncrypted)
+    {
+        if (APassword.empty() || !zipPasswordFits(LZip, LInfo, APassword))
+        {
+            unzClose(LZip);
+            return false;
+        }
+        LPassword = APassword;
+    }
+
+    int LOpened;
+    if (LEncrypted)
+        LOpened = unzOpenCurrentFilePassword(LZip, LPassword.c_str());
+    else
+        LOpened = unzOpenCurrentFile(LZip);
+    if (LOpened != UNZ_OK)
+    {
+        unzClose(LZip);
+        return false;
+    }
+
+    m_zip      = LZip;
+    m_password = std::move(LPassword);
+    m_size     = static_cast<std::size_t>(LInfo.uncompressed_size);
+    m_position = 0;
+    m_failed   = false;
+    return true;
+}
+
+bool sfx::ZipStream::close()
+{
+    if (m_zip == nullptr)
+        return true;
+
+    // Both are called, whatever the first gives (never inside an assert)
+    unzFile   LZip     = static_cast<unzFile>(m_zip);
+    const int LEntry   = unzCloseCurrentFile(LZip);
+    const int LArchive = unzClose(LZip);
+    const bool LOk     = LEntry == UNZ_OK && LArchive == UNZ_OK && !m_failed;
+
+    m_zip = nullptr;
+    m_password.clear();
+    m_size     = 0;
+    m_position = 0;
+    m_failed   = false;
+    return LOk;
+}
+
+bool sfx::ZipStream::isOpen() const
+{
+    return m_zip != nullptr;
+}
+
+std::optional<std::size_t> sfx::ZipStream::read(void* AData, std::size_t ASize)
+{
+    if (m_zip == nullptr || m_failed)
+        return std::nullopt;
+
+    unzFile        LZip   = static_cast<unzFile>(m_zip);
+    unsigned char* LBytes = static_cast<unsigned char*>(AData);
+    std::size_t    LDone  = 0;
+    while (LDone < ASize)
+    {
+        // minizip takes an unsigned count and answers an int
+        const std::size_t LAsk = std::min<std::size_t>(ASize - LDone, static_cast<std::size_t>(INT_MAX));
+        const int         LGot = unzReadCurrentFile(LZip, LBytes + LDone, static_cast<unsigned int>(LAsk));
+        if (LGot < 0)
+        {
+            m_failed = true;
+            return std::nullopt;
+        }
+        if (LGot == 0)
+            break;
+        LDone += static_cast<std::size_t>(LGot);
+    }
+    m_position += LDone;
+    return LDone;
+}
+
+bool sfx::ZipStream::restart()
+{
+    unzFile LZip = static_cast<unzFile>(m_zip);
+    if (unzCloseCurrentFile(LZip) != UNZ_OK)
+        return false;
+
+    int LOpened;
+    if (m_password.empty())
+        LOpened = unzOpenCurrentFile(LZip);
+    else
+        LOpened = unzOpenCurrentFilePassword(LZip, m_password.c_str());
+    if (LOpened != UNZ_OK)
+        return false;
+
+    m_position = 0;
+    return true;
+}
+
+std::optional<std::size_t> sfx::ZipStream::seek(std::size_t APosition)
+{
+    if (m_zip == nullptr || m_failed || APosition > m_size)
+        return std::nullopt;
+
+    // minizip reads forward only: a position behind starts the entry again
+    if (APosition < m_position && !restart())
+    {
+        m_failed = true;
+        return std::nullopt;
+    }
+
+    unzFile                    LZip = static_cast<unzFile>(m_zip);
+    std::vector<unsigned char> LSkip(kZipChunk);
+    while (m_position < APosition)
+    {
+        const std::size_t LAsk = std::min(APosition - m_position, LSkip.size());
+        const int         LGot = unzReadCurrentFile(LZip, LSkip.data(), static_cast<unsigned int>(LAsk));
+        // An error, or an end before the size the entry claims: never a loop that waits
+        if (LGot <= 0)
+        {
+            m_failed = true;
+            return std::nullopt;
+        }
+        m_position += static_cast<std::size_t>(LGot);
+    }
+    return m_position;
+}
+
+std::optional<std::size_t> sfx::ZipStream::tell()
+{
+    if (m_zip == nullptr)
+        return std::nullopt;
+    return m_position;
+}
+
+std::optional<std::size_t> sfx::ZipStream::getSize()
+{
+    if (m_zip == nullptr)
+        return std::nullopt;
+    return m_size;
+}
+
+bool sfx::eof(sf::InputStream& AStream)
+{
+    const std::optional<std::size_t> LPosition = AStream.tell();
+    const std::optional<std::size_t> LSize     = AStream.getSize();
+    if (!LPosition.has_value() || !LSize.has_value())
+        return false;
+    return *LPosition >= *LSize;
+}
+
+bool sfx::buildZip(const std::string& AFolder,
+                   const std::string& AArchive,
+                   const std::string& APassword,
+                   const std::string& ARoot,
+                   const ZipProgress& AProgress)
+{
+    std::error_code LError;
+    const std::string           LArchiveText = zipResolve(AArchive);
+    const std::filesystem::path LFolder      = zipUtf8Path(zipResolve(AFolder));
+    const std::filesystem::path LArchive     = zipUtf8Path(LArchiveText);
+    std::filesystem::path       LRoot        = LFolder;
+    if (!ARoot.empty())
+        LRoot = zipUtf8Path(zipResolve(ARoot));
+
+    // The folder must lie inside the root: its path below the root holds no ".."
+    const std::filesystem::path LBelow = LFolder.lexically_relative(LRoot);
+    if (LBelow.empty() || *LBelow.begin() == "..")
+        return false;
+
+    // Every regular file below the folder, named by its path below the root with '/'
+    std::vector<std::pair<std::string, std::filesystem::path>> LFiles;
+    // ResolvePath gives full, normalized paths: the entries' paths compare as text
+    std::filesystem::recursive_directory_iterator LEntry(LFolder, LError);
+    for (; !LError && LEntry != std::filesystem::recursive_directory_iterator(); LEntry.increment(LError))
+    {
+        const bool LRegular = LEntry->is_regular_file(LError);
+        if (LError)
+            break;
+        if (!LRegular)
+            continue;
+
+        const std::filesystem::path LFile = LEntry->path().lexically_normal();
+        if (LFile == LArchive.lexically_normal())
+            continue;
+        LFiles.emplace_back(zipPathText(LFile.lexically_relative(LRoot)), LEntry->path());
+    }
+    if (LError)
+        return false;
+
+    // In byte order of the names: the same archive whatever order the OS lists them in
+    std::sort(LFiles.begin(), LFiles.end(),
+              [](const auto& ALeft, const auto& ARight) { return ALeft.first < ARight.first; });
+
+    zlib_filefunc64_def LFuncs;
+    fill_utf8_filefunc64(&LFuncs);
+    zipFile LZip = zipOpen2_64(LArchiveText.c_str(), APPEND_STATUS_CREATE, nullptr, &LFuncs);
+    if (LZip == nullptr)
+        return false;
+
+    bool LOk = true;
+    for (const auto& LFile : LFiles)
+    {
+        if (!zipAddFile(LZip, LFile.second, LFile.first, APassword, AProgress))
+        {
+            LOk = false;
+            break;
+        }
+    }
+
+    // Called whatever the entries gave: the archive is always closed
+    if (zipClose(LZip, nullptr) != ZIP_OK)
+        LOk = false;
+    return LOk;
+}
+
+#include <deque>
+#include <mutex>
+#include <SFML/Audio/SoundStream.hpp>
+#include <SFML/Graphics/Shader.hpp>
+#include <SFML/Window/Context.hpp>
+// GL 1.1 only (glTexSubImage2D, GL_LUMINANCE): the platform gl.h, no loader
+#include <SFML/OpenGL.hpp>
+
+// Xlib.h (Linux, above) defines Status as a macro: sfx::Video::Status is a name
+// here, up to the pop at this unit's end
+#pragma push_macro("Status")
+#undef Status
+
+namespace
+{
+
+// The samples (per channel) the audio feed hands SFML at most in one chunk, and
+// as silence when nothing is decoded yet: SFML stops a stream given no samples
+constexpr std::size_t kVideoChunkFrames = 2048;
+constexpr std::size_t kVideoSilenceFrames = 1024;
+
+// The most audio the feed holds, in seconds: decoded faster than it plays (an
+// update with a long elapsed time), the oldest samples are dropped
+constexpr unsigned int kVideoQueueSeconds = 2;
+
+// pl_mpeg decodes MP2 as interleaved stereo, a mono track as two equal channels
+constexpr unsigned int kVideoChannels = 2;
+
+// The audio of a video: pl_mpeg's samples (pushed by update(), the main thread)
+// queued for SFML's streaming thread (onGetData), both under one lock
+class VideoAudio : public sf::SoundStream
+{
+public:
+    explicit VideoAudio(unsigned int ASampleRate)
+    {
+        m_max = static_cast<std::size_t>(ASampleRate) * kVideoChannels * kVideoQueueSeconds;
+        initialize(kVideoChannels, ASampleRate, {sf::SoundChannel::FrontLeft, sf::SoundChannel::FrontRight});
+        // a video's sound is never placed: SFML spatializes every source at
+        // (0, 0, 0) by default, which fades it once the listener moves away
+        // (sfx::Mixer::setListenerPosition does); after initialize(), which
+        // builds the sound this applies to
+        setSpatializationEnabled(false);
+    }
+
+    // SFML's thread must stop before this object's members go
+    ~VideoAudio() override
+    {
+        stop();
+    }
+
+    // ACount interleaved values (two per sample frame), -1 .. 1, as 16-bit
+    void push(const float* ASamples, std::size_t ACount)
+    {
+        std::lock_guard<std::mutex> LLock(m_mutex);
+        for (std::size_t LIndex = 0; LIndex < ACount; ++LIndex)
+        {
+            const float LValue = std::clamp(ASamples[LIndex], -1.0f, 1.0f);
+            m_queue.push_back(static_cast<std::int16_t>(std::lround(LValue * 32767.0f)));
+        }
+
+        // Whole sample frames dropped: the queue always holds pairs
+        if (m_queue.size() > m_max)
+            m_queue.erase(m_queue.begin(), m_queue.begin() + static_cast<std::ptrdiff_t>(m_queue.size() - m_max));
+    }
+
+    void clear()
+    {
+        std::lock_guard<std::mutex> LLock(m_mutex);
+        m_queue.clear();
+    }
+
+    [[nodiscard]] bool hasQueued()
+    {
+        std::lock_guard<std::mutex> LLock(m_mutex);
+        return !m_queue.empty();
+    }
+
+protected:
+    // SFML's thread. m_chunk is this thread's only: it lives until the next call
+    bool onGetData(Chunk& AData) override
+    {
+        {
+            std::lock_guard<std::mutex> LLock(m_mutex);
+            const std::size_t LCount = std::min(m_queue.size(), kVideoChunkFrames * kVideoChannels);
+            m_chunk.assign(m_queue.begin(), m_queue.begin() + static_cast<std::ptrdiff_t>(LCount));
+            m_queue.erase(m_queue.begin(), m_queue.begin() + static_cast<std::ptrdiff_t>(LCount));
+        }
+
+        // Nothing decoded yet (an underrun): silence keeps the stream going
+        if (m_chunk.empty())
+            m_chunk.assign(kVideoSilenceFrames * kVideoChannels, 0);
+
+        AData.samples     = m_chunk.data();
+        AData.sampleCount = m_chunk.size();
+        return true;
+    }
+
+    // stop() seeks to the start: what was queued is from before
+    void onSeek(sf::Time ATimeOffset) override
+    {
+        (void)ATimeOffset;
+        clear();
+    }
+
+private:
+    std::mutex                m_mutex;
+    std::deque<std::int16_t>  m_queue;
+    std::vector<std::int16_t> m_chunk;
+    std::size_t               m_max{0};
+};
+
+// The frame's planes to RGB, pl_mpeg_player_gl.c's fragment shader in SFML's
+// form: the Y plane is the sprite's texture (gl_TexCoord[0] normalized by its
+// size), Cb / Cr are half its size with the same padding, so the same
+// coordinates; Rec. 601 video range; gl_Color keeps an sf::Sprite colour
+constexpr const char* kVideoShader = R"(
+uniform sampler2D texture_y;
+uniform sampler2D texture_cb;
+uniform sampler2D texture_cr;
+
+const mat4 rec601 = mat4(
+    1.16438,  0.00000,  1.59603, -0.87079,
+    1.16438, -0.39176, -0.81297,  0.52959,
+    1.16438,  2.01723,  0.00000, -1.08139,
+    0.0,      0.0,      0.0,      1.0);
+
+void main()
+{
+    vec2 c = gl_TexCoord[0].xy;
+    float y = texture2D(texture_y, c).r;
+    float cb = texture2D(texture_cb, c).r;
+    float cr = texture2D(texture_cr, c).r;
+    gl_FragColor = vec4(y, cb, cr, 1.0) * rec601 * gl_Color;
+}
+)";
+
+// One plane of a frame into its texture: sized to the plane (a multiple of 16
+// wide and high, Cb / Cr half), smooth as pl_mpeg's GL player; its bytes go in
+// as GL_LUMINANCE (r = g = b = the byte), one byte per pixel. SFML's
+// sf::Texture::update takes RGBA only. Needs a current GL context.
+bool videoUploadPlane(sf::Texture& ATexture, const plm_plane_t& APlane)
+{
+    const sf::Vector2u LSize(APlane.width, APlane.height);
+    if (ATexture.getSize() != LSize)
+    {
+        if (!ATexture.resize(LSize))
+            return false;
+        ATexture.setSmooth(true);
+    }
+
+    sf::Texture::bind(&ATexture);
+    GLint LAlignment = 4;
+    glGetIntegerv(GL_UNPACK_ALIGNMENT, &LAlignment);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, static_cast<GLsizei>(APlane.width), static_cast<GLsizei>(APlane.height),
+                    GL_LUMINANCE, GL_UNSIGNED_BYTE, APlane.data);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, LAlignment);
+    sf::Texture::bind(nullptr);
+    return true;
+}
+
+// plm_stream_t's callbacks over an sf::InputStream
+std::size_t videoStreamRead(void* AUser, void* ADest, std::size_t ACount)
+{
+    const std::optional<std::size_t> LRead = static_cast<sf::InputStream*>(AUser)->read(ADest, ACount);
+    return LRead ? *LRead : 0;
+}
+
+int videoStreamSeek(void* AUser, std::size_t APosition)
+{
+    const std::optional<std::size_t> LDone = static_cast<sf::InputStream*>(AUser)->seek(APosition);
+    return (LDone && *LDone == APosition) ? 1 : 0;
+}
+
+} // namespace
+
+namespace sfx
+{
+
+struct Video::Impl
+{
+    plm_t*                      plm{nullptr};
+    // A stream source: the callbacks pl_mpeg reads through (its address is
+    // kept by pl_mpeg: a member of this object, which never moves)
+    plm_stream_t                stream{};
+    std::unique_ptr<ZipStream>  zip;
+    std::unique_ptr<VideoAudio> audio;
+    bool                        audioStarted{false};
+    // GPU path: the planes and the shader; CPU path: the RGBA frame
+    bool                        gpu{false};
+    sf::Shader                  shader;
+    sf::Texture                 planeY;
+    sf::Texture                 planeCb;
+    sf::Texture                 planeCr;
+    // A context for the plane uploads when none is current (no window yet)
+    std::optional<sf::Context>  context;
+    sf::Texture                 texture;
+    std::vector<std::uint8_t>   pixels;
+    sf::Vector2u                size{0, 0};
+    plm_frame_t*                frame{nullptr}; // the last frame one decode gave
+    bool                        hasFrame{false};
+    std::string                 name;
+    Status                      status{Status::Stopped};
+    bool                        loop{false};
+    float                       volume{1.0f};
+    StatusCallback              callback;
+    sf::Clock                   clock;
+
+    // pl_mpeg's callbacks: only the last frame of a decode is converted
+    static void onFrame(plm_t* APlm, plm_frame_t* AFrame, void* AUser)
+    {
+        (void)APlm;
+        static_cast<Impl*>(AUser)->frame = AFrame;
+    }
+
+    static void onSamples(plm_t* APlm, plm_samples_t* ASamples, void* AUser)
+    {
+        (void)APlm;
+        Impl* LSelf = static_cast<Impl*>(AUser);
+        if (LSelf->audio)
+            LSelf->audio->push(ASamples->interleaved, static_cast<std::size_t>(ASamples->count) * kVideoChannels);
+    }
+
+    void notify()
+    {
+        if (callback)
+            callback(status, name);
+    }
+
+    // Takes APlm (destroyed when it is no video): the decoder, the frame
+    // texture and the audio feed, stopped at the start
+    bool start(plm_t* APlm, const std::string& AName)
+    {
+        if (APlm == nullptr)
+            return false;
+
+        // A broken source is an object with no headers (creation never fails)
+        if (!plm_has_headers(APlm) || plm_get_num_video_streams(APlm) < 1 ||
+            plm_get_width(APlm) <= 0 || plm_get_height(APlm) <= 0)
+        {
+            plm_destroy(APlm);
+            return false;
+        }
+
+        size = {static_cast<unsigned int>(plm_get_width(APlm)), static_cast<unsigned int>(plm_get_height(APlm))};
+
+        // GPU when shaders work here (the shader is built once per video
+        // object); the planes are sized at the first frame. Else the CPU
+        // path's RGBA texture and buffer.
+        if (!gpu && sf::Shader::isAvailable())
+            gpu = shader.loadFromMemory(kVideoShader, sf::Shader::Type::Fragment);
+        if (gpu)
+        {
+            shader.setUniform("texture_y", sf::Shader::CurrentTexture);
+            shader.setUniform("texture_cb", planeCb);
+            shader.setUniform("texture_cr", planeCr);
+        }
+        else
+        {
+            if (!texture.resize(size))
+            {
+                plm_destroy(APlm);
+                return false;
+            }
+            // plm_frame_to_rgba leaves the alpha bytes as they are: opaque
+            pixels.assign(static_cast<std::size_t>(size.x) * size.y * 4, 255);
+        }
+
+        const int LRate = plm_get_samplerate(APlm);
+        if (plm_get_num_audio_streams(APlm) > 0 && LRate > 0)
+        {
+            audio = std::make_unique<VideoAudio>(static_cast<unsigned int>(LRate));
+            audio->setVolume(::pcpp_m_Math::PerceivedVolume(volume, 100.0f));
+            plm_set_audio_enabled(APlm, 1);
+            plm_set_audio_stream(APlm, 0);
+            plm_set_audio_decode_callback(APlm, &Impl::onSamples, this);
+            // Two MP2 frames ahead of the video, as PSFML.Ext decoded them
+            plm_set_audio_lead_time(APlm, static_cast<double>(PLM_AUDIO_SAMPLES_PER_FRAME) * 2.0 / LRate);
+        }
+        else
+        {
+            plm_set_audio_enabled(APlm, 0);
+        }
+
+        plm_set_video_decode_callback(APlm, &Impl::onFrame, this);
+        plm_set_loop(APlm, loop ? 1 : 0);
+
+        plm      = APlm;
+        name     = AName;
+        status   = Status::Stopped;
+        hasFrame = false;
+        return true;
+    }
+
+    // Back to the start: the audio stopped and emptied, no frame shown
+    void rewind()
+    {
+        if (audio)
+        {
+            audio->stop();
+            audio->clear();
+        }
+        audioStarted = false;
+        if (plm)
+            plm_rewind(plm);
+        frame    = nullptr;
+        hasFrame = false;
+    }
+
+    // The stream source of an open from a stream: the stream's size first
+    bool openStream(sf::InputStream& AStream, const std::string& AName)
+    {
+        const std::optional<std::size_t> LSize = AStream.getSize();
+        if (!LSize || *LSize == 0)
+            return false;
+
+        stream        = plm_stream_t{};
+        stream.read   = &videoStreamRead;
+        stream.seek   = &videoStreamSeek;
+        stream.length = *LSize;
+        stream.user   = &AStream;
+        return start(plm_create_with_stream(&stream), AName);
+    }
+};
+
+Video::Video() : m_impl(std::make_unique<Impl>())
+{
+}
+
+Video::~Video()
+{
+    // A video going away tells no one
+    m_impl->callback = nullptr;
+    close();
+}
+
+bool Video::openFromFile(const std::string& APath)
+{
+    close();
+    const std::string LPath = zipResolve(APath);
+    return m_impl->start(plm_create_with_filename_utf8(LPath.c_str()), APath);
+}
+
+bool Video::openFromStream(sf::InputStream& AStream, const std::string& AName)
+{
+    close();
+    return m_impl->openStream(AStream, AName);
+}
+
+bool Video::openFromZip(const std::string& AArchive, const std::string& AEntry, const std::string& APassword)
+{
+    close();
+    auto LZip = std::make_unique<ZipStream>();
+    if (!LZip->open(AArchive, AEntry, APassword))
+        return false;
+
+    // The stream stays where it is when the pointer moves into the video
+    if (!m_impl->openStream(*LZip, AEntry))
+        return false;
+    m_impl->zip = std::move(LZip);
+    return true;
+}
+
+void Video::close()
+{
+    stop();
+    m_impl->audio.reset();
+    if (m_impl->plm)
+    {
+        plm_destroy(m_impl->plm);
+        m_impl->plm = nullptr;
+    }
+    m_impl->zip.reset();
+    m_impl->stream   = plm_stream_t{};
+    m_impl->texture  = sf::Texture();
+    m_impl->planeY   = sf::Texture();
+    m_impl->planeCb  = sf::Texture();
+    m_impl->planeCr  = sf::Texture();
+    m_impl->pixels.clear();
+    m_impl->size     = {0, 0};
+    m_impl->name.clear();
+}
+
+bool Video::isOpen() const
+{
+    return m_impl->plm != nullptr;
+}
+
+void Video::play()
+{
+    if (m_impl->plm == nullptr || m_impl->status == Status::Playing)
+        return;
+
+    // The audio starts again where it paused; from the start, once update()
+    // decoded its first samples (no silence ahead of the picture)
+    if (m_impl->audio && m_impl->audioStarted)
+        m_impl->audio->play();
+    m_impl->status = Status::Playing;
+    m_impl->clock.restart();
+    m_impl->notify();
+}
+
+void Video::pause()
+{
+    if (m_impl->plm == nullptr || m_impl->status != Status::Playing)
+        return;
+
+    if (m_impl->audio && m_impl->audioStarted)
+        m_impl->audio->pause();
+    m_impl->status = Status::Paused;
+    m_impl->notify();
+}
+
+void Video::stop()
+{
+    if (m_impl->plm == nullptr || m_impl->status == Status::Stopped)
+        return;
+
+    m_impl->rewind();
+    m_impl->status = Status::Stopped;
+    m_impl->notify();
+}
+
+Video::Status Video::getStatus() const
+{
+    return m_impl->status;
+}
+
+void Video::update()
+{
+    update(m_impl->clock.restart());
+}
+
+void Video::update(sf::Time AElapsed)
+{
+    Impl& LSelf = *m_impl;
+    if (LSelf.plm == nullptr || LSelf.status != Status::Playing)
+        return;
+
+    LSelf.frame = nullptr;
+    if (AElapsed > sf::Time::Zero)
+        plm_decode(LSelf.plm, static_cast<double>(AElapsed.asMicroseconds()) / 1000000.0);
+
+    if (LSelf.frame != nullptr)
+    {
+        if (LSelf.gpu)
+        {
+            // The uploads need a current context: the window's when it is
+            // there, else this video's own (made once, left inactive after)
+            const bool LOwn = sf::Context::getActiveContext() == nullptr;
+            bool LReady = true;
+            if (LOwn)
+            {
+                if (!LSelf.context)
+                    LSelf.context.emplace();
+                LReady = LSelf.context->setActive(true);
+            }
+            const bool LDone = LReady &&
+                               videoUploadPlane(LSelf.planeY, LSelf.frame->y) &&
+                               videoUploadPlane(LSelf.planeCb, LSelf.frame->cb) &&
+                               videoUploadPlane(LSelf.planeCr, LSelf.frame->cr);
+            if (LOwn && LReady)
+                (void)LSelf.context->setActive(false);
+            if (LDone)
+                LSelf.hasFrame = true;
+        }
+        else
+        {
+            plm_frame_to_rgba(LSelf.frame, LSelf.pixels.data(), static_cast<int>(LSelf.size.x * 4));
+            LSelf.texture.update(LSelf.pixels.data());
+            LSelf.hasFrame = true;
+        }
+        LSelf.frame = nullptr;
+    }
+
+    if (LSelf.audio && !LSelf.audioStarted && LSelf.audio->hasQueued())
+    {
+        LSelf.audio->play();
+        LSelf.audioStarted = true;
+    }
+
+    // pl_mpeg starts a looping video again itself; the end of one that does
+    // not loop stops it at its start
+    if (plm_has_ended(LSelf.plm))
+    {
+        LSelf.rewind();
+        LSelf.status = Status::Stopped;
+        LSelf.notify();
+    }
+}
+
+void Video::setLooping(bool ALoop)
+{
+    m_impl->loop = ALoop;
+    if (m_impl->plm)
+        plm_set_loop(m_impl->plm, ALoop ? 1 : 0);
+}
+
+bool Video::isLooping() const
+{
+    return m_impl->loop;
+}
+
+void Video::setVolume(float AVolume)
+{
+    // The level is kept as set; SFML gets the linear volume it stands for.
+    // NaN fails every comparison: stored as 0 (std::clamp would keep it)
+    m_impl->volume = (AVolume > 0.0f) ? std::min(AVolume, 1.0f) : 0.0f;
+    if (m_impl->audio)
+        m_impl->audio->setVolume(::pcpp_m_Math::PerceivedVolume(m_impl->volume, 100.0f));
+}
+
+float Video::getVolume() const
+{
+    return m_impl->volume;
+}
+
+void Video::setStatusCallback(StatusCallback ACallback)
+{
+    m_impl->callback = std::move(ACallback);
+}
+
+const std::string& Video::getName() const
+{
+    return m_impl->name;
+}
+
+sf::Vector2u Video::getSize() const
+{
+    return m_impl->size;
+}
+
+float Video::getFrameRate() const
+{
+    return m_impl->plm ? static_cast<float>(plm_get_framerate(m_impl->plm)) : 0.0f;
+}
+
+bool Video::hasAudio() const
+{
+    return m_impl->audio != nullptr;
+}
+
+unsigned int Video::getSampleRate() const
+{
+    return m_impl->audio ? m_impl->audio->getSampleRate() : 0;
+}
+
+sf::Time Video::getDuration() const
+{
+    if (m_impl->plm == nullptr)
+        return sf::Time::Zero;
+
+    // pl_mpeg's duration spans the first frame's start to the last frame's
+    // start: the video plays one frame longer
+    double LSeconds = plm_get_duration(m_impl->plm);
+    const double LRate = plm_get_framerate(m_impl->plm);
+    if (LRate > 0.0)
+        LSeconds += 1.0 / LRate;
+    return sf::microseconds(static_cast<std::int64_t>(std::llround(LSeconds * 1000000.0)));
+}
+
+sf::Time Video::getPlayingOffset() const
+{
+    if (m_impl->plm == nullptr)
+        return sf::Time::Zero;
+    return sf::microseconds(static_cast<std::int64_t>(std::llround(plm_get_time(m_impl->plm) * 1000000.0)));
+}
+
+bool Video::usesShader() const
+{
+    return m_impl->gpu;
+}
+
+void Video::draw(sf::RenderTarget& ATarget, sf::RenderStates AStates) const
+{
+    if (m_impl->plm == nullptr || m_impl->status == Status::Stopped || !m_impl->hasFrame)
+        return;
+
+    AStates.transform *= getTransform();
+    if (m_impl->gpu)
+    {
+        // The Y plane's frame part (its padding to 16 left out); the shader
+        // reads Cb / Cr at the same normalized coordinates
+        const sf::Sprite LSprite(m_impl->planeY, sf::IntRect({0, 0}, {static_cast<int>(m_impl->size.x),
+                                                                      static_cast<int>(m_impl->size.y)}));
+        AStates.shader = &m_impl->shader;
+        ATarget.draw(LSprite, AStates);
+    }
+    else
+    {
+        const sf::Sprite LSprite(m_impl->texture);
+        ATarget.draw(LSprite, AStates);
+    }
+}
+
+} // namespace sfx
+
+namespace
+{
+
+// The entry AKey of this binary's built-in data: true with its bytes, false
+// when the binary holds none (ResData gives Data nil and Size 0 then).
+bool resDataBytes(const std::string& AKey, const void*& AData, std::size_t& ASize)
+{
+    const ::pcpp_m_ResData::ResDataEntry LEntry = ::pcpp_m_ResData::FindResData(AKey);
+    if (LEntry.Data == nullptr)
+        return false;
+    AData = LEntry.Data;
+    ASize = static_cast<std::size_t>(LEntry.Size);
+    return true;
+}
+
+} // namespace
+
+bool sfx::openFromResData(sf::Font& AFont, const std::string& AKey)
+{
+    const void* LData = nullptr;
+    std::size_t LSize = 0;
+    if (!resDataBytes(AKey, LData, LSize))
+        return false;
+    return AFont.openFromMemory(LData, LSize);
+}
+
+bool sfx::openFromResData(sf::Music& AMusic, const std::string& AKey)
+{
+    const void* LData = nullptr;
+    std::size_t LSize = 0;
+    if (!resDataBytes(AKey, LData, LSize))
+        return false;
+    return AMusic.openFromMemory(LData, LSize);
+}
+
+bool sfx::loadFromResData(sf::Texture& ATexture, const std::string& AKey, bool ASRgb, const sf::IntRect& AArea)
+{
+    const void* LData = nullptr;
+    std::size_t LSize = 0;
+    if (!resDataBytes(AKey, LData, LSize))
+        return false;
+    return ATexture.loadFromMemory(LData, LSize, ASRgb, AArea);
+}
+
+bool sfx::loadFromResData(sf::Image& AImage, const std::string& AKey)
+{
+    const void* LData = nullptr;
+    std::size_t LSize = 0;
+    if (!resDataBytes(AKey, LData, LSize))
+        return false;
+    return AImage.loadFromMemory(LData, LSize);
+}
+
+bool sfx::loadFromResData(sf::SoundBuffer& ABuffer, const std::string& AKey)
+{
+    const void* LData = nullptr;
+    std::size_t LSize = 0;
+    if (!resDataBytes(AKey, LData, LSize))
+        return false;
+    return ABuffer.loadFromMemory(LData, LSize);
+}
+
+bool sfx::openDefaultFont(sf::Font& AFont)
+{
+    return openFromResData(AFont, DefaultFontKey);
+}
+
+#include <mutex>
+#include <SFML/System/Err.hpp>
+
+namespace
+{
+
+// The error state: the newest message and the callback, shared with SFML's
+// threads (audio) under one lock. A function's static, so it is built before
+// the capture below (which asks for it first) and torn down after it.
+struct ErrorState
+{
+    std::mutex Lock;
+    std::string Last;
+    sfx::ErrorCallback Callback;
+};
+
+ErrorState& errorState()
+{
+    static ErrorState LState;
+    return LState;
+}
+
+// One message: kept as the newest, then to the callback; with no callback, the
+// text goes to APrevious (SFML's own stderr buffer) as SFML wrote it, or
+// nowhere when APrevious is nullptr (a program's own setError). The callback
+// runs outside the lock, so it may call the error routines itself.
+void dispatchError(const std::string& AMessage, const std::string& ARaw, std::streambuf* APrevious)
+{
+    sfx::ErrorCallback LCallback;
+    {
+        const std::lock_guard<std::mutex> LGuard(errorState().Lock);
+        errorState().Last = AMessage;
+        LCallback = errorState().Callback;
+    }
+    if (LCallback)
+    {
+        LCallback(AMessage);
+        return;
+    }
+    if (APrevious != nullptr)
+    {
+        APrevious->sputn(ARaw.data(), static_cast<std::streamsize>(ARaw.size()));
+        APrevious->pubsync();
+    }
+}
+
+// sf::err()'s buffer while the program runs: collects what is written and, at
+// each flush, hands it on as one message. Built at start-up (a namespace
+// scope object in this unit's translation unit); its destructor hands on what
+// is left and gives sf::err() its own buffer back. sf::err()'s stream is a
+// function static built by the constructor's first call, so it outlives this.
+class ErrCapture final : public std::streambuf
+{
+public:
+    ErrCapture()
+    {
+        errorState();
+        m_previous = sf::err().rdbuf(this);
+    }
+
+    ~ErrCapture() override
+    {
+        flushPending();
+        sf::err().rdbuf(m_previous);
+    }
+
+    ErrCapture(const ErrCapture&) = delete;
+    ErrCapture& operator=(const ErrCapture&) = delete;
+
+protected:
+    int_type overflow(int_type AChar) override
+    {
+        if (!traits_type::eq_int_type(AChar, traits_type::eof()))
+        {
+            const std::lock_guard<std::mutex> LGuard(m_lock);
+            m_pending.push_back(traits_type::to_char_type(AChar));
+        }
+        return traits_type::not_eof(AChar);
+    }
+
+    std::streamsize xsputn(const char* AText, std::streamsize ACount) override
+    {
+        if (ACount > 0)
+        {
+            const std::lock_guard<std::mutex> LGuard(m_lock);
+            m_pending.append(AText, static_cast<std::size_t>(ACount));
+        }
+        return ACount;
+    }
+
+    int sync() override
+    {
+        flushPending();
+        return 0;
+    }
+
+private:
+    // Takes the collected text out under the lock, then hands it on outside
+    // it (a callback that writes to sf::err() again must not wait on itself).
+    // Only line breaks at the end are dropped from the message; text that is
+    // nothing but line breaks is no message.
+    void flushPending()
+    {
+        std::string LRaw;
+        {
+            const std::lock_guard<std::mutex> LGuard(m_lock);
+            LRaw.swap(m_pending);
+        }
+        std::string LMessage = LRaw;
+        while (!LMessage.empty() && (LMessage.back() == '\n' || LMessage.back() == '\r'))
+            LMessage.pop_back();
+        if (LMessage.empty())
+            return;
+        dispatchError(LMessage, LRaw, m_previous);
+    }
+
+    std::mutex m_lock;
+    std::string m_pending;
+    std::streambuf* m_previous = nullptr;
+};
+
+ErrCapture ErrCaptureInstance;
+
+} // namespace
+
+void sfx::setErrorCallback(ErrorCallback ACallback)
+{
+    const std::lock_guard<std::mutex> LGuard(errorState().Lock);
+    errorState().Callback = std::move(ACallback);
+}
+
+sfx::ErrorCallback sfx::getErrorCallback()
+{
+    const std::lock_guard<std::mutex> LGuard(errorState().Lock);
+    return errorState().Callback;
+}
+
+std::string sfx::getLastError()
+{
+    const std::lock_guard<std::mutex> LGuard(errorState().Lock);
+    return errorState().Last;
+}
+
+void sfx::detail::setErrorMessage(const std::string& AMessage)
+{
+    dispatchError(AMessage, AMessage, nullptr);
+}
+
+// sfx::Mixer: inside the push_macro("Status") region (sf::SoundSource::Status)
+#include <limits>
+#include <SFML/Audio/Listener.hpp>
+#include <SFML/Audio/Music.hpp>
+#include <SFML/Audio/Sound.hpp>
+#include <SFML/Audio/SoundBuffer.hpp>
+
+namespace
+{
+
+// The most channels a Mixer takes
+constexpr unsigned int kMixerMaxChannels = 256;
+
+// The distance model's defaults, for positions in pixels: full level within
+// 200, half at 400 (SFML's own min distance 1 is for metres: at pixel
+// distances a placed voice was all but silent)
+constexpr float kMixerMinDistance = 200.0f;
+constexpr float kMixerAttenuation = 1.0f;
+
+// A slot's generation after it is freed (or a channel's after a new voice):
+// never 0, which marks a handle that was never valid
+std::uint32_t mixerNextGeneration(const std::uint32_t AGeneration)
+{
+    const std::uint32_t LNext = AGeneration + 1;
+    if (LNext == 0)
+    {
+        return 1;
+    }
+    return LNext;
+}
+
+// The keys a load is shared under; an empty key is never shared
+std::string mixerFileKey(const std::string& APath)
+{
+    return "file:" + zipResolve(APath);
+}
+
+// The password is part of the key: a load under another password is a load of
+// its own, so a wrong one fails instead of sharing what a right one opened
+std::string mixerZipKey(const std::string& AArchive, const std::string& AEntry, const std::string& APassword)
+{
+    // a line break occurs in neither a path nor an entry name: it separates
+    // them, and the password comes last
+    return "zip:" + zipResolve(AArchive) + "\n" + zipEntryName(AEntry) + "\n" + APassword;
+}
+
+std::string mixerStreamKey(const std::string& AName)
+{
+    if (AName.empty())
+    {
+        return {};
+    }
+    return "stream:" + AName;
+}
+
+// -1 .. 1, NaN = centre
+float mixerPan(const float APan)
+{
+    if (std::isnan(APan))
+    {
+        return 0.0f;
+    }
+    return std::clamp(APan, -1.0f, 1.0f);
+}
+
+// A usable pitch: above 0 and not NaN
+bool mixerPitchOk(const float APitch)
+{
+    return APitch > 0.0f;
+}
+
+} // namespace
+
+struct sfx::Mixer::Impl
+{
+    struct Fade
+    {
+        bool active{false};
+        float from{0.0f};
+        float to{0.0f};
+        sf::Time duration;
+        sf::Time elapsed;
+        // fadeOut: stop once the level reaches 0
+        bool stopAtEnd{false};
+    };
+
+    struct MusicSlot
+    {
+        std::uint32_t generation{1};
+        // the loads it holds; 0 = a free slot
+        std::uint32_t loads{0};
+        std::string key;
+        // the zip entry the music streams from (zip loads only); declared
+        // before music, so the music is destroyed first
+        std::unique_ptr<ZipStream> zip;
+        std::unique_ptr<sf::Music> music;
+        float level{1.0f};
+        Fade fade;
+        // paused by pauseAll / pauseAllMusic, for resumeAll
+        bool heldByPause{false};
+    };
+
+    struct SoundSlot
+    {
+        std::uint32_t generation{1};
+        std::uint32_t loads{0};
+        std::string key;
+        std::unique_ptr<sf::SoundBuffer> buffer;
+    };
+
+    struct Channel
+    {
+        // the newest voice's generation; 0 = no voice yet
+        std::uint32_t generation{0};
+        // the voice; empty when none or its sound was unloaded
+        std::optional<sf::Sound> sound;
+        std::uint32_t soundSlot{0};
+        float level{1.0f};
+        int priority{0};
+        std::uint64_t order{0};
+        bool reserved{false};
+        bool positioned{false};
+        sf::Vector2f position;
+        bool heldByPause{false};
+    };
+
+    explicit Impl(const unsigned int AChannels) :
+    channels(AChannels)
+    {
+    }
+
+    std::vector<MusicSlot> musics;
+    std::vector<SoundSlot> sounds;
+    std::vector<Channel> channels;
+    // the next voice's start order
+    std::uint64_t nextOrder{1};
+    float master{1.0f};
+    float musicGroup{1.0f};
+    float soundGroup{1.0f};
+    sf::Vector2f listener;
+    // the distance model a voice starts with
+    float minDistance{kMixerMinDistance};
+    float attenuation{kMixerAttenuation};
+
+    // The live slot a handle names, nullptr when it is invalid or stale
+    template <class TSlots, class THandle>
+    static auto findSlot(TSlots& ASlots, const THandle AId) -> decltype(&ASlots[0])
+    {
+        if ((AId.generation == 0) || (AId.slot >= ASlots.size()))
+        {
+            return nullptr;
+        }
+        auto& LSlot = ASlots[AId.slot];
+        if ((LSlot.loads == 0) || (LSlot.generation != AId.generation))
+        {
+            return nullptr;
+        }
+        return &LSlot;
+    }
+
+    // The channel a voice plays on, nullptr when the voice is stale
+    template <class TChannels>
+    static auto findVoice(TChannels& AChannels, const VoiceId AId) -> decltype(&AChannels[0])
+    {
+        if ((AId.generation == 0) || (AId.slot >= AChannels.size()))
+        {
+            return nullptr;
+        }
+        auto& LChannel = AChannels[AId.slot];
+        if ((LChannel.generation != AId.generation) || !LChannel.sound.has_value())
+        {
+            return nullptr;
+        }
+        return &LChannel;
+    }
+
+    // A channel index the program gave, or nullptr (reported)
+    Channel* findChannel(const int AChannel, const char* AWhat)
+    {
+        if ((AChannel < 0) || (static_cast<std::size_t>(AChannel) >= channels.size()))
+        {
+            sfx::setError("sfx::Mixer::{}: channel {} is not 0 .. {}", AWhat, AChannel, channels.size() - 1);
+            return nullptr;
+        }
+        return &channels[static_cast<std::size_t>(AChannel)];
+    }
+
+    const Channel* findChannel(const int AChannel) const
+    {
+        if ((AChannel < 0) || (static_cast<std::size_t>(AChannel) >= channels.size()))
+        {
+            return nullptr;
+        }
+        return &channels[static_cast<std::size_t>(AChannel)];
+    }
+
+    // The slot already holding AKey, its load counted; nullopt when none
+    template <class THandle, class TSlots>
+    static std::optional<THandle> share(TSlots& ASlots, const std::string& AKey)
+    {
+        if (AKey.empty())
+        {
+            return std::nullopt;
+        }
+        for (std::size_t LIndex = 0; LIndex < ASlots.size(); LIndex++)
+        {
+            auto& LSlot = ASlots[LIndex];
+            if ((LSlot.loads > 0) && (LSlot.key == AKey))
+            {
+                LSlot.loads++;
+                return THandle{static_cast<std::uint32_t>(LIndex), LSlot.generation};
+            }
+        }
+        return std::nullopt;
+    }
+
+    // A free slot (a new one when none is free)
+    template <class TSlots>
+    static std::size_t freeSlot(TSlots& ASlots)
+    {
+        for (std::size_t LIndex = 0; LIndex < ASlots.size(); LIndex++)
+        {
+            if (ASlots[LIndex].loads == 0)
+            {
+                return LIndex;
+            }
+        }
+        ASlots.emplace_back();
+        return ASlots.size() - 1;
+    }
+
+    MusicId addMusic(const std::string& AKey, std::unique_ptr<ZipStream> AZip, std::unique_ptr<sf::Music> AMusic)
+    {
+        const std::size_t LIndex = freeSlot(musics);
+        MusicSlot& LSlot = musics[LIndex];
+        LSlot.loads = 1;
+        LSlot.key = AKey;
+        LSlot.zip = std::move(AZip);
+        LSlot.music = std::move(AMusic);
+        // music is never placed: SFML spatializes every source at (0, 0, 0)
+        // by default, which fades it once the listener moves away
+        LSlot.music->setSpatializationEnabled(false);
+        LSlot.level = 1.0f;
+        LSlot.fade = {};
+        LSlot.heldByPause = false;
+        applyMusicVolume(LSlot);
+        return MusicId{static_cast<std::uint32_t>(LIndex), LSlot.generation};
+    }
+
+    SoundId addSound(const std::string& AKey, std::unique_ptr<sf::SoundBuffer> ABuffer)
+    {
+        const std::size_t LIndex = freeSlot(sounds);
+        SoundSlot& LSlot = sounds[LIndex];
+        LSlot.loads = 1;
+        LSlot.key = AKey;
+        LSlot.buffer = std::move(ABuffer);
+        return SoundId{static_cast<std::uint32_t>(LIndex), LSlot.generation};
+    }
+
+    void freeMusic(MusicSlot& ASlot)
+    {
+        if (ASlot.music)
+        {
+            ASlot.music->stop();
+        }
+        ASlot.music.reset();
+        ASlot.zip.reset();
+        ASlot.key.clear();
+        ASlot.loads = 0;
+        ASlot.fade = {};
+        ASlot.heldByPause = false;
+        ASlot.generation = mixerNextGeneration(ASlot.generation);
+    }
+
+    // Stops a channel's voice and lets it go: its VoiceId turns stale
+    void dropVoice(Channel& AChannel)
+    {
+        if (AChannel.sound.has_value())
+        {
+            AChannel.sound->stop();
+            AChannel.sound.reset();
+            AChannel.generation = mixerNextGeneration(AChannel.generation);
+        }
+        AChannel.heldByPause = false;
+    }
+
+    void freeSound(const std::size_t AIndex)
+    {
+        // its voices first: an sf::Sound must not outlive its buffer
+        for (Channel& LChannel : channels)
+        {
+            if (LChannel.sound.has_value() && (LChannel.soundSlot == AIndex))
+            {
+                dropVoice(LChannel);
+            }
+        }
+        SoundSlot& LSlot = sounds[AIndex];
+        LSlot.buffer.reset();
+        LSlot.key.clear();
+        LSlot.loads = 0;
+        LSlot.generation = mixerNextGeneration(LSlot.generation);
+    }
+
+    void applyMusicVolume(MusicSlot& ASlot) const
+    {
+        if (ASlot.music)
+        {
+            ASlot.music->setVolume(Mixer::toVolume(ASlot.level, musicGroup));
+        }
+    }
+
+    void applyVoiceVolume(Channel& AChannel) const
+    {
+        if (AChannel.sound.has_value())
+        {
+            AChannel.sound->setVolume(Mixer::toVolume(AChannel.level, soundGroup));
+        }
+    }
+
+    void applyMaster() const
+    {
+        sf::Listener::setGlobalVolume(::pcpp_m_Math::PerceivedVolume(master, 100.0f));
+    }
+
+    void applyListener() const
+    {
+        sf::Listener::setPosition(Mixer::toAudioSpace(listener));
+    }
+
+    // The music group's pause / resume and stop
+    void pauseMusicGroup()
+    {
+        for (MusicSlot& LSlot : musics)
+        {
+            if (LSlot.music && (LSlot.music->getStatus() == sf::SoundSource::Status::Playing))
+            {
+                LSlot.music->pause();
+                LSlot.heldByPause = true;
+            }
+        }
+    }
+
+    void resumeMusicGroup()
+    {
+        for (MusicSlot& LSlot : musics)
+        {
+            if (LSlot.heldByPause && LSlot.music && (LSlot.music->getStatus() == sf::SoundSource::Status::Paused))
+            {
+                LSlot.music->play();
+            }
+            LSlot.heldByPause = false;
+        }
+    }
+
+    void stopMusicGroup()
+    {
+        for (MusicSlot& LSlot : musics)
+        {
+            if (LSlot.music)
+            {
+                LSlot.music->stop();
+            }
+            LSlot.fade = {};
+            LSlot.heldByPause = false;
+        }
+    }
+
+    void pauseSoundGroup()
+    {
+        for (Channel& LChannel : channels)
+        {
+            if (LChannel.sound.has_value() && (LChannel.sound->getStatus() == sf::SoundSource::Status::Playing))
+            {
+                LChannel.sound->pause();
+                LChannel.heldByPause = true;
+            }
+        }
+    }
+
+    void resumeSoundGroup()
+    {
+        for (Channel& LChannel : channels)
+        {
+            if (LChannel.heldByPause && LChannel.sound.has_value() &&
+                (LChannel.sound->getStatus() == sf::SoundSource::Status::Paused))
+            {
+                LChannel.sound->play();
+            }
+            LChannel.heldByPause = false;
+        }
+    }
+
+    void stopSoundGroup()
+    {
+        for (Channel& LChannel : channels)
+        {
+            if (LChannel.sound.has_value())
+            {
+                LChannel.sound->stop();
+            }
+            LChannel.heldByPause = false;
+        }
+    }
+};
+
+int sfx::Mixer::pickChannel(const std::span<const ChannelState> AChannels, const int ARequested, const int APriority)
+{
+    if (ARequested >= 0)
+    {
+        if (static_cast<std::size_t>(ARequested) < AChannels.size())
+        {
+            return ARequested;
+        }
+        return -1;
+    }
+    if (ARequested != -1)
+    {
+        return -1;
+    }
+
+    // a free channel first
+    for (std::size_t LIndex = 0; LIndex < AChannels.size(); LIndex++)
+    {
+        if (!AChannels[LIndex].reserved && !AChannels[LIndex].busy)
+        {
+            return static_cast<int>(LIndex);
+        }
+    }
+
+    // else the oldest voice the new one outranks or matches
+    int LPick = -1;
+    std::uint64_t LOldest = std::numeric_limits<std::uint64_t>::max();
+    for (std::size_t LIndex = 0; LIndex < AChannels.size(); LIndex++)
+    {
+        const ChannelState& LState = AChannels[LIndex];
+        if (!LState.reserved && (LState.priority <= APriority) && (LState.order < LOldest))
+        {
+            LOldest = LState.order;
+            LPick = static_cast<int>(LIndex);
+        }
+    }
+    return LPick;
+}
+
+float sfx::Mixer::clampLevel(const float ALevel)
+{
+    if (std::isnan(ALevel))
+    {
+        return 0.0f;
+    }
+    return std::clamp(ALevel, 0.0f, 1.0f);
+}
+
+float sfx::Mixer::toVolume(const float ALevel, const float AGroup)
+{
+    return ::pcpp_m_Math::PerceivedVolume(clampLevel(ALevel) * clampLevel(AGroup), 100.0f);
+}
+
+float sfx::Mixer::fadeLevel(const float AFrom, const float ATo, const sf::Time ADuration, const sf::Time AElapsed)
+{
+    if ((ADuration <= sf::Time::Zero) || (AElapsed >= ADuration))
+    {
+        return clampLevel(ATo);
+    }
+    if (AElapsed <= sf::Time::Zero)
+    {
+        return clampLevel(AFrom);
+    }
+    // in microseconds: exact for every time sf::Time holds
+    const double LPart = static_cast<double>(AElapsed.asMicroseconds()) / static_cast<double>(ADuration.asMicroseconds());
+    const double LFrom = clampLevel(AFrom);
+    const double LTo   = clampLevel(ATo);
+    return static_cast<float>(LFrom + (LTo - LFrom) * LPart);
+}
+
+sf::Vector3f sfx::Mixer::toAudioSpace(const sf::Vector2f APosition)
+{
+    return {APosition.x, 0.0f, APosition.y};
+}
+
+float sfx::Mixer::distanceGain(const float ADistance, const float AMinDistance, const float AAttenuation,
+                               const float AMaxDistance)
+{
+    // miniaudio's ma_attenuation_inverse, as SFML 3.1's miniaudio.h has it
+    if (AMinDistance >= AMaxDistance)
+    {
+        return 1.0f;
+    }
+    const float LDistance = std::clamp(ADistance, AMinDistance, AMaxDistance);
+    return AMinDistance / (AMinDistance + AAttenuation * (LDistance - AMinDistance));
+}
+
+sfx::Mixer::Mixer(const unsigned int AChannels) :
+m_impl(std::make_unique<Impl>(std::clamp(AChannels, 1u, kMixerMaxChannels)))
+{
+    m_impl->applyMaster();
+    m_impl->applyListener();
+}
+
+sfx::Mixer::~Mixer()
+{
+    unloadAll();
+}
+
+void sfx::Mixer::reset()
+{
+    unloadAll();
+    for (Impl::Channel& LChannel : m_impl->channels)
+    {
+        LChannel.reserved = false;
+    }
+    m_impl->master = 1.0f;
+    m_impl->musicGroup = 1.0f;
+    m_impl->soundGroup = 1.0f;
+    m_impl->listener = {};
+    m_impl->minDistance = kMixerMinDistance;
+    m_impl->attenuation = kMixerAttenuation;
+    m_impl->applyMaster();
+    m_impl->applyListener();
+}
+
+bool sfx::Mixer::isValid(const MusicId AMusic) const
+{
+    return Impl::findSlot(m_impl->musics, AMusic) != nullptr;
+}
+
+bool sfx::Mixer::isValid(const SoundId ASound) const
+{
+    return Impl::findSlot(m_impl->sounds, ASound) != nullptr;
+}
+
+bool sfx::Mixer::isValid(const VoiceId AVoice) const
+{
+    return Impl::findVoice(m_impl->channels, AVoice) != nullptr;
+}
+
+sfx::MusicId sfx::Mixer::loadMusic(const std::string& APath)
+{
+    const std::string LKey = mixerFileKey(APath);
+    if (const std::optional<MusicId> LShared = Impl::share<MusicId>(m_impl->musics, LKey))
+    {
+        return *LShared;
+    }
+    auto LMusic = std::make_unique<sf::Music>();
+    if (!LMusic->openFromFile(zipUtf8Path(zipResolve(APath))))
+    {
+        sfx::setError("sfx::Mixer: cannot load the music \"{}\"", APath);
+        return {};
+    }
+    return m_impl->addMusic(LKey, nullptr, std::move(LMusic));
+}
+
+sfx::MusicId sfx::Mixer::loadMusic(sf::InputStream& AStream, const std::string& AName)
+{
+    const std::string LKey = mixerStreamKey(AName);
+    if (const std::optional<MusicId> LShared = Impl::share<MusicId>(m_impl->musics, LKey))
+    {
+        return *LShared;
+    }
+    auto LMusic = std::make_unique<sf::Music>();
+    if (!LMusic->openFromStream(AStream))
+    {
+        sfx::setError("sfx::Mixer: cannot load the music stream \"{}\"", AName);
+        return {};
+    }
+    return m_impl->addMusic(LKey, nullptr, std::move(LMusic));
+}
+
+sfx::MusicId sfx::Mixer::loadMusicFromZip(const std::string& AArchive, const std::string& AEntry, const std::string& APassword)
+{
+    const std::string LKey = mixerZipKey(AArchive, AEntry, APassword);
+    if (const std::optional<MusicId> LShared = Impl::share<MusicId>(m_impl->musics, LKey))
+    {
+        return *LShared;
+    }
+    auto LZip = std::make_unique<ZipStream>();
+    if (!LZip->open(AArchive, AEntry, APassword))
+    {
+        sfx::setError("sfx::Mixer: cannot open the zip entry \"{}\" of \"{}\"", AEntry, AArchive);
+        return {};
+    }
+    // the stream stays where it is when the pointer moves into the slot
+    auto LMusic = std::make_unique<sf::Music>();
+    if (!LMusic->openFromStream(*LZip))
+    {
+        sfx::setError("sfx::Mixer: cannot load the music \"{}\" of \"{}\"", AEntry, AArchive);
+        return {};
+    }
+    return m_impl->addMusic(LKey, std::move(LZip), std::move(LMusic));
+}
+
+void sfx::Mixer::unload(const MusicId AMusic)
+{
+    Impl::MusicSlot* LSlot = Impl::findSlot(m_impl->musics, AMusic);
+    if (LSlot == nullptr)
+    {
+        return;
+    }
+    LSlot->loads--;
+    if (LSlot->loads == 0)
+    {
+        m_impl->freeMusic(*LSlot);
+    }
+}
+
+void sfx::Mixer::play(const MusicId AMusic, const float ALevel, const bool ALoop)
+{
+    Impl::MusicSlot* LSlot = Impl::findSlot(m_impl->musics, AMusic);
+    if (LSlot == nullptr)
+    {
+        return;
+    }
+    // from the start, every value set before it starts
+    LSlot->music->stop();
+    LSlot->fade = {};
+    LSlot->heldByPause = false;
+    LSlot->level = clampLevel(ALevel);
+    LSlot->music->setLooping(ALoop);
+    m_impl->applyMusicVolume(*LSlot);
+    LSlot->music->play();
+}
+
+void sfx::Mixer::stop(const MusicId AMusic)
+{
+    Impl::MusicSlot* LSlot = Impl::findSlot(m_impl->musics, AMusic);
+    if (LSlot == nullptr)
+    {
+        return;
+    }
+    LSlot->music->stop();
+    LSlot->fade = {};
+    LSlot->heldByPause = false;
+}
+
+void sfx::Mixer::pause(const MusicId AMusic)
+{
+    Impl::MusicSlot* LSlot = Impl::findSlot(m_impl->musics, AMusic);
+    if (LSlot == nullptr)
+    {
+        return;
+    }
+    if (LSlot->music->getStatus() == sf::SoundSource::Status::Playing)
+    {
+        LSlot->music->pause();
+    }
+    LSlot->heldByPause = false;
+}
+
+void sfx::Mixer::resume(const MusicId AMusic)
+{
+    Impl::MusicSlot* LSlot = Impl::findSlot(m_impl->musics, AMusic);
+    if (LSlot == nullptr)
+    {
+        return;
+    }
+    if (LSlot->music->getStatus() == sf::SoundSource::Status::Paused)
+    {
+        LSlot->music->play();
+    }
+    LSlot->heldByPause = false;
+}
+
+sf::SoundSource::Status sfx::Mixer::getStatus(const MusicId AMusic) const
+{
+    const Impl::MusicSlot* LSlot = Impl::findSlot(m_impl->musics, AMusic);
+    if (LSlot == nullptr)
+    {
+        return sf::SoundSource::Status::Stopped;
+    }
+    return LSlot->music->getStatus();
+}
+
+void sfx::Mixer::setLooping(const MusicId AMusic, const bool ALoop)
+{
+    Impl::MusicSlot* LSlot = Impl::findSlot(m_impl->musics, AMusic);
+    if (LSlot != nullptr)
+    {
+        LSlot->music->setLooping(ALoop);
+    }
+}
+
+bool sfx::Mixer::isLooping(const MusicId AMusic) const
+{
+    const Impl::MusicSlot* LSlot = Impl::findSlot(m_impl->musics, AMusic);
+    return (LSlot != nullptr) && LSlot->music->isLooping();
+}
+
+void sfx::Mixer::setLevel(const MusicId AMusic, const float ALevel)
+{
+    Impl::MusicSlot* LSlot = Impl::findSlot(m_impl->musics, AMusic);
+    if (LSlot == nullptr)
+    {
+        return;
+    }
+    LSlot->fade = {};
+    LSlot->level = clampLevel(ALevel);
+    m_impl->applyMusicVolume(*LSlot);
+}
+
+float sfx::Mixer::getLevel(const MusicId AMusic) const
+{
+    const Impl::MusicSlot* LSlot = Impl::findSlot(m_impl->musics, AMusic);
+    if (LSlot == nullptr)
+    {
+        return 0.0f;
+    }
+    return LSlot->level;
+}
+
+void sfx::Mixer::setPlayingOffset(const MusicId AMusic, const sf::Time AOffset)
+{
+    Impl::MusicSlot* LSlot = Impl::findSlot(m_impl->musics, AMusic);
+    if (LSlot != nullptr)
+    {
+        LSlot->music->setPlayingOffset(AOffset);
+    }
+}
+
+sf::Time sfx::Mixer::getPlayingOffset(const MusicId AMusic) const
+{
+    const Impl::MusicSlot* LSlot = Impl::findSlot(m_impl->musics, AMusic);
+    if (LSlot == nullptr)
+    {
+        return sf::Time::Zero;
+    }
+    return LSlot->music->getPlayingOffset();
+}
+
+sf::Time sfx::Mixer::getDuration(const MusicId AMusic) const
+{
+    const Impl::MusicSlot* LSlot = Impl::findSlot(m_impl->musics, AMusic);
+    if (LSlot == nullptr)
+    {
+        return sf::Time::Zero;
+    }
+    return LSlot->music->getDuration();
+}
+
+void sfx::Mixer::fadeTo(const MusicId AMusic, const float ALevel, const sf::Time ADuration)
+{
+    Impl::MusicSlot* LSlot = Impl::findSlot(m_impl->musics, AMusic);
+    if (LSlot == nullptr)
+    {
+        return;
+    }
+    LSlot->fade = {};
+    if (ADuration <= sf::Time::Zero)
+    {
+        LSlot->level = clampLevel(ALevel);
+        m_impl->applyMusicVolume(*LSlot);
+        return;
+    }
+    LSlot->fade.active = true;
+    LSlot->fade.from = LSlot->level;
+    LSlot->fade.to = clampLevel(ALevel);
+    LSlot->fade.duration = ADuration;
+}
+
+void sfx::Mixer::fadeIn(const MusicId AMusic, const sf::Time ADuration, const float ALevel, const bool ALoop)
+{
+    if (!isValid(AMusic))
+    {
+        return;
+    }
+    play(AMusic, 0.0f, ALoop);
+    fadeTo(AMusic, ALevel, ADuration);
+}
+
+void sfx::Mixer::fadeOut(const MusicId AMusic, const sf::Time ADuration)
+{
+    Impl::MusicSlot* LSlot = Impl::findSlot(m_impl->musics, AMusic);
+    if (LSlot == nullptr)
+    {
+        return;
+    }
+    if (ADuration <= sf::Time::Zero)
+    {
+        stop(AMusic);
+        LSlot->level = 0.0f;
+        m_impl->applyMusicVolume(*LSlot);
+        return;
+    }
+    fadeTo(AMusic, 0.0f, ADuration);
+    LSlot->fade.stopAtEnd = true;
+}
+
+bool sfx::Mixer::isFading(const MusicId AMusic) const
+{
+    const Impl::MusicSlot* LSlot = Impl::findSlot(m_impl->musics, AMusic);
+    return (LSlot != nullptr) && LSlot->fade.active;
+}
+
+void sfx::Mixer::update(const sf::Time AElapsed)
+{
+    if (AElapsed <= sf::Time::Zero)
+    {
+        return;
+    }
+    for (Impl::MusicSlot& LSlot : m_impl->musics)
+    {
+        // a fade moves while its music plays: a paused one waits
+        if (!LSlot.fade.active || !LSlot.music || (LSlot.music->getStatus() != sf::SoundSource::Status::Playing))
+        {
+            continue;
+        }
+        LSlot.fade.elapsed += AElapsed;
+        LSlot.level = fadeLevel(LSlot.fade.from, LSlot.fade.to, LSlot.fade.duration, LSlot.fade.elapsed);
+        m_impl->applyMusicVolume(LSlot);
+        if (LSlot.fade.elapsed >= LSlot.fade.duration)
+        {
+            const bool LStop = LSlot.fade.stopAtEnd;
+            LSlot.fade = {};
+            if (LStop)
+            {
+                LSlot.music->stop();
+            }
+        }
+    }
+}
+
+sfx::SoundId sfx::Mixer::loadSound(const std::string& APath)
+{
+    const std::string LKey = mixerFileKey(APath);
+    if (const std::optional<SoundId> LShared = Impl::share<SoundId>(m_impl->sounds, LKey))
+    {
+        return *LShared;
+    }
+    auto LBuffer = std::make_unique<sf::SoundBuffer>();
+    if (!LBuffer->loadFromFile(zipUtf8Path(zipResolve(APath))))
+    {
+        sfx::setError("sfx::Mixer: cannot load the sound \"{}\"", APath);
+        return {};
+    }
+    return m_impl->addSound(LKey, std::move(LBuffer));
+}
+
+sfx::SoundId sfx::Mixer::loadSound(sf::InputStream& AStream, const std::string& AName)
+{
+    const std::string LKey = mixerStreamKey(AName);
+    if (const std::optional<SoundId> LShared = Impl::share<SoundId>(m_impl->sounds, LKey))
+    {
+        return *LShared;
+    }
+    auto LBuffer = std::make_unique<sf::SoundBuffer>();
+    if (!LBuffer->loadFromStream(AStream))
+    {
+        sfx::setError("sfx::Mixer: cannot load the sound stream \"{}\"", AName);
+        return {};
+    }
+    return m_impl->addSound(LKey, std::move(LBuffer));
+}
+
+sfx::SoundId sfx::Mixer::loadSoundFromZip(const std::string& AArchive, const std::string& AEntry, const std::string& APassword)
+{
+    const std::string LKey = mixerZipKey(AArchive, AEntry, APassword);
+    if (const std::optional<SoundId> LShared = Impl::share<SoundId>(m_impl->sounds, LKey))
+    {
+        return *LShared;
+    }
+    ZipStream LZip;
+    if (!LZip.open(AArchive, AEntry, APassword))
+    {
+        sfx::setError("sfx::Mixer: cannot open the zip entry \"{}\" of \"{}\"", AEntry, AArchive);
+        return {};
+    }
+    auto LBuffer = std::make_unique<sf::SoundBuffer>();
+    // read whole: the entry closes when LZip goes out of scope
+    if (!LBuffer->loadFromStream(LZip))
+    {
+        sfx::setError("sfx::Mixer: cannot load the sound \"{}\" of \"{}\"", AEntry, AArchive);
+        return {};
+    }
+    return m_impl->addSound(LKey, std::move(LBuffer));
+}
+
+void sfx::Mixer::unload(const SoundId ASound)
+{
+    Impl::SoundSlot* LSlot = Impl::findSlot(m_impl->sounds, ASound);
+    if (LSlot == nullptr)
+    {
+        return;
+    }
+    LSlot->loads--;
+    if (LSlot->loads == 0)
+    {
+        m_impl->freeSound(ASound.slot);
+    }
+}
+
+sf::Time sfx::Mixer::getDuration(const SoundId ASound) const
+{
+    const Impl::SoundSlot* LSlot = Impl::findSlot(m_impl->sounds, ASound);
+    if (LSlot == nullptr)
+    {
+        return sf::Time::Zero;
+    }
+    return LSlot->buffer->getDuration();
+}
+
+void sfx::Mixer::unloadAll()
+{
+    for (std::size_t LIndex = 0; LIndex < m_impl->sounds.size(); LIndex++)
+    {
+        if (m_impl->sounds[LIndex].loads > 0)
+        {
+            m_impl->freeSound(LIndex);
+        }
+    }
+    for (Impl::MusicSlot& LSlot : m_impl->musics)
+    {
+        if (LSlot.loads > 0)
+        {
+            m_impl->freeMusic(LSlot);
+        }
+    }
+}
+
+sfx::VoiceId sfx::Mixer::play(const SoundId ASound, const PlayOptions& AOptions)
+{
+    Impl::SoundSlot* LSlot = Impl::findSlot(m_impl->sounds, ASound);
+    if (LSlot == nullptr)
+    {
+        return {};
+    }
+
+    // the rule sees every channel as it is now
+    std::vector<ChannelState> LStates(m_impl->channels.size());
+    for (std::size_t LIndex = 0; LIndex < m_impl->channels.size(); LIndex++)
+    {
+        const Impl::Channel& LChannel = m_impl->channels[LIndex];
+        LStates[LIndex].reserved = LChannel.reserved;
+        LStates[LIndex].busy = LChannel.sound.has_value() &&
+                               (LChannel.sound->getStatus() != sf::SoundSource::Status::Stopped);
+        LStates[LIndex].priority = LChannel.priority;
+        LStates[LIndex].order = LChannel.order;
+    }
+    const int LPick = pickChannel(LStates, AOptions.channel, AOptions.priority);
+    if (LPick < 0)
+    {
+        return {};
+    }
+
+    Impl::Channel& LChannel = m_impl->channels[static_cast<std::size_t>(LPick)];
+    m_impl->dropVoice(LChannel);
+    LChannel.sound.emplace(*LSlot->buffer);
+    LChannel.generation = mixerNextGeneration(LChannel.generation);
+    LChannel.soundSlot = ASound.slot;
+    LChannel.level = clampLevel(AOptions.level);
+    LChannel.priority = AOptions.priority;
+    LChannel.order = m_impl->nextOrder++;
+    LChannel.positioned = AOptions.position.has_value();
+    LChannel.position = AOptions.position.value_or(sf::Vector2f{});
+    LChannel.heldByPause = false;
+
+    // every value before the play starts: no glitch at its first samples
+    sf::Sound& LSound = *LChannel.sound;
+    LSound.setPitch(mixerPitchOk(AOptions.pitch) ? AOptions.pitch : 1.0f);
+    LSound.setPan(mixerPan(AOptions.pan));
+    LSound.setLooping(AOptions.loop);
+    LSound.setMinDistance(m_impl->minDistance);
+    LSound.setAttenuation(m_impl->attenuation);
+    // a position places it from its first sample; none = plain stereo, not
+    // placed at the listener's own spot
+    if (LChannel.positioned)
+    {
+        LSound.setPosition(toAudioSpace(LChannel.position));
+    }
+    LSound.setSpatializationEnabled(LChannel.positioned);
+    m_impl->applyVoiceVolume(LChannel);
+    LSound.play();
+    return VoiceId{static_cast<std::uint32_t>(LPick), LChannel.generation};
+}
+
+void sfx::Mixer::stop(const VoiceId AVoice)
+{
+    Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel != nullptr)
+    {
+        LChannel->sound->stop();
+        LChannel->heldByPause = false;
+    }
+}
+
+void sfx::Mixer::pause(const VoiceId AVoice)
+{
+    Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel == nullptr)
+    {
+        return;
+    }
+    if (LChannel->sound->getStatus() == sf::SoundSource::Status::Playing)
+    {
+        LChannel->sound->pause();
+    }
+    LChannel->heldByPause = false;
+}
+
+void sfx::Mixer::resume(const VoiceId AVoice)
+{
+    Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel == nullptr)
+    {
+        return;
+    }
+    if (LChannel->sound->getStatus() == sf::SoundSource::Status::Paused)
+    {
+        LChannel->sound->play();
+    }
+    LChannel->heldByPause = false;
+}
+
+sf::SoundSource::Status sfx::Mixer::getStatus(const VoiceId AVoice) const
+{
+    const Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel == nullptr)
+    {
+        return sf::SoundSource::Status::Stopped;
+    }
+    return LChannel->sound->getStatus();
+}
+
+void sfx::Mixer::setLevel(const VoiceId AVoice, const float ALevel)
+{
+    Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel != nullptr)
+    {
+        LChannel->level = clampLevel(ALevel);
+        m_impl->applyVoiceVolume(*LChannel);
+    }
+}
+
+float sfx::Mixer::getLevel(const VoiceId AVoice) const
+{
+    const Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel == nullptr)
+    {
+        return 0.0f;
+    }
+    return LChannel->level;
+}
+
+void sfx::Mixer::setPitch(const VoiceId AVoice, const float APitch)
+{
+    Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if ((LChannel != nullptr) && mixerPitchOk(APitch))
+    {
+        LChannel->sound->setPitch(APitch);
+    }
+}
+
+float sfx::Mixer::getPitch(const VoiceId AVoice) const
+{
+    const Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel == nullptr)
+    {
+        return 1.0f;
+    }
+    return LChannel->sound->getPitch();
+}
+
+void sfx::Mixer::setPan(const VoiceId AVoice, const float APan)
+{
+    Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel != nullptr)
+    {
+        LChannel->sound->setPan(mixerPan(APan));
+    }
+}
+
+float sfx::Mixer::getPan(const VoiceId AVoice) const
+{
+    const Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel == nullptr)
+    {
+        return 0.0f;
+    }
+    return LChannel->sound->getPan();
+}
+
+void sfx::Mixer::setLooping(const VoiceId AVoice, const bool ALoop)
+{
+    Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel != nullptr)
+    {
+        LChannel->sound->setLooping(ALoop);
+    }
+}
+
+bool sfx::Mixer::isLooping(const VoiceId AVoice) const
+{
+    const Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    return (LChannel != nullptr) && LChannel->sound->isLooping();
+}
+
+void sfx::Mixer::setPosition(const VoiceId AVoice, const sf::Vector2f APosition)
+{
+    Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel == nullptr)
+    {
+        return;
+    }
+    LChannel->positioned = true;
+    LChannel->position = APosition;
+    LChannel->sound->setPosition(toAudioSpace(APosition));
+    LChannel->sound->setSpatializationEnabled(true);
+}
+
+void sfx::Mixer::clearPosition(const VoiceId AVoice)
+{
+    Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel == nullptr)
+    {
+        return;
+    }
+    LChannel->positioned = false;
+    LChannel->position = {};
+    LChannel->sound->setSpatializationEnabled(false);
+}
+
+bool sfx::Mixer::hasPosition(const VoiceId AVoice) const
+{
+    const Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    return (LChannel != nullptr) && LChannel->positioned;
+}
+
+sf::Vector2f sfx::Mixer::getPosition(const VoiceId AVoice) const
+{
+    const Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel == nullptr)
+    {
+        return {};
+    }
+    return LChannel->position;
+}
+
+void sfx::Mixer::setMinDistance(const VoiceId AVoice, const float ADistance)
+{
+    Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if ((LChannel != nullptr) && (ADistance > 0.0f))
+    {
+        LChannel->sound->setMinDistance(ADistance);
+    }
+}
+
+float sfx::Mixer::getMinDistance(const VoiceId AVoice) const
+{
+    const Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel == nullptr)
+    {
+        return 0.0f;
+    }
+    return LChannel->sound->getMinDistance();
+}
+
+void sfx::Mixer::setMaxDistance(const VoiceId AVoice, const float ADistance)
+{
+    Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if ((LChannel != nullptr) && (ADistance > 0.0f))
+    {
+        LChannel->sound->setMaxDistance(ADistance);
+    }
+}
+
+float sfx::Mixer::getMaxDistance(const VoiceId AVoice) const
+{
+    const Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel == nullptr)
+    {
+        return 0.0f;
+    }
+    return LChannel->sound->getMaxDistance();
+}
+
+void sfx::Mixer::setAttenuation(const VoiceId AVoice, const float AAttenuation)
+{
+    Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if ((LChannel != nullptr) && (AAttenuation >= 0.0f))
+    {
+        LChannel->sound->setAttenuation(AAttenuation);
+    }
+}
+
+float sfx::Mixer::getAttenuation(const VoiceId AVoice) const
+{
+    const Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel == nullptr)
+    {
+        return 0.0f;
+    }
+    return LChannel->sound->getAttenuation();
+}
+
+void sfx::Mixer::setRelativeToListener(const VoiceId AVoice, const bool ARelative)
+{
+    Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    if (LChannel != nullptr)
+    {
+        LChannel->sound->setRelativeToListener(ARelative);
+    }
+}
+
+bool sfx::Mixer::isRelativeToListener(const VoiceId AVoice) const
+{
+    const Impl::Channel* LChannel = Impl::findVoice(m_impl->channels, AVoice);
+    return (LChannel != nullptr) && LChannel->sound->isRelativeToListener();
+}
+
+unsigned int sfx::Mixer::getChannelCount() const
+{
+    return static_cast<unsigned int>(m_impl->channels.size());
+}
+
+void sfx::Mixer::setReserved(const int AChannel, const bool AReserved)
+{
+    Impl::Channel* LChannel = m_impl->findChannel(AChannel, "setReserved");
+    if (LChannel != nullptr)
+    {
+        LChannel->reserved = AReserved;
+    }
+}
+
+bool sfx::Mixer::isReserved(const int AChannel) const
+{
+    const Impl::Channel* LChannel = m_impl->findChannel(AChannel);
+    return (LChannel != nullptr) && LChannel->reserved;
+}
+
+void sfx::Mixer::stopChannel(const int AChannel)
+{
+    Impl::Channel* LChannel = m_impl->findChannel(AChannel, "stopChannel");
+    if ((LChannel != nullptr) && LChannel->sound.has_value())
+    {
+        LChannel->sound->stop();
+        LChannel->heldByPause = false;
+    }
+}
+
+void sfx::Mixer::pauseChannel(const int AChannel)
+{
+    Impl::Channel* LChannel = m_impl->findChannel(AChannel, "pauseChannel");
+    if ((LChannel != nullptr) && LChannel->sound.has_value())
+    {
+        pause(VoiceId{static_cast<std::uint32_t>(AChannel), LChannel->generation});
+    }
+}
+
+void sfx::Mixer::resumeChannel(const int AChannel)
+{
+    Impl::Channel* LChannel = m_impl->findChannel(AChannel, "resumeChannel");
+    if ((LChannel != nullptr) && LChannel->sound.has_value())
+    {
+        resume(VoiceId{static_cast<std::uint32_t>(AChannel), LChannel->generation});
+    }
+}
+
+sfx::VoiceId sfx::Mixer::getVoice(const int AChannel) const
+{
+    const Impl::Channel* LChannel = m_impl->findChannel(AChannel);
+    if ((LChannel == nullptr) || !LChannel->sound.has_value())
+    {
+        return {};
+    }
+    return VoiceId{static_cast<std::uint32_t>(AChannel), LChannel->generation};
+}
+
+void sfx::Mixer::stopAll()
+{
+    m_impl->stopSoundGroup();
+    m_impl->stopMusicGroup();
+}
+
+void sfx::Mixer::stopAllSounds()
+{
+    m_impl->stopSoundGroup();
+}
+
+void sfx::Mixer::stopAllMusic()
+{
+    m_impl->stopMusicGroup();
+}
+
+void sfx::Mixer::pauseAll()
+{
+    m_impl->pauseSoundGroup();
+    m_impl->pauseMusicGroup();
+}
+
+void sfx::Mixer::resumeAll()
+{
+    m_impl->resumeSoundGroup();
+    m_impl->resumeMusicGroup();
+}
+
+void sfx::Mixer::pauseAllSounds()
+{
+    m_impl->pauseSoundGroup();
+}
+
+void sfx::Mixer::resumeAllSounds()
+{
+    m_impl->resumeSoundGroup();
+}
+
+void sfx::Mixer::pauseAllMusic()
+{
+    m_impl->pauseMusicGroup();
+}
+
+void sfx::Mixer::resumeAllMusic()
+{
+    m_impl->resumeMusicGroup();
+}
+
+void sfx::Mixer::setMasterLevel(const float ALevel)
+{
+    m_impl->master = clampLevel(ALevel);
+    m_impl->applyMaster();
+}
+
+float sfx::Mixer::getMasterLevel() const
+{
+    return m_impl->master;
+}
+
+void sfx::Mixer::setMusicLevel(const float ALevel)
+{
+    m_impl->musicGroup = clampLevel(ALevel);
+    for (Impl::MusicSlot& LSlot : m_impl->musics)
+    {
+        m_impl->applyMusicVolume(LSlot);
+    }
+}
+
+float sfx::Mixer::getMusicLevel() const
+{
+    return m_impl->musicGroup;
+}
+
+void sfx::Mixer::setSoundLevel(const float ALevel)
+{
+    m_impl->soundGroup = clampLevel(ALevel);
+    for (Impl::Channel& LChannel : m_impl->channels)
+    {
+        m_impl->applyVoiceVolume(LChannel);
+    }
+}
+
+float sfx::Mixer::getSoundLevel() const
+{
+    return m_impl->soundGroup;
+}
+
+void sfx::Mixer::setListenerPosition(const sf::Vector2f APosition)
+{
+    m_impl->listener = APosition;
+    m_impl->applyListener();
+}
+
+sf::Vector2f sfx::Mixer::getListenerPosition() const
+{
+    return m_impl->listener;
+}
+
+void sfx::Mixer::setDistanceModel(const float AMinDistance, const float AAttenuation)
+{
+    // NaN fails both tests: kept
+    if (AMinDistance > 0.0f)
+    {
+        m_impl->minDistance = AMinDistance;
+    }
+    if (AAttenuation >= 0.0f)
+    {
+        m_impl->attenuation = AAttenuation;
+    }
+}
+
+float sfx::Mixer::getDefaultMinDistance() const
+{
+    return m_impl->minDistance;
+}
+
+float sfx::Mixer::getDefaultAttenuation() const
+{
+    return m_impl->attenuation;
+}
+
+#pragma pop_macro("Status")
+
+namespace
+{
+
+#ifdef _WIN32
+
+std::wstring utf8ToWide(const std::string& AText)
+{
+    if (AText.empty())
+    {
+        return {};
+    }
+    const int LSize = MultiByteToWideChar(CP_UTF8, 0, AText.data(), static_cast<int>(AText.size()), nullptr, 0);
+    if (LSize <= 0)
+    {
+        return {};
+    }
+    std::wstring LWide(static_cast<std::size_t>(LSize), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, AText.data(), static_cast<int>(AText.size()), LWide.data(), LSize);
+    return LWide;
+}
+
+#else
+
+
+// Message lines wrapped at word breaks to AMaxWidth pixels (a word wider
+// than that keeps a line of its own)
+std::vector<std::string> wrapMessage(const sf::Font& AFont, const unsigned int ASize, const std::string& AMessage,
+                                     const float AMaxWidth)
+{
+    std::vector<std::string> LLines;
+    std::size_t LStart = 0;
+    while (LStart <= AMessage.size())
+    {
+        std::size_t LBreak = AMessage.find('\n', LStart);
+        if (LBreak == std::string::npos)
+        {
+            LBreak = AMessage.size();
+        }
+        const std::string LParagraph = AMessage.substr(LStart, LBreak - LStart);
+        std::string LLine;
+        std::size_t LWordStart = 0;
+        while (LWordStart <= LParagraph.size())
+        {
+            std::size_t LWordEnd = LParagraph.find(' ', LWordStart);
+            if (LWordEnd == std::string::npos)
+            {
+                LWordEnd = LParagraph.size();
+            }
+            const std::string LWord = LParagraph.substr(LWordStart, LWordEnd - LWordStart);
+            const std::string LTry = LLine.empty() ? LWord : LLine + " " + LWord;
+            const sf::Text LMeasure(AFont, sf::String::fromUtf8(LTry.begin(), LTry.end()), ASize);
+            if (!LLine.empty() && (LMeasure.getLocalBounds().size.x > AMaxWidth))
+            {
+                LLines.push_back(LLine);
+                LLine = LWord;
+            }
+            else
+            {
+                LLine = LTry;
+            }
+            LWordStart = LWordEnd + 1;
+        }
+        LLines.push_back(LLine);
+        LStart = LBreak + 1;
+    }
+    return LLines;
+}
+
+sf::Text makeDialogText(const sf::Font& AFont, const std::string& AText, const unsigned int ASize, const sf::Color& AColor)
+{
+    sf::Text LText(AFont, sf::String::fromUtf8(AText.begin(), AText.end()), ASize);
+    LText.setFillColor(AColor);
+    return LText;
+}
+
+// The Linux message box: a small SFML window, sized by the desktop's scale
+void showMessageDialog(const std::string& ATitle, const std::string& AMessage,
+                       const sfx::MessageBoxType AType)
+{
+    sf::Font LFont;
+    if (!sfx::openDefaultFont(LFont))
+    {
+        return;
+    }
+
+    float LScale = 1.0f;
+    Display* LDisplay = XOpenDisplay(nullptr);
+    if (LDisplay != nullptr)
+    {
+        LScale = static_cast<float>(x11Dpi(LDisplay)) / static_cast<float>(kBaseDpi);
+        XCloseDisplay(LDisplay);
+    }
+    if (LScale < 1.0f)
+    {
+        LScale = 1.0f;
+    }
+
+    const unsigned int LTextSize = static_cast<unsigned int>(std::lround(15.0f * LScale));
+    const float LPad = 20.0f * LScale;
+    const float LIcon = 36.0f * LScale;
+    const sf::Vector2f LButton(88.0f * LScale, 30.0f * LScale);
+    const float LLineSpacing = LFont.getLineSpacing(LTextSize);
+
+    const std::vector<std::string> LLines = wrapMessage(LFont, LTextSize, AMessage, 480.0f * LScale);
+    float LTextWidth = 0.0f;
+    for (const std::string& LLine : LLines)
+    {
+        const sf::Text LMeasure = makeDialogText(LFont, LLine, LTextSize, sf::Color::Black);
+        LTextWidth = std::max(LTextWidth, LMeasure.getLocalBounds().size.x);
+    }
+    const float LTextHeight = LLineSpacing * static_cast<float>(LLines.size());
+    const float LBodyHeight = std::max(LIcon, LTextHeight);
+    const float LWidth = std::max(300.0f * LScale, LPad + LIcon + LPad + LTextWidth + LPad);
+    const float LHeight = LPad + LBodyHeight + LPad + LButton.y + LPad;
+
+    const sf::Vector2u LSize(static_cast<unsigned int>(std::lround(LWidth)),
+                             static_cast<unsigned int>(std::lround(LHeight)));
+    sf::RenderWindow LWindow(sf::VideoMode(LSize), sf::String::fromUtf8(ATitle.begin(), ATitle.end()),
+                             sf::Style::Titlebar | sf::Style::Close);
+    LWindow.setFramerateLimit(30);
+    const sf::Vector2u LDesktop = sf::VideoMode::getDesktopMode().size;
+    LWindow.setPosition(sf::Vector2i(static_cast<int>(LDesktop.x / 2) - static_cast<int>(LSize.x / 2),
+                                     static_cast<int>(LDesktop.y / 2) - static_cast<int>(LSize.y / 2)));
+
+    // icon colour and glyph by type
+    sf::Color LIconColor(0, 120, 215);
+    std::string LGlyph = "i";
+    if (AType == sfx::MessageBoxType::Warning)
+    {
+        LIconColor = sf::Color(230, 160, 0);
+        LGlyph = "!";
+    }
+    else if (AType == sfx::MessageBoxType::Error)
+    {
+        LIconColor = sf::Color(200, 40, 40);
+        LGlyph = "x";
+    }
+
+    const sf::FloatRect LButtonRect({LWidth - LPad - LButton.x, LHeight - LPad - LButton.y}, LButton);
+    while (LWindow.isOpen())
+    {
+        while (const std::optional<sf::Event> LEvent = LWindow.pollEvent())
+        {
+            if (LEvent->is<sf::Event::Closed>())
+            {
+                LWindow.close();
+            }
+            else if (const auto* LKey = LEvent->getIf<sf::Event::KeyPressed>())
+            {
+                if ((LKey->code == sf::Keyboard::Key::Enter) || (LKey->code == sf::Keyboard::Key::Escape) ||
+                    (LKey->code == sf::Keyboard::Key::Space))
+                {
+                    LWindow.close();
+                }
+            }
+            else if (const auto* LMouse = LEvent->getIf<sf::Event::MouseButtonPressed>())
+            {
+                const sf::Vector2f LAt = LWindow.mapPixelToCoords(LMouse->position);
+                if ((LMouse->button == sf::Mouse::Button::Left) && LButtonRect.contains(LAt))
+                {
+                    LWindow.close();
+                }
+            }
+        }
+        if (!LWindow.isOpen())
+        {
+            break;
+        }
+
+        LWindow.clear(sf::Color(240, 240, 240));
+
+        sf::CircleShape LCircle(LIcon / 2.0f);
+        LCircle.setFillColor(LIconColor);
+        LCircle.setPosition({LPad, LPad});
+        LWindow.draw(LCircle);
+        sf::Text LGlyphText = makeDialogText(LFont, LGlyph, static_cast<unsigned int>(std::lround(LIcon * 0.7f)),
+                                             sf::Color::White);
+        const sf::FloatRect LGlyphBounds = LGlyphText.getLocalBounds();
+        LGlyphText.setPosition({LPad + (LIcon - LGlyphBounds.size.x) / 2.0f - LGlyphBounds.position.x,
+                                LPad + (LIcon - LGlyphBounds.size.y) / 2.0f - LGlyphBounds.position.y});
+        LWindow.draw(LGlyphText);
+
+        float LY = LPad + (LBodyHeight - LTextHeight) / 2.0f;
+        for (const std::string& LLine : LLines)
+        {
+            sf::Text LText = makeDialogText(LFont, LLine, LTextSize, sf::Color(20, 20, 20));
+            LText.setPosition({LPad + LIcon + LPad, std::round(LY)});
+            LWindow.draw(LText);
+            LY += LLineSpacing;
+        }
+
+        sf::RectangleShape LButtonShape(LButton);
+        LButtonShape.setPosition(LButtonRect.position);
+        LButtonShape.setFillColor(sf::Color(225, 225, 225));
+        LButtonShape.setOutlineColor(sf::Color(0, 120, 215));
+        LButtonShape.setOutlineThickness(std::max(1.0f, LScale));
+        LWindow.draw(LButtonShape);
+        sf::Text LOk = makeDialogText(LFont, "OK", LTextSize, sf::Color(20, 20, 20));
+        const sf::FloatRect LOkBounds = LOk.getLocalBounds();
+        LOk.setPosition({std::round(LButtonRect.position.x + (LButton.x - LOkBounds.size.x) / 2.0f - LOkBounds.position.x),
+                         std::round(LButtonRect.position.y + (LButton.y - LOkBounds.size.y) / 2.0f - LOkBounds.position.y)});
+        LWindow.draw(LOk);
+
+        LWindow.display();
+    }
+}
+
+#endif
+
+} // namespace
+
+void sfx::messageBox(const std::string& ATitle, const std::string& AMessage, const MessageBoxType AType)
+{
+    std::fflush(stdout);
+#ifdef _WIN32
+    UINT LFlags = MB_OK | MB_ICONINFORMATION;
+    if (AType == MessageBoxType::Warning)
+    {
+        LFlags = MB_OK | MB_ICONWARNING;
+    }
+    else if (AType == MessageBoxType::Error)
+    {
+        LFlags = MB_OK | MB_ICONERROR;
+    }
+    MessageBoxW(nullptr, utf8ToWide(AMessage).c_str(), utf8ToWide(ATitle).c_str(), LFlags);
+#else
+    showMessageDialog(ATitle, AMessage, AType);
+#endif
+}
+
+end.

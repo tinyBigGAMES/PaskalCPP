@@ -20,6 +20,10 @@
   archives from PaskalCPP (zip.h: zipOpen64 / zipOpenNewFileInZip3_64 ...,
   unzip.h: unzOpen64 / unzOpenCurrentFilePassword ...), with the
   traditional PKWARE password encryption. Built on zlib, which it imports.
+  Paths: zipOpen64 / unzOpen64 read a path in the ANSI code page on Windows;
+  for a UTF-8 path (a PaskalCPP string) on every target open with
+  zipOpen2_64 / unzOpen2_64 and the set fill_utf8_filefunc64 fills
+  (ioutf8.h, PaskalCPP-Libs' addition: Windows through minizip's iowin32).
   A self-describing vendor module: it owns every include path, library
   path and link library it needs, per official target.
 ==============================================================================*/
@@ -38,6 +42,8 @@ module unit minizip;
   @message error "minizip_import: unsupported target";
 @endif
 
+// minizip_utf8: PaskalCPP-Libs' ioutf8.h set (UTF-8 paths on every target)
+@linklibrary "minizip_utf8";
 @linklibrary "minizip";
 
 // minizip's CMake gives its users _LARGEFILE64_SOURCE=1 on both targets and
@@ -52,5 +58,6 @@ cpp header;
 
 #include "zip.h"
 #include "unzip.h"
+#include "ioutf8.h"
 
 end.

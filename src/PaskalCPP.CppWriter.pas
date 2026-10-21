@@ -137,6 +137,14 @@ type
     // Range.StartLine + k, one span per non-empty line on ANode
     procedure WriteVerbatim(const AVerbatim: TPCVerbatim; const ANode: TPCNode);
 
+    // PLAN-RESDATA A3: a preprocessing line the emitter generates (#embed)
+    // for the current .pcpp line: its own C++ line with its #line, written
+    // past this file's and the peer's text on the .pcpp line (spaces before
+    // '#' change nothing), one span on ANode. The .pcpp line stays open: the
+    // next text starts a new C++ line (its own #line) past this one, so a
+    // (.pcpp line, column) still lies in one text only (V1)
+    procedure WritePreprocLine(const AText: string; const ANode: TPCNode);
+
     // A borrowed spelling: text another node's spelling already owns (the
     // routine's return type in a guard's std::optional, a for iterator's
     // type). Between the two calls nothing records a span; they nest
@@ -550,6 +558,22 @@ begin
     FLineOpen := False;
     FLineClosed := True;
   end;
+end;
+
+procedure TPCCppWriter.WritePreprocLine(const AText: string; const ANode: TPCNode);
+begin
+  // Unlike a verbatim # line (its columns are the person's own), a generated
+  // one may move right: its span is recorded where it lands
+  if AText.Contains(#10) or AText.Contains(#13) then
+    raise EInvalidOpException.CreateFmt(RSCwrLineBreak, [FSourceLine]);
+  if FLineClosed then
+    raise EInvalidOpException.CreateFmt(RSCwrLineClosed, [FSourceLine]);
+  if FSourceLine = 0 then
+    raise EInvalidOpException.Create(RSCwrLineZero);
+  DoStartLine(True);
+  DoAppendText(DoUtf8(AText), ANode, True);
+  // The # line ends here: the next write for this .pcpp line opens a new one
+  FLineOpen := False;
 end;
 
 procedure TPCCppWriter.BeginBorrowed();

@@ -30,7 +30,7 @@ PaskalCPP's syntax follows Pascal and Oberon: blocks open and close with words, 
 
 The compiler writes a C++23 header and source for each module and builds them with the bundled Zig toolchain (clang) through `zig build`, which caches compiles. One source builds an executable (`module exe`), a shared library (`module dll`) or a static library (`module lib`), for x86_64-windows-gnu and x86_64-linux-gnu, from Windows.
 
-C and C++ are part of the language. A library is used by `#include`-ing its header in the `.pcpp` file and calling it: there is no import, binding or wrapper layer. Its names are opaque to PaskalCPP and checked by clang.
+C and C++ are part of the language. A library is used by `#include`-ing its header in the `.pcpp` file and calling it: there is no binding or wrapper layer. Its names are opaque to PaskalCPP and checked by clang. For the libraries PaskalCPP bundles, a vendor unit also sets up the include path, library path and link libraries on each target, so a program writes `import raylib;` and calls raylib's own API.
 
 ## 🚀 A first look
 
@@ -103,6 +103,7 @@ With no `@optimize` a build is `debug`, and a debug build prints the runtime's h
 - **Errors speak PaskalCPP.** A mistake on a PaskalCPP construct is reported in PaskalCPP's words and types. What only C++ can judge is clang's or the linker's own message, mapped back to the `.pcpp` file, line and column.
 - **The toolchain is in the box.** Zig and clang ship in the `res` folder beside `pcpp.exe`: one `pcpp` command turns a source file into a native binary.
 - **Two targets, one source.** `@target` or `pcpp -t` picks x86_64-windows-gnu or x86_64-linux-gnu; `pcpp <file> -r` runs a Linux build through WSL.
+- **Libraries in the box.** The standard library holds PaskalCPP's own units (`SysUtils`, `Math`, `Console`, `ResData`, `sfml_ext`) and vendor units for `box2d`, `cgltf`, `glfw`, `miniaudio`, `minizip`, `pl_mpeg`, `raylib`, `rlimgui`, `sdl3`, `sdl_gp`, `sfml`, `zlib` and seventeen stb libraries: `import sfml;` and the library is ready on both targets. The bundled examples (`res\examples`) build on both.
 
 ## 🛠️ Tools
 
@@ -132,7 +133,7 @@ For contributors who want to change the compiler itself.
    ```
 
 2. Download the latest release and unzip it into the repo folder, so the toolchain, the libraries and the binaries are in place. A build from source needs them too.
-3. Run `bin\build-pcpp.cmd` (it loads RAD Studio's `rsvars.bat` from `Studio\37.0`: edit that line for another install), or open `projects\PaskalCPP.groupproj` in the Delphi IDE and build the `pcpp` and `testbed` projects. This produces `pcpp.exe` and the test runner `testbed.exe` in `bin\`. `bin\testbed.exe -all` runs the test suite and exits 0 when it passes; `bin\testbed.exe -h` lists the rest.
+3. Run `bin\build-pcpp.cmd` (it loads RAD Studio's `rsvars.bat` from `Studio\37.0`: edit that line for another install), or open `projects\PaskalCPP.groupproj` in the Delphi IDE and build the `pcpp` project. This produces `pcpp.exe` in `bin\`. The test runner is not part of this release; it returns in a later update.
 
 ## ❓ FAQ
 

@@ -27,11 +27,11 @@
        within a moment; the others stay.
     4. Undo the fix: the squiggle comes back.
     5. The disk counts too: open dll_build.pcpp and leave it open. Delete
-       repo\bin\output\dll_build_dll in Explorer: within about two seconds
-       its @addlibrarypath and @copydll lines are underlined (SM0106 /
-       SM0105), and the delete itself succeeds (nothing holds the folder).
-       Build dll_build_dll.pcpp (Ctrl+B): both squiggles in dll_build.pcpp
-       go, without touching it.
+       repo\bin\output\bin\dll_build_dll.dll in Explorer: within about two
+       seconds its Windows @copydll line is underlined (SM0105), and the
+       delete itself succeeds (nothing holds the file).
+       Build dll_build_dll.pcpp (Ctrl+B): the squiggle in dll_build.pcpp
+       goes, without touching it.
 *******************************************************************************/
 
 module exe lsp_diagnostics;

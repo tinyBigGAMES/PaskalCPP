@@ -18,15 +18,17 @@
   @exeicon "<path>"; stamps an .ico file into the built program as its icon
   (BNF.md sec 2). The path must name an existing file; it resolves once, as
   every path directive ($P: = the folder pcpp.exe is in; a plain relative
-  path = the current folder). An icon is a Windows resource of an executable:
-  on a dll, a lib or a target that is not Windows it is a warning and is not
-  used. Main module only, at most once.
+  path = the current folder). An icon belongs to an executable: on a dll or
+  a lib it is a warning and is not used. On Windows it is stamped as the
+  exe's icon resource; on a target that is not Windows the compiler builds
+  its largest image in as the built-in data entry "pcpp/exeicon"
+  (dir_exeicon_linux.pcpp). Main module only, at most once.
 
   This program stamps res\assets\icons\paskalcpp.ico (13 images) and reads
   its own icon resources back: one icon group holding the file's images, in
   the file's order, each width x height / bits per pixel.
 
-  How to check, from repo\bin (Windows only: see dir_exeicon_err_linux.pcpp):
+  How to check, from repo\bin (Windows only: Linux is dir_exeicon_linux.pcpp):
     pcpp res\tests\dir_exeicon.pcpp -r
   EXPECT:
     icon groups: 1
@@ -43,7 +45,7 @@
     dir_exeicon_err_missing.pcpp  an icon file that does not exist
     dir_exeicon_err_path.pcpp     a path no file can have (a '<' in it)
     dir_exeicon_err_dll.pcpp      @exeicon on a dll (a warning)
-    dir_exeicon_err_linux.pcpp    @exeicon for Linux (a warning)
+  and dir_exeicon_linux.pcpp's break step (an icon that holds no image).
   The prologue rules (once, main module only) are dir_prologue.pcpp's break
   steps.
 *******************************************************************************/

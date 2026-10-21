@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_resdata_unit.pcpp - the unit std_resdata.pcpp imports: it adds the data
+  key "unit" (std_resdata_unit.txt, 9 bytes), which lands in the program
+  beside the program's own keys. Nothing to check here: std_resdata.pcpp
+  checks it.
+*******************************************************************************/
+
+module unit std_resdata_unit;
+@addresdata "unit" "$P:res/tests/std_resdata_unit.txt";
+
+import ResData;
+
+// The unit's own key, read from inside the unit
+exported routine UnitSize(): int64;
+begin
+  return FindResData("unit").Size;
+end;
+
+end.

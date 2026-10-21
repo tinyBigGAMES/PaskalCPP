@@ -164,6 +164,24 @@ const
   // paths: none'): either is taken, closed by the same character.
   PC_ZIG_MISSING_LIB_KIND = ' system library ';
 
+  { PC_LINKER_DUPLICATE_SYMBOL }
+  // lld's error for a symbol two linked inputs define, after its linker label,
+  // the same on COFF and ELF (probed 2026-10-19, zig 0.17.0: scripts\vendor\
+  // resdata_a4b\raw_win.txt / raw_linux.txt): 'duplicate symbol: <name>', no
+  // location; each holder follows as a note (PC_LINKER_DEFINED_AT)
+  PC_LINKER_DUPLICATE_SYMBOL = 'duplicate symbol: ';
+
+  { PC_LINKER_DEFINED_AT }
+  // A duplicate symbol's note that starts a holder. lld-link: 'defined at
+  // <object>' or 'defined at <archive>(<member>)'; ld.lld: 'defined at
+  // <file>:<line> (<path>:<line>)' when the object has line info, then a
+  // further note '<object>:(<section>)[ in archive <path>]'
+  PC_LINKER_DEFINED_AT = 'defined at ';
+
+  { PC_LINKER_IN_ARCHIVE }
+  // ld.lld's holder note: the archive the object came from
+  PC_LINKER_IN_ARCHIVE = ' in archive ';
+
 type
 
   { TPCBuildNote }
@@ -190,6 +208,11 @@ type
     // (PC_ZIG_MISSING_LIB_PREFIX): the library's name, which the frontend
     // locates (TPCLibraryLocator); '' for any other diagnostic
     LibraryName: string;
+    // A location-less duplicate-symbol linker error (PC_LINKER_DUPLICATE_SYMBOL):
+    // the symbol, and per holder the archive file name it came from, bare ('' =
+    // an object of this build), in the linker's order; '' / nil otherwise
+    DuplicateSymbol: string;
+    DuplicateArchives: TArray<string>;
     // clang's warning group as the .dia names it (DIAG_FLAG, no -W); ''
     // = none or a diagnostic read from zig's lines (O13b)
     FlagText: string;
@@ -241,6 +264,17 @@ type
     const AEvaluated: string; const AFlag: string; out ACode: string; out AText: string;
     out AOutFilename: string; out AOutLine: UInt64; out AOutColumn: UInt64): Boolean;
 
+  { TPCDuplicateSymbolCheck }
+  // A duplicate symbol the frontend defined on purpose (PLAN-RESDATA A4b: a
+  // built-in data key's symbol, which a separately built library holds too).
+  // ASymbol and AArchives as TPCBuildDiag holds them. True = the frontend's:
+  // report ACode / AText at AOut* ('' = no location) with ANotes, the linker's
+  // notes not shown (they name object files). False = reported as the linker's
+  TPCDuplicateSymbolCheck = reference to function(const ASymbol: string;
+    const AArchives: TArray<string>; out ACode: string; out AText: string;
+    out AOutFilename: string; out AOutLine: UInt64; out AOutColumn: UInt64;
+    out ANotes: TArray<TPCBuildNote>): Boolean;
+
   { TPCBuildOutputFilter }
   // zig build output lines -> captures + unrecognised lines. Pure: reports
   // nothing. Init before every build; Finish after its last line.
@@ -257,6 +291,9 @@ type
     FLinkerPending: Boolean;
     FLinkerMsg: string;
     FLinkerTail: Boolean;
+    // A pending duplicate-symbol error's holders, one per 'defined at' note
+    // (TPCBuildDiag.DuplicateArchives)
+    FLinkerArchives: TArray<string>;
 
     // Inside a step's child stderr the build runner re-printed ('error: error:
     // ...'): its further lines come indented by PC_ZIG_FALLBACK_INDENT
@@ -278,6 +315,7 @@ type
     function DoChildLine(const ALine: string): Boolean;
     function DoClangLine(const ALine: string): Boolean;
     function DoLinkerNote(const ALine: string): Boolean;
+    procedure DoDuplicateHolderNote(const AText: string);
     procedure DoLinkerCommit(const AFilename: string; const ALine: UInt64);
     procedure DoCapture(const AFilename: string; const ALine: UInt64;
       const AColumn: UInt64; const ASeverity: TErrorSeverity;
@@ -321,6 +359,7 @@ type
     FLocator: TPCLibraryLocator;
     FGeneratedFileTest: TPCGeneratedFileTest;
     FFrontendCheck: TPCFrontendCheck;
+    FDuplicateSymbolCheck: TPCDuplicateSymbolCheck;
     FCommitted: TList<TPCBuildDiag>;
     FErrorsReported: Integer;
 
@@ -337,6 +376,8 @@ type
     class function DoEvaluatedText(const ADiag: TPCBuildDiag): string; static;
     function DoFrontendCheck(const ADiag: TPCBuildDiag; var AKey: TPCBuildDiag;
       out ACode: string): Boolean;
+    function DoDuplicateCheck(const ADiag: TPCBuildDiag; var AKey: TPCBuildDiag;
+      out ACode: string; out ANotes: TArray<TPCBuildNote>): Boolean;
     function DoFirstReport(const AKey: TPCBuildDiag): Boolean;
     procedure DoReport(const ADiag: TPCBuildDiag);
   public
@@ -353,6 +394,9 @@ type
       const ALocator: TPCLibraryLocator;
       const AGeneratedFileTest: TPCGeneratedFileTest;
       const AFrontendCheck: TPCFrontendCheck);
+
+    // Kept across commits; nil = no frontend owns a duplicate symbol
+    procedure SetDuplicateSymbolCheck(const ACheck: TPCDuplicateSymbolCheck);
 
     // Errors (not warnings) the last Commit reported
     function ErrorsReported(): Integer;
@@ -407,6 +451,24 @@ begin
   if AMessage.IndexOf(']', LPos) <> AMessage.Length - 1 then
     Exit;
   Result := AMessage.Substring(0, LPos);
+end;
+
+function DoDuplicateSymbolName(const AMessage: string): string;
+begin
+  // The symbol lld's duplicate-symbol error names; '' for any other message
+  Result := '';
+  if AMessage.StartsWith(PC_LINKER_DUPLICATE_SYMBOL) then
+    Result := AMessage.Substring(Length(PC_LINKER_DUPLICATE_SYMBOL)).Trim();
+end;
+
+function DoBareFileName(const APath: string): string;
+var
+  LCut: Integer;
+begin
+  // A linker's file text after its last folder separator, either slash (text
+  // only: it names a file the linker read, never one opened here)
+  LCut := APath.LastIndexOfAny(['\', '/']);
+  Result := APath.Substring(LCut + 1).Trim();
 end;
 
 function DoMissingLibraryName(const AMessage: string): string;
@@ -558,6 +620,7 @@ begin
   FLinkerPending := False;
   FLinkerMsg := '';
   FLinkerTail := False;
+  FLinkerArchives := nil;
   FInChildStderr := False;
   FCaptures.Clear();
   FUnknown.Clear();
@@ -779,6 +842,13 @@ begin
   if not FLinkerPending then
     Exit;
 
+  // A duplicate symbol's notes name its holders, never a source line
+  if FLinkerMsg.StartsWith(PC_LINKER_DUPLICATE_SYMBOL) then
+  begin
+    DoDuplicateHolderNote(LRef.Substring(5).Trim());
+    Exit;
+  end;
+
   // 'referenced by <path>:<line>' locates it; an object-file reference
   // ('...a.obj:(main)', '...a.o:_main') carries no source line, skipped
   LRef := LRef.Substring(5).Trim();
@@ -805,12 +875,53 @@ procedure TPCBuildOutputFilter.DoLinkerCommit(const AFilename: string;
   const ALine: UInt64);
 var
   LMessage: string;
+  LArchives: TArray<string>;
+  LDiag: TPCBuildDiag;
 begin
   // Cleared first: the capture below must not see a pending linker error
   LMessage := FLinkerMsg;
+  LArchives := FLinkerArchives;
   FLinkerPending := False;
   FLinkerMsg := '';
+  FLinkerArchives := nil;
   DoCapture(AFilename, ALine, 0, esError, LMessage);
+
+  // A duplicate symbol keeps the holders its notes named
+  LDiag := FCaptures.Last;
+  if LDiag.DuplicateSymbol <> '' then
+  begin
+    LDiag.DuplicateArchives := LArchives;
+    FCaptures[FCaptures.Count - 1] := LDiag;
+  end;
+end;
+
+procedure TPCBuildOutputFilter.DoDuplicateHolderNote(const AText: string);
+var
+  LRest: string;
+  LOpen: Integer;
+  LArchive: string;
+  LIndex: Integer;
+begin
+  // One holder per 'defined at' note. lld-link names an archive member
+  // '<archive>(<member>)' with no blank before the '(' (an object of this
+  // build: no archive); ld.lld's 'defined at <file>:<line> (<path>:<line>)'
+  // has one, and names the archive in a further note (PC_LINKER_IN_ARCHIVE)
+  if AText.StartsWith(PC_LINKER_DEFINED_AT) then
+  begin
+    LRest := AText.Substring(Length(PC_LINKER_DEFINED_AT)).Trim();
+    LArchive := '';
+    LOpen := LRest.LastIndexOf('(');
+    if LRest.EndsWith(')') and (LOpen > 0) and (LRest.Chars[LOpen - 1] <> ' ') then
+      LArchive := DoBareFileName(LRest.Substring(0, LOpen));
+    FLinkerArchives := FLinkerArchives + [LArchive];
+    Exit;
+  end;
+
+  LIndex := AText.IndexOf(PC_LINKER_IN_ARCHIVE);
+  if (LIndex < 0) or (Length(FLinkerArchives) = 0) then
+    Exit;
+  FLinkerArchives[High(FLinkerArchives)] :=
+    DoBareFileName(AText.Substring(LIndex + Length(PC_LINKER_IN_ARCHIVE)).Trim());
 end;
 
 procedure TPCBuildOutputFilter.DoCapture(const AFilename: string;
@@ -831,7 +942,10 @@ begin
   // Only a location-less error can be zig's missing-library one: the
   // frontend gives it the location of the library's naming at the commit
   if AFilename = '' then
+  begin
     LDiag.LibraryName := DoMissingLibraryName(AMessage);
+    LDiag.DuplicateSymbol := DoDuplicateSymbolName(AMessage);
+  end;
   FCaptures.Add(LDiag);
 end;
 
@@ -1083,6 +1197,7 @@ begin
   FCommitted := TList<TPCBuildDiag>.Create();
   FTranslator := nil;
   FFrontendCheck := nil;
+  FDuplicateSymbolCheck := nil;
   FErrorsReported := 0;
 end;
 
@@ -1322,6 +1437,42 @@ begin
   Result := True;
 end;
 
+procedure TPCBuildOutputCommit.SetDuplicateSymbolCheck(const ACheck: TPCDuplicateSymbolCheck);
+begin
+  FDuplicateSymbolCheck := ACheck;
+end;
+
+function TPCBuildOutputCommit.DoDuplicateCheck(const ADiag: TPCBuildDiag;
+  var AKey: TPCBuildDiag; out ACode: string; out ANotes: TArray<TPCBuildNote>): Boolean;
+var
+  LCode: string;
+  LText: string;
+  LOutFilename: string;
+  LOutLine: UInt64;
+  LOutColumn: UInt64;
+begin
+  // True = a duplicate symbol the frontend defined (A4b): AKey takes its
+  // location ('' = none) and message, ACode its code, ANotes its notes
+  Result := False;
+  ACode := PC_ERR_BUILDOUTPUT_TOOLDIAG;
+  ANotes := nil;
+  if (not Assigned(FDuplicateSymbolCheck)) or (ADiag.DuplicateSymbol = '') then
+    Exit;
+  if not FDuplicateSymbolCheck(ADiag.DuplicateSymbol, ADiag.DuplicateArchives, LCode,
+    LText, LOutFilename, LOutLine, LOutColumn, ANotes) then
+  begin
+    ANotes := nil;
+    Exit;
+  end;
+
+  AKey.Filename := LOutFilename;
+  AKey.Line := LOutLine;
+  AKey.Column := LOutColumn;
+  AKey.MessageText := LText;
+  ACode := LCode;
+  Result := True;
+end;
+
 function TPCBuildOutputCommit.DoFirstReport(const AKey: TPCBuildDiag): Boolean;
 var
   LI: Integer;
@@ -1356,6 +1507,8 @@ var
   LRange: TSourceRange;
   LCode: string;
   LIsCheck: Boolean;
+  LIsDuplicate: Boolean;
+  LDuplicateNotes: TArray<TPCBuildNote>;
 begin
   // clang's stop marker under -ferror-limit (no location): not a diagnostic
   if (ADiag.Filename = '') and (ADiag.MessageText = PC_CLANG_STOP_MARKER) then
@@ -1376,8 +1529,11 @@ begin
   LKey.Severity := ADiag.Severity;
   LKey.MessageText := ADiag.MessageText;
   LIsCheck := DoFrontendCheck(ADiag, LKey, LCode);
+  // A built-in data key's symbol a separately built library holds too: the
+  // frontend's report and notes (PLAN-RESDATA A4b)
+  LIsDuplicate := (not LIsCheck) and DoDuplicateCheck(ADiag, LKey, LCode, LDuplicateNotes);
   // A frontend check's location is already the frontend's
-  if not LIsCheck then
+  if not (LIsCheck or LIsDuplicate) then
   begin
     if LKey.Filename <> '' then
       DoTranslate(LKey.Filename, LKey.Line, LKey.Column)
@@ -1409,6 +1565,21 @@ begin
     Exit;
   if LIsCheck then
     Exit;
+  // The frontend's notes are its own locations already
+  if LIsDuplicate then
+  begin
+    for LI := 0 to High(LDuplicateNotes) do
+    begin
+      LRange.Clear();
+      LRange.Filename := LDuplicateNotes[LI].Filename;
+      LRange.StartLine := LDuplicateNotes[LI].Line;
+      LRange.StartColumn := LDuplicateNotes[LI].Column;
+      LRange.EndLine := LDuplicateNotes[LI].Line;
+      LRange.EndColumn := LDuplicateNotes[LI].Column;
+      FErrors.AddRelated(LRange, LDuplicateNotes[LI].MessageText);
+    end;
+    Exit;
+  end;
 
   // Notes map back to the frontend's source like the diagnostic does
   for LI := 0 to High(ADiag.Notes) do

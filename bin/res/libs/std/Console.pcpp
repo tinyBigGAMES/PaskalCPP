@@ -1,0 +1,2121 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  Console.pcpp - the program's console: `import Console;` adds text and VT
+  escape sequences on standard output and the keyboard on standard input:
+  WriteLn("{} of {}", 3, 10).
+
+  Console writes to the program's standard output: formatted Write /
+  WriteLn (as FormatStr), the cursor (0-based positions, moves, save /
+  restore, hide / show), clearing, scrolling, inserting / deleting lines,
+  bold and colours (the 16 standard ones, the 256-colour palette or any
+  24-bit Rgb), the title and the terminal's size; text padded / aligned by
+  display columns (wide characters count 2), rules, a progress bar and a
+  spinner; it reads a key, waits for one or for Enter, and pauses before a
+  console that closes with the program. Text is always written; escape
+  sequences only on a terminal by default (a file or a pipe gets the text
+  alone; SetEscapeMode changes that). The Csi consts and routines give the
+  sequences to a program that writes them itself. sfml_ext converts between
+  Rgb and sf::Color (sfx::fromSf / sfx::toSf).
+==============================================================================*/
+
+module unit Console;
+
+import
+  SysUtils;
+
+// Private: the OS calls and the byte work, this unit's own translation unit.
+// The routines below wrap them; every helper is named apart from the unit's
+// exported names (a body in the unit's namespace would find those first).
+cpp source;
+
+#include <atomic>
+#include <cstdint>
+#include <cstdio>
+#include <string>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <cerrno>
+#include <poll.h>
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <unistd.h>
+#endif
+
+namespace
+{
+
+// The escape mode as its choice number (EscapeMode: 0 Auto, 1 On, 2 Off);
+// atomic: a mode set on one thread holds for a write on another
+std::atomic<int> ConsoleEscapeMode{0};
+
+int LoadEscapeMode()
+{
+    return ConsoleEscapeMode.load();
+}
+
+void StoreEscapeMode(const int AMode)
+{
+    ConsoleEscapeMode.store(AMode);
+}
+
+// True when standard output is a terminal (a console on Windows)
+bool OutputIsTerminal()
+{
+    // Decided once: standard output does not change kind while a program runs
+    static const bool LTerminal = []()
+    {
+#ifdef _WIN32
+        const HANDLE LOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        DWORD LMode = 0;
+        return (LOut != nullptr) && (LOut != INVALID_HANDLE_VALUE) && (GetConsoleMode(LOut, &LMode) != 0);
+#else
+        return ::isatty(STDOUT_FILENO) == 1;
+#endif
+    }();
+    return LTerminal;
+}
+
+// Bytes to standard output through C stdio, the stream println writes to;
+// a terminal gets them at once (a cursor move must show before a key wait)
+void StdoutWrite(const std::string& AText)
+{
+    if (!AText.empty())
+    {
+        std::fwrite(AText.data(), 1, AText.size(), stdout);
+    }
+    if (OutputIsTerminal())
+    {
+        std::fflush(stdout);
+    }
+}
+
+// A window title's bytes without C0 controls and DEL (they would end or
+// break the OSC); UTF-8 bytes stay
+std::string TitleText(const std::string& ATitle)
+{
+    std::string LTitle;
+    for (const char LChar : ATitle)
+    {
+        const unsigned char LByte = static_cast<unsigned char>(LChar);
+        if ((LByte >= 0x20) && (LByte != 0x7F))
+        {
+            LTitle.push_back(LChar);
+        }
+    }
+    return LTitle;
+}
+
+// Display columns of one code point (see DisplayWidth)
+int CodePointColumns(const char32_t ACode)
+{
+    // control characters
+    if ((ACode < 0x20) || ((ACode >= 0x7F) && (ACode < 0xA0)))
+    {
+        return 0;
+    }
+    // combining marks, zero-width spaces / joiners, variation selectors
+    if (((ACode >= 0x0300) && (ACode <= 0x036F)) || ((ACode >= 0x1AB0) && (ACode <= 0x1AFF)) ||
+        ((ACode >= 0x1DC0) && (ACode <= 0x1DFF)) || ((ACode >= 0x200B) && (ACode <= 0x200F)) ||
+        ((ACode >= 0x20D0) && (ACode <= 0x20FF)) || ((ACode >= 0xFE00) && (ACode <= 0xFE0F)) ||
+        ((ACode >= 0xFE20) && (ACode <= 0xFE2F)) || ((ACode >= 0xE0100) && (ACode <= 0xE01EF)))
+    {
+        return 0;
+    }
+    // East Asian wide / fullwidth ranges and emoji
+    if (((ACode >= 0x1100) && (ACode <= 0x115F)) || ((ACode >= 0x2E80) && (ACode <= 0x303E)) ||
+        ((ACode >= 0x3041) && (ACode <= 0x33FF)) || ((ACode >= 0x3400) && (ACode <= 0x4DBF)) ||
+        ((ACode >= 0x4E00) && (ACode <= 0x9FFF)) || ((ACode >= 0xA000) && (ACode <= 0xA4CF)) ||
+        ((ACode >= 0xAC00) && (ACode <= 0xD7A3)) || ((ACode >= 0xF900) && (ACode <= 0xFAFF)) ||
+        ((ACode >= 0xFE30) && (ACode <= 0xFE4F)) || ((ACode >= 0xFF00) && (ACode <= 0xFF60)) ||
+        ((ACode >= 0xFFE0) && (ACode <= 0xFFE6)) || ((ACode >= 0x1F300) && (ACode <= 0x1F64F)) ||
+        ((ACode >= 0x1F900) && (ACode <= 0x1F9FF)) || ((ACode >= 0x20000) && (ACode <= 0x2FFFD)) ||
+        ((ACode >= 0x30000) && (ACode <= 0x3FFFD)))
+    {
+        return 2;
+    }
+    return 1;
+}
+
+// Display columns of UTF-8 text (see DisplayWidth)
+std::int64_t Utf8Columns(const std::string& AText)
+{
+    std::int64_t LColumns = 0;
+    std::size_t LIndex = 0;
+    while (LIndex < AText.size())
+    {
+        const unsigned char LLead = static_cast<unsigned char>(AText[LIndex]);
+        // the sequence length from the lead byte; 0 = not a lead byte
+        std::size_t LLength = 0;
+        char32_t LCode = 0;
+        if (LLead < 0x80)
+        {
+            LLength = 1;
+            LCode = LLead;
+        }
+        else if ((LLead >= 0xC2) && (LLead <= 0xDF))
+        {
+            LLength = 2;
+            LCode = LLead & 0x1F;
+        }
+        else if ((LLead >= 0xE0) && (LLead <= 0xEF))
+        {
+            LLength = 3;
+            LCode = LLead & 0x0F;
+        }
+        else if ((LLead >= 0xF0) && (LLead <= 0xF4))
+        {
+            LLength = 4;
+            LCode = LLead & 0x07;
+        }
+        bool LValid = (LLength > 0) && (LIndex + LLength <= AText.size());
+        for (std::size_t LNext = 1; LValid && (LNext < LLength); ++LNext)
+        {
+            const unsigned char LByte = static_cast<unsigned char>(AText[LIndex + LNext]);
+            if ((LByte & 0xC0) != 0x80)
+            {
+                LValid = false;
+            }
+            else
+            {
+                LCode = (LCode << 6) | (LByte & 0x3F);
+            }
+        }
+        if (!LValid)
+        {
+            // a byte that is not UTF-8: one column, go on with the next byte
+            LColumns += 1;
+            LIndex += 1;
+            continue;
+        }
+        LColumns += CodePointColumns(LCode);
+        LIndex += LLength;
+    }
+    return LColumns;
+}
+
+// AColumns columns of APad: whole copies, a column left over (a wide pad
+// character) as a space; an empty or zero-width pad counts as a space
+std::string FillColumns(const std::string& APad, const std::int64_t AColumns)
+{
+    std::string LFill;
+    if (AColumns <= 0)
+    {
+        return LFill;
+    }
+    std::string LPad = APad;
+    std::int64_t LPadWidth = Utf8Columns(LPad);
+    if (LPadWidth == 0)
+    {
+        LPad = " ";
+        LPadWidth = 1;
+    }
+    const std::int64_t LCopies = AColumns / LPadWidth;
+    const std::int64_t LLeft = AColumns % LPadWidth;
+    for (std::int64_t LIndex = 0; LIndex < LCopies; ++LIndex)
+    {
+        LFill.append(LPad);
+    }
+    LFill.append(static_cast<std::size_t>(LLeft), ' ');
+    return LFill;
+}
+
+// floor(ADone * AScale / ATotal) for 0 <= ADone <= ATotal, ATotal > 0, in long
+// double so the product cannot overflow (100% only when ADone = ATotal)
+std::int64_t ScaledFloor(const std::int64_t ADone, const std::int64_t AScale, const std::int64_t ATotal)
+{
+    return static_cast<std::int64_t>((static_cast<long double>(ADone) * AScale) / ATotal);
+}
+
+// The same bytes, ASCII letters compared without case
+bool AsciiSameText(const std::string& ALeft, const std::string& ARight)
+{
+    if (ALeft.size() != ARight.size())
+    {
+        return false;
+    }
+    for (std::size_t LIndex = 0; LIndex < ALeft.size(); ++LIndex)
+    {
+        char LA = ALeft[LIndex];
+        char LB = ARight[LIndex];
+        if ((LA >= 'A') && (LA <= 'Z'))
+        {
+            LA = static_cast<char>(LA - 'A' + 'a');
+        }
+        if ((LB >= 'A') && (LB <= 'Z'))
+        {
+            LB = static_cast<char>(LB - 'A' + 'a');
+        }
+        if (LA != LB)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The terminal's visible columns / lines; 80 x 25 when standard output is not one
+int TerminalColumns()
+{
+#ifdef _WIN32
+    CONSOLE_SCREEN_BUFFER_INFO LInfo{};
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &LInfo) != 0)
+    {
+        return LInfo.srWindow.Right - LInfo.srWindow.Left + 1;
+    }
+#else
+    winsize LSize{};
+    if ((::ioctl(STDOUT_FILENO, TIOCGWINSZ, &LSize) == 0) && (LSize.ws_col > 0))
+    {
+        return LSize.ws_col;
+    }
+#endif
+    return 80;
+}
+
+int TerminalRows()
+{
+#ifdef _WIN32
+    CONSOLE_SCREEN_BUFFER_INFO LInfo{};
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &LInfo) != 0)
+    {
+        return LInfo.srWindow.Bottom - LInfo.srWindow.Top + 1;
+    }
+#else
+    winsize LSize{};
+    if ((::ioctl(STDOUT_FILENO, TIOCGWINSZ, &LSize) == 0) && (LSize.ws_row > 0))
+    {
+        return LSize.ws_row;
+    }
+#endif
+    return 25;
+}
+
+#ifdef _WIN32
+
+// Standard input when it is a console, else nullptr
+HANDLE ConsoleInput()
+{
+    const HANDLE LIn = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD LMode = 0;
+    if ((LIn == nullptr) || (LIn == INVALID_HANDLE_VALUE) || (GetConsoleMode(LIn, &LMode) == 0))
+    {
+        return nullptr;
+    }
+    return LIn;
+}
+
+bool IsModifierKey(const WORD AKey)
+{
+    switch (AKey)
+    {
+    case VK_SHIFT:
+    case VK_CONTROL:
+    case VK_MENU:
+    case VK_LSHIFT:
+    case VK_RSHIFT:
+    case VK_LCONTROL:
+    case VK_RCONTROL:
+    case VK_LMENU:
+    case VK_RMENU:
+    case VK_LWIN:
+    case VK_RWIN:
+    case VK_CAPITAL:
+    case VK_NUMLOCK:
+    case VK_SCROLL:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// A key going down that is not a modifier alone
+bool IsKeyPress(const INPUT_RECORD& ARecord)
+{
+    return (ARecord.EventType == KEY_EVENT) && (ARecord.Event.KeyEvent.bKeyDown != 0) &&
+           !IsModifierKey(ARecord.Event.KeyEvent.wVirtualKeyCode);
+}
+
+std::wstring ConsoleWide(const std::string& AText)
+{
+    if (AText.empty())
+    {
+        return {};
+    }
+    const int LSize = MultiByteToWideChar(CP_UTF8, 0, AText.data(), static_cast<int>(AText.size()), nullptr, 0);
+    if (LSize <= 0)
+    {
+        return {};
+    }
+    std::wstring LWide(static_cast<std::size_t>(LSize), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, AText.data(), static_cast<int>(AText.size()), LWide.data(), LSize);
+    return LWide;
+}
+
+std::string ConsoleUtf8(const wchar_t* AText, const int ALength)
+{
+    if (ALength <= 0)
+    {
+        return {};
+    }
+    const int LSize = WideCharToMultiByte(CP_UTF8, 0, AText, ALength, nullptr, 0, nullptr, nullptr);
+    if (LSize <= 0)
+    {
+        return {};
+    }
+    std::string LText(static_cast<std::size_t>(LSize), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, AText, ALength, LText.data(), LSize, nullptr, nullptr);
+    return LText;
+}
+
+#else
+
+// The terminal on standard input in non-canonical, no-echo mode while alive
+// (VMIN = AMinBytes, no timer); the old settings come back at the end
+class RawInput
+{
+public:
+    explicit RawInput(const cc_t AMinBytes)
+    {
+        m_Ok = (::isatty(STDIN_FILENO) == 1) && (::tcgetattr(STDIN_FILENO, &m_Saved) == 0);
+        if (m_Ok)
+        {
+            termios LRaw = m_Saved;
+            LRaw.c_lflag &= static_cast<tcflag_t>(~(ICANON | ECHO));
+            LRaw.c_cc[VMIN] = AMinBytes;
+            LRaw.c_cc[VTIME] = 0;
+            m_Ok = ::tcsetattr(STDIN_FILENO, TCSANOW, &LRaw) == 0;
+        }
+    }
+
+    ~RawInput()
+    {
+        if (m_Ok)
+        {
+            ::tcsetattr(STDIN_FILENO, TCSANOW, &m_Saved);
+        }
+    }
+
+    RawInput(const RawInput&) = delete;
+    RawInput& operator=(const RawInput&) = delete;
+
+    [[nodiscard]] bool ok() const
+    {
+        return m_Ok;
+    }
+
+private:
+    termios m_Saved{};
+    bool m_Ok = false;
+};
+
+// True when standard input has bytes within AWaitMs
+bool InputReady(const int AWaitMs)
+{
+    pollfd LPoll{};
+    LPoll.fd = STDIN_FILENO;
+    LPoll.events = POLLIN;
+    int LResult = 0;
+    do
+    {
+        LResult = ::poll(&LPoll, 1, AWaitMs);
+    } while ((LResult < 0) && (errno == EINTR));
+    return (LResult > 0) && ((LPoll.revents & POLLIN) != 0);
+}
+
+// One key may send several bytes (an arrow: ESC [ A): read the rest of them
+void ReadRestOfKey()
+{
+    unsigned char LBuffer[64];
+    while (InputReady(10))
+    {
+        if (::read(STDIN_FILENO, LBuffer, sizeof(LBuffer)) <= 0)
+        {
+            break;
+        }
+    }
+}
+
+bool ReadInputByte(unsigned char& AByte)
+{
+    ssize_t LRead = 0;
+    do
+    {
+        LRead = ::read(STDIN_FILENO, &AByte, 1);
+    } while ((LRead < 0) && (errno == EINTR));
+    return LRead == 1;
+}
+
+#endif
+
+// True when standard input is a console / terminal (a keyboard to read)
+bool KeyboardPresent()
+{
+#ifdef _WIN32
+    return ConsoleInput() != nullptr;
+#else
+    return ::isatty(STDIN_FILENO) == 1;
+#endif
+}
+
+// Drops the keys typed so far
+void DropKeys()
+{
+#ifdef _WIN32
+    const HANDLE LIn = ConsoleInput();
+    if (LIn != nullptr)
+    {
+        FlushConsoleInputBuffer(LIn);
+    }
+#else
+    if (KeyboardPresent())
+    {
+        ::tcflush(STDIN_FILENO, TCIFLUSH);
+    }
+#endif
+}
+
+// The console belongs to this program alone and closes when it ends: on
+// Windows a console no other process shares; never on Linux (a terminal
+// outlives the program)
+bool ClosesWithProgram()
+{
+#ifdef _WIN32
+    DWORD LProcesses[2] = {0, 0};
+    return GetConsoleProcessList(LProcesses, 2) == 1;
+#else
+    return false;
+#endif
+}
+
+// Waits for a key press (see WaitForAnyKey)
+void WaitKeyPress()
+{
+    std::fflush(stdout);
+#ifdef _WIN32
+    const HANDLE LIn = ConsoleInput();
+    if (LIn == nullptr)
+    {
+        return;
+    }
+    DWORD LOldMode = 0;
+    GetConsoleMode(LIn, &LOldMode);
+    SetConsoleMode(LIn, 0);
+    INPUT_RECORD LRecord{};
+    DWORD LRead = 0;
+    // A failed read ends the wait (no record to look at)
+    while ((ReadConsoleInputW(LIn, &LRecord, 1, &LRead) != 0) && (LRead == 1))
+    {
+        if (IsKeyPress(LRecord))
+        {
+            break;
+        }
+    }
+    SetConsoleMode(LIn, LOldMode);
+#else
+    const RawInput LRaw(1);
+    if (!LRaw.ok())
+    {
+        return;
+    }
+    unsigned char LByte = 0;
+    if (ReadInputByte(LByte))
+    {
+        ReadRestOfKey();
+    }
+#endif
+}
+
+// True while a key press waits to be read (see AnyKeyPressed)
+bool KeyWaiting()
+{
+#ifdef _WIN32
+    const HANDLE LIn = ConsoleInput();
+    if (LIn == nullptr)
+    {
+        return false;
+    }
+    DWORD LCount = 0;
+    while ((GetNumberOfConsoleInputEvents(LIn, &LCount) != 0) && (LCount > 0))
+    {
+        INPUT_RECORD LRecord{};
+        DWORD LRead = 0;
+        if ((PeekConsoleInputW(LIn, &LRecord, 1, &LRead) == 0) || (LRead == 0))
+        {
+            return false;
+        }
+        if (IsKeyPress(LRecord))
+        {
+            return true;
+        }
+        // Not a key press (a release, a modifier, the mouse, a resize): only
+        // this event leaves the queue, a key press behind it stays
+        if (ReadConsoleInputW(LIn, &LRecord, 1, &LRead) == 0)
+        {
+            return false;
+        }
+    }
+    return false;
+#else
+    // A terminal sends bytes only for a key press (a modifier alone sends none)
+    const RawInput LRaw(0);
+    if (!LRaw.ok())
+    {
+        return false;
+    }
+    return InputReady(0);
+#endif
+}
+
+// The next typed key as UTF-8 text (see ReadKey)
+std::string ReadKeyText()
+{
+    std::fflush(stdout);
+#ifdef _WIN32
+    const HANDLE LIn = ConsoleInput();
+    if (LIn == nullptr)
+    {
+        return {};
+    }
+    DWORD LOldMode = 0;
+    GetConsoleMode(LIn, &LOldMode);
+    SetConsoleMode(LIn, 0);
+    std::string LKey;
+    wchar_t LHigh = 0;
+    INPUT_RECORD LRecord{};
+    DWORD LRead = 0;
+    // A failed read ends the wait with no key
+    while ((ReadConsoleInputW(LIn, &LRecord, 1, &LRead) != 0) && (LRead == 1))
+    {
+        if ((LRecord.EventType != KEY_EVENT) || (LRecord.Event.KeyEvent.bKeyDown == 0))
+        {
+            continue;
+        }
+        const wchar_t LChar = LRecord.Event.KeyEvent.uChar.UnicodeChar;
+        if (LChar == 0)
+        {
+            // a key that types nothing (an arrow, a modifier)
+            continue;
+        }
+        if ((LChar >= 0xD800) && (LChar <= 0xDBFF))
+        {
+            // the first half of a character outside the BMP: wait for its second
+            LHigh = LChar;
+            continue;
+        }
+        if ((LChar >= 0xDC00) && (LChar <= 0xDFFF))
+        {
+            if (LHigh != 0)
+            {
+                const wchar_t LPair[2] = {LHigh, LChar};
+                LKey = ConsoleUtf8(LPair, 2);
+                break;
+            }
+            continue;
+        }
+        LKey = ConsoleUtf8(&LChar, 1);
+        break;
+    }
+    SetConsoleMode(LIn, LOldMode);
+    return LKey;
+#else
+    const RawInput LRaw(1);
+    if (!LRaw.ok())
+    {
+        return {};
+    }
+    unsigned char LByte = 0;
+    while (ReadInputByte(LByte))
+    {
+        if (LByte == 0x1B)
+        {
+            // more bytes at once = a key's escape sequence (an arrow): skipped;
+            // none = the Escape key itself
+            if (InputReady(10))
+            {
+                ReadRestOfKey();
+                continue;
+            }
+            return "\x1b";
+        }
+        if ((LByte == '\n') || (LByte == '\r'))
+        {
+            return "\r";
+        }
+        if (LByte == 0x7F)
+        {
+            return "\b";
+        }
+        std::string LKey(1, static_cast<char>(LByte));
+        std::size_t LMore = 0;
+        if (LByte >= 0xF0)
+        {
+            LMore = 3;
+        }
+        else if (LByte >= 0xE0)
+        {
+            LMore = 2;
+        }
+        else if (LByte >= 0xC0)
+        {
+            LMore = 1;
+        }
+        for (std::size_t LIndex = 0; LIndex < LMore; ++LIndex)
+        {
+            unsigned char LNext = 0;
+            if (!ReadInputByte(LNext))
+            {
+                break;
+            }
+            LKey.push_back(static_cast<char>(LNext));
+        }
+        return LKey;
+    }
+    return {};
+#endif
+}
+
+// One line from standard input, without its line break; empty at its end
+std::string ReadLineText()
+{
+    std::fflush(stdout);
+#ifdef _WIN32
+    // A console reads as UTF-16 (ReadFile would lose non-ASCII text)
+    const HANDLE LIn = ConsoleInput();
+    if (LIn != nullptr)
+    {
+        std::wstring LLine;
+        wchar_t LBuffer[256];
+        DWORD LRead = 0;
+        while ((ReadConsoleW(LIn, LBuffer, 256, &LRead, nullptr) != 0) && (LRead > 0))
+        {
+            LLine.append(LBuffer, LRead);
+            if (LLine.find(L'\n') != std::wstring::npos)
+            {
+                break;
+            }
+        }
+        const std::size_t LEnd = LLine.find_first_of(L"\r\n");
+        if (LEnd != std::wstring::npos)
+        {
+            LLine.erase(LEnd);
+        }
+        return ConsoleUtf8(LLine.data(), static_cast<int>(LLine.size()));
+    }
+#endif
+    std::string LLine;
+    int LChar = std::fgetc(stdin);
+    while ((LChar != EOF) && (LChar != '\n'))
+    {
+        LLine.push_back(static_cast<char>(LChar));
+        LChar = std::fgetc(stdin);
+    }
+    if (!LLine.empty() && (LLine.back() == '\r'))
+    {
+        LLine.pop_back();
+    }
+    return LLine;
+}
+
+// Sets the console window's title through the OS: true on Windows (the
+// console API); false on Linux, where the title is an escape sequence
+bool OsSetTitle(const std::string& ATitle)
+{
+#ifdef _WIN32
+    SetConsoleTitleW(ConsoleWide(ATitle).c_str());
+    return true;
+#else
+    (void)ATitle;
+    return false;
+#endif
+}
+
+} // namespace
+
+exported type
+  /// The 16 standard terminal colours, in their SGR order (`int32(TextColor.Red)`
+  /// is 1): foreground 30-37 / 90-97, background 40-47 / 100-107.
+  /// @since 0.2
+  /// @see TextColorAt
+  TextColor = choices(Black, Red, Green, Yellow, Blue, Magenta, Cyan, White, BrightBlack,
+    BrightRed, BrightGreen, BrightYellow, BrightBlue, BrightMagenta, BrightCyan, BrightWhite);
+
+  /// When escape sequences are written: Auto while standard output is a
+  /// terminal (the default), On always, Off never. (Not Always / Never: X11's
+  /// X.h defines Always.)
+  /// @since 0.2
+  /// @see SetEscapeMode
+  EscapeMode = choices(Auto, On, Off);
+
+  /// Where a text sits inside a padded width.
+  /// @since 0.2
+  /// @see PadText
+  TextAlign = choices(Left, Center, Right);
+
+  /// A 24-bit colour (SGR 38;2 / 48;2): red, green and blue, 0-255 each.
+  /// @since 0.2
+  /// @example `LGold: Rgb(255, 215, 0);`
+  Rgb = object
+    R: uint8;
+    G: uint8;
+    B: uint8;
+    /// Black (0, 0, 0).
+    init();
+    begin
+      self.R := 0;
+      self.G := 0;
+      self.B := 0;
+    end;
+    /// The colour (AR, AG, AB).
+    /// @param AR red, 0-255
+    /// @param AG green, 0-255
+    /// @param AB blue, 0-255
+    init(const AR: uint8; const AG: uint8; const AB: uint8);
+    begin
+      self.R := AR;
+      self.G := AG;
+      self.B := AB;
+    end;
+  end;
+
+exported const
+  /// The escape character (ESC, 0x1B), the start of every sequence.
+  /// @since 0.2
+  CsiEsc: string = "\x1b";
+  /// A carriage return: the cursor to the start of its line.
+  /// @since 0.2
+  CsiCr: string = "\r";
+  /// A line feed, the line break WriteLn writes.
+  /// @since 0.2
+  CsiLf: string = "\n";
+  /// A carriage return and a line feed.
+  /// @since 0.2
+  CsiCrLf: string = "\r\n";
+  /// Saves the cursor's position (CSI s).
+  /// @since 0.2
+  /// @see CsiRestoreCursorPosition
+  CsiSaveCursorPosition: string = "\x1b[s";
+  /// Puts the cursor back where CsiSaveCursorPosition saved it (CSI u).
+  /// @since 0.2
+  CsiRestoreCursorPosition: string = "\x1b[u";
+  /// Shows the cursor.
+  /// @since 0.2
+  CsiShowCursor: string = "\x1b[?25h";
+  /// Hides the cursor.
+  /// @since 0.2
+  CsiHideCursor: string = "\x1b[?25l";
+  /// A blinking cursor.
+  /// @since 0.2
+  CsiBlinkCursor: string = "\x1b[?12h";
+  /// A steady (not blinking) cursor.
+  /// @since 0.2
+  CsiSteadyCursor: string = "\x1b[?12l";
+  /// Clears the visible screen (the cursor stays).
+  /// @since 0.2
+  CsiClearScreen: string = "\x1b[2J";
+  /// Clears the scrollback above the screen.
+  /// @since 0.2
+  CsiClearScrollback: string = "\x1b[3J";
+  /// Clears the cursor's line (the cursor stays).
+  /// @since 0.2
+  CsiClearLine: string = "\x1b[2K";
+  /// Clears from the cursor to the end of its line.
+  /// @since 0.2
+  CsiClearToEndOfLine: string = "\x1b[0K";
+  /// Bold text.
+  /// @since 0.2
+  CsiBold: string = "\x1b[1m";
+  /// Dim text.
+  /// @since 0.2
+  CsiDim: string = "\x1b[2m";
+  /// Italic text.
+  /// @since 0.2
+  CsiItalic: string = "\x1b[3m";
+  /// Underlined text.
+  /// @since 0.2
+  CsiUnderline: string = "\x1b[4m";
+  /// Blinking text.
+  /// @since 0.2
+  CsiBlink: string = "\x1b[5m";
+  /// Foreground and background swapped.
+  /// @since 0.2
+  /// @see CsiNormalColors
+  CsiInvertColors: string = "\x1b[7m";
+  /// Struck-through text.
+  /// @since 0.2
+  CsiStrike: string = "\x1b[9m";
+  /// Ends CsiInvertColors.
+  /// @since 0.2
+  CsiNormalColors: string = "\x1b[27m";
+  /// Framed text.
+  /// @since 0.2
+  CsiFramed: string = "\x1b[51m";
+  /// Encircled text.
+  /// @since 0.2
+  CsiEncircled: string = "\x1b[52m";
+  /// Resets bold, the colours and every other attribute.
+  /// @since 0.2
+  CsiResetFormat: string = "\x1b[0m";
+  /// The default foreground colour.
+  /// @since 0.2
+  CsiResetForeground: string = "\x1b[39m";
+  /// The default background colour.
+  /// @since 0.2
+  CsiResetBackground: string = "\x1b[49m";
+  /// Black foreground (SGR 30).
+  /// @since 0.2
+  CsiFgBlack: string = "\x1b[30m";
+  /// Red foreground (SGR 31).
+  /// @since 0.2
+  CsiFgRed: string = "\x1b[31m";
+  /// Green foreground (SGR 32).
+  /// @since 0.2
+  CsiFgGreen: string = "\x1b[32m";
+  /// Yellow foreground (SGR 33).
+  /// @since 0.2
+  CsiFgYellow: string = "\x1b[33m";
+  /// Blue foreground (SGR 34).
+  /// @since 0.2
+  CsiFgBlue: string = "\x1b[34m";
+  /// Magenta foreground (SGR 35).
+  /// @since 0.2
+  CsiFgMagenta: string = "\x1b[35m";
+  /// Cyan foreground (SGR 36).
+  /// @since 0.2
+  CsiFgCyan: string = "\x1b[36m";
+  /// White foreground (SGR 37).
+  /// @since 0.2
+  CsiFgWhite: string = "\x1b[37m";
+  /// Black background (SGR 40).
+  /// @since 0.2
+  CsiBgBlack: string = "\x1b[40m";
+  /// Red background (SGR 41).
+  /// @since 0.2
+  CsiBgRed: string = "\x1b[41m";
+  /// Green background (SGR 42).
+  /// @since 0.2
+  CsiBgGreen: string = "\x1b[42m";
+  /// Yellow background (SGR 43).
+  /// @since 0.2
+  CsiBgYellow: string = "\x1b[43m";
+  /// Blue background (SGR 44).
+  /// @since 0.2
+  CsiBgBlue: string = "\x1b[44m";
+  /// Magenta background (SGR 45).
+  /// @since 0.2
+  CsiBgMagenta: string = "\x1b[45m";
+  /// Cyan background (SGR 46).
+  /// @since 0.2
+  CsiBgCyan: string = "\x1b[46m";
+  /// White background (SGR 47).
+  /// @since 0.2
+  CsiBgWhite: string = "\x1b[47m";
+  /// Bright black (grey) foreground (SGR 90).
+  /// @since 0.2
+  CsiFgBrightBlack: string = "\x1b[90m";
+  /// Bright red foreground (SGR 91).
+  /// @since 0.2
+  CsiFgBrightRed: string = "\x1b[91m";
+  /// Bright green foreground (SGR 92).
+  /// @since 0.2
+  CsiFgBrightGreen: string = "\x1b[92m";
+  /// Bright yellow foreground (SGR 93).
+  /// @since 0.2
+  CsiFgBrightYellow: string = "\x1b[93m";
+  /// Bright blue foreground (SGR 94).
+  /// @since 0.2
+  CsiFgBrightBlue: string = "\x1b[94m";
+  /// Bright magenta foreground (SGR 95).
+  /// @since 0.2
+  CsiFgBrightMagenta: string = "\x1b[95m";
+  /// Bright cyan foreground (SGR 96).
+  /// @since 0.2
+  CsiFgBrightCyan: string = "\x1b[96m";
+  /// Bright white foreground (SGR 97).
+  /// @since 0.2
+  CsiFgBrightWhite: string = "\x1b[97m";
+  /// Bright black (grey) background (SGR 100).
+  /// @since 0.2
+  CsiBgBrightBlack: string = "\x1b[100m";
+  /// Bright red background (SGR 101).
+  /// @since 0.2
+  CsiBgBrightRed: string = "\x1b[101m";
+  /// Bright green background (SGR 102).
+  /// @since 0.2
+  CsiBgBrightGreen: string = "\x1b[102m";
+  /// Bright yellow background (SGR 103).
+  /// @since 0.2
+  CsiBgBrightYellow: string = "\x1b[103m";
+  /// Bright blue background (SGR 104).
+  /// @since 0.2
+  CsiBgBrightBlue: string = "\x1b[104m";
+  /// Bright magenta background (SGR 105).
+  /// @since 0.2
+  CsiBgBrightMagenta: string = "\x1b[105m";
+  /// Bright cyan background (SGR 106).
+  /// @since 0.2
+  CsiBgBrightCyan: string = "\x1b[106m";
+  /// Bright white background (SGR 107).
+  /// @since 0.2
+  CsiBgBrightWhite: string = "\x1b[107m";
+  /// A dark grey background: 256-colour palette entry 238.
+  /// @since 0.2
+  CsiBgDarkGrey: string = "\x1b[48;5;238m";
+  /// What ReadKey gives for Enter, on every target.
+  /// @since 0.2
+  /// @see IsEnterKey
+  KeyEnter: string = "\r";
+  /// What ReadKey gives for Escape, on every target.
+  /// @since 0.2
+  /// @see IsEscapeKey
+  KeyEscape: string = "\x1b";
+  /// What ReadKey gives for Backspace, on every target.
+  /// @since 0.2
+  KeyBackspace: string = "\x08";
+
+// "<ESC>[<count><final>"; empty for a count <= 0 (a CSI count of 0 means 1)
+routine CsiCount(const ACount: int32; const AFinal: string): string;
+begin
+  if ACount <= 0 then
+    return "";
+  end;
+  return FormatStr("\x1b[{}{}", ACount, AFinal);
+end;
+
+// SGR for a standard colour: index 0-7 from ANormalBase, 8-15 from
+// ABrightBase; a value outside the choices gives nothing
+routine SgrStandard(const AColor: TextColor; const ANormalBase: int32; const ABrightBase: int32): string;
+var
+  LIndex: int32;
+begin
+  LIndex := int32(AColor);
+  if (LIndex < 0) or (LIndex > 15) then
+    return "";
+  end;
+  if LIndex < 8 then
+    return FormatStr("\x1b[{}m", ANormalBase + LIndex);
+  end;
+  return FormatStr("\x1b[{}m", ABrightBase + LIndex - 8);
+end;
+
+// SGR 38;2 / 48;2 for a 24-bit colour
+routine SgrRgb(const AColor: Rgb; const ASelector: int32): string;
+begin
+  return FormatStr("\x1b[{};2;{};{};{}m", ASelector, int32(AColor.R), int32(AColor.G), int32(AColor.B));
+end;
+
+/// The sequence that puts the cursor at column AX, line AY (0-based, (0, 0)
+/// the top left; a position below 0 counts as 0).
+/// @param AX the column
+/// @param AY the line
+/// @returns the sequence (CSI is 1-based, row first: (4, 2) is `ESC[3;5H`)
+/// @since 0.2
+exported routine CsiCursorPosition(const AX: int32; const AY: int32): string;
+var
+  LX: int32;
+  LY: int32;
+begin
+  LX := AX;
+  if LX < 0 then
+    LX := 0;
+  end;
+  LY := AY;
+  if LY < 0 then
+    LY := 0;
+  end;
+  return FormatStr("\x1b[{};{}H", LY + 1, LX + 1);
+end;
+
+/// The sequence that puts the cursor at column AX of its line (0-based; below
+/// 0 counts as 0).
+/// @param AX the column
+/// @returns the sequence
+/// @since 0.2
+exported routine CsiCursorColumn(const AX: int32): string;
+var
+  LX: int32;
+begin
+  LX := AX;
+  if LX < 0 then
+    LX := 0;
+  end;
+  return FormatStr("\x1b[{}G", LX + 1);
+end;
+
+/// The sequence that moves the cursor up ALines lines.
+/// @param ALines how far; <= 0 gives ""
+/// @returns the sequence
+/// @since 0.2
+exported routine CsiCursorUp(const ALines: int32): string;
+begin
+  return CsiCount(ALines, "A");
+end;
+
+/// The sequence that moves the cursor down ALines lines.
+/// @param ALines how far; <= 0 gives ""
+/// @returns the sequence
+/// @since 0.2
+exported routine CsiCursorDown(const ALines: int32): string;
+begin
+  return CsiCount(ALines, "B");
+end;
+
+/// The sequence that moves the cursor right AColumns columns.
+/// @param AColumns how far; <= 0 gives ""
+/// @returns the sequence
+/// @since 0.2
+exported routine CsiCursorForward(const AColumns: int32): string;
+begin
+  return CsiCount(AColumns, "C");
+end;
+
+/// The sequence that moves the cursor left AColumns columns.
+/// @param AColumns how far; <= 0 gives ""
+/// @returns the sequence
+/// @since 0.2
+exported routine CsiCursorBack(const AColumns: int32): string;
+begin
+  return CsiCount(AColumns, "D");
+end;
+
+/// The sequence that scrolls the screen up ALines lines.
+/// @param ALines how far; <= 0 gives ""
+/// @returns the sequence
+/// @since 0.2
+exported routine CsiScrollUp(const ALines: int32): string;
+begin
+  return CsiCount(ALines, "S");
+end;
+
+/// The sequence that scrolls the screen down ALines lines.
+/// @param ALines how far; <= 0 gives ""
+/// @returns the sequence
+/// @since 0.2
+exported routine CsiScrollDown(const ALines: int32): string;
+begin
+  return CsiCount(ALines, "T");
+end;
+
+/// The sequence that inserts ALines blank lines at the cursor.
+/// @param ALines how many; <= 0 gives ""
+/// @returns the sequence
+/// @since 0.2
+exported routine CsiInsertLines(const ALines: int32): string;
+begin
+  return CsiCount(ALines, "L");
+end;
+
+/// The sequence that deletes ALines lines at the cursor.
+/// @param ALines how many; <= 0 gives ""
+/// @returns the sequence
+/// @since 0.2
+exported routine CsiDeleteLines(const ALines: int32): string;
+begin
+  return CsiCount(ALines, "M");
+end;
+
+/// The sequence that inserts ACount blanks at the cursor.
+/// @param ACount how many; <= 0 gives ""
+/// @returns the sequence
+/// @since 0.2
+exported routine CsiInsertChars(const ACount: int32): string;
+begin
+  return CsiCount(ACount, "@");
+end;
+
+/// The sequence that deletes ACount characters at the cursor.
+/// @param ACount how many; <= 0 gives ""
+/// @returns the sequence
+/// @since 0.2
+exported routine CsiDeleteChars(const ACount: int32): string;
+begin
+  return CsiCount(ACount, "P");
+end;
+
+/// The sequence that blanks ACount characters at the cursor.
+/// @param ACount how many; <= 0 gives ""
+/// @returns the sequence
+/// @since 0.2
+exported routine CsiEraseChars(const ACount: int32): string;
+begin
+  return CsiCount(ACount, "X");
+end;
+
+/// The foreground sequence of a 256-colour palette entry.
+/// @param AIndex the entry, 0-255; another value gives ""
+/// @returns the sequence (`ESC[38;5;<index>m`)
+/// @since 0.2
+exported routine CsiForeground256(const AIndex: int32): string;
+begin
+  if (AIndex < 0) or (AIndex > 255) then
+    return "";
+  end;
+  return FormatStr("\x1b[38;5;{}m", AIndex);
+end;
+
+/// The background sequence of a 256-colour palette entry.
+/// @param AIndex the entry, 0-255; another value gives ""
+/// @returns the sequence (`ESC[48;5;<index>m`)
+/// @since 0.2
+exported routine CsiBackground256(const AIndex: int32): string;
+begin
+  if (AIndex < 0) or (AIndex > 255) then
+    return "";
+  end;
+  return FormatStr("\x1b[48;5;{}m", AIndex);
+end;
+
+/// The foreground sequence of a standard colour.
+/// @param AColor the colour; a value outside TextColor gives ""
+/// @returns the sequence (SGR 30-37 / 90-97)
+/// @since 0.2
+exported routine CsiForeground(const AColor: TextColor): string;
+begin
+  return SgrStandard(AColor, 30, 90);
+end;
+
+/// The background sequence of a standard colour.
+/// @param AColor the colour; a value outside TextColor gives ""
+/// @returns the sequence (SGR 40-47 / 100-107)
+/// @since 0.2
+exported routine CsiBackground(const AColor: TextColor): string;
+begin
+  return SgrStandard(AColor, 40, 100);
+end;
+
+/// The foreground sequence of a 24-bit colour.
+/// @param AColor the colour
+/// @returns the sequence (`ESC[38;2;<r>;<g>;<b>m`)
+/// @since 0.2
+exported routine CsiForeground(const AColor: Rgb): string;
+begin
+  return SgrRgb(AColor, 38);
+end;
+
+/// The background sequence of a 24-bit colour.
+/// @param AColor the colour
+/// @returns the sequence (`ESC[48;2;<r>;<g>;<b>m`)
+/// @since 0.2
+exported routine CsiBackground(const AColor: Rgb): string;
+begin
+  return SgrRgb(AColor, 48);
+end;
+
+/// The sequence that sets the window title (OSC 0, ended by BEL); C0 control
+/// characters and DEL in the title are left out, UTF-8 text stays.
+/// @param ATitle the title
+/// @returns the sequence
+/// @since 0.2
+/// @see SetTitle
+exported routine CsiTitle(const ATitle: string): string;
+begin
+  return FormatStr("\x1b]0;{}\x07", TitleText(ATitle));
+end;
+
+/// Sets when escape sequences are written (Auto by default).
+/// @param AMode the new mode
+/// @since 0.2
+/// @see EscapesEnabled
+exported routine SetEscapeMode(const AMode: EscapeMode);
+begin
+  StoreEscapeMode(int32(AMode));
+end;
+
+/// The escape mode now.
+/// @returns the mode SetEscapeMode set last (Auto at start)
+/// @since 0.2
+exported routine GetEscapeMode(): EscapeMode;
+begin
+  return (EscapeMode)LoadEscapeMode();
+end;
+
+/// Whether standard output is a terminal (a console on Windows), decided once.
+/// @returns true for a terminal, false for a file or a pipe
+/// @since 0.2
+exported routine IsTerminal(): bool;
+begin
+  return OutputIsTerminal();
+end;
+
+/// Whether the escape mode writes escape sequences now: On yes, Off no, Auto
+/// while standard output is a terminal.
+/// @returns true when WriteEscape writes
+/// @since 0.2
+exported routine EscapesEnabled(): bool;
+var
+  LMode: EscapeMode;
+begin
+  LMode := GetEscapeMode();
+  if LMode = EscapeMode.On then
+    return true;
+  end;
+  if LMode = EscapeMode.Off then
+    return false;
+  end;
+  return IsTerminal();
+end;
+
+/// Writes text to standard output, always (the bytes as given). A terminal
+/// gets them at once.
+/// @param AText the text
+/// @since 0.2
+/// @see WriteEscape
+exported routine WriteText(const AText: string);
+begin
+  StdoutWrite(AText);
+end;
+
+/// Writes an escape sequence to standard output while EscapesEnabled, else
+/// nothing.
+/// @param ASequence the sequence
+/// @since 0.2
+/// @see WriteText
+exported routine WriteEscape(const ASequence: string);
+begin
+  if EscapesEnabled() then
+    StdoutWrite(ASequence);
+  end;
+end;
+
+/// Puts the cursor at column AX, line AY (0-based; below 0 counts as 0).
+/// @param AX the column
+/// @param AY the line
+/// @since 0.2
+exported routine SetCursorPosition(const AX: int32; const AY: int32);
+begin
+  WriteEscape(CsiCursorPosition(AX, AY));
+end;
+
+/// Puts the cursor at column AX of its line (0-based).
+/// @param AX the column
+/// @since 0.2
+exported routine SetCursorColumn(const AX: int32);
+begin
+  WriteEscape(CsiCursorColumn(AX));
+end;
+
+/// Moves the cursor up one line.
+/// @since 0.2
+exported routine MoveCursorUp();
+begin
+  WriteEscape(CsiCursorUp(1));
+end;
+
+/// Moves the cursor up ALines lines (<= 0: not at all).
+/// @param ALines how far
+/// @since 0.2
+exported routine MoveCursorUp(const ALines: int32);
+begin
+  WriteEscape(CsiCursorUp(ALines));
+end;
+
+/// Moves the cursor down one line.
+/// @since 0.2
+exported routine MoveCursorDown();
+begin
+  WriteEscape(CsiCursorDown(1));
+end;
+
+/// Moves the cursor down ALines lines (<= 0: not at all).
+/// @param ALines how far
+/// @since 0.2
+exported routine MoveCursorDown(const ALines: int32);
+begin
+  WriteEscape(CsiCursorDown(ALines));
+end;
+
+/// Moves the cursor right one column.
+/// @since 0.2
+exported routine MoveCursorForward();
+begin
+  WriteEscape(CsiCursorForward(1));
+end;
+
+/// Moves the cursor right AColumns columns (<= 0: not at all).
+/// @param AColumns how far
+/// @since 0.2
+exported routine MoveCursorForward(const AColumns: int32);
+begin
+  WriteEscape(CsiCursorForward(AColumns));
+end;
+
+/// Moves the cursor left one column.
+/// @since 0.2
+exported routine MoveCursorBack();
+begin
+  WriteEscape(CsiCursorBack(1));
+end;
+
+/// Moves the cursor left AColumns columns (<= 0: not at all).
+/// @param AColumns how far
+/// @since 0.2
+exported routine MoveCursorBack(const AColumns: int32);
+begin
+  WriteEscape(CsiCursorBack(AColumns));
+end;
+
+/// Saves the cursor's position.
+/// @since 0.2
+/// @see RestoreCursorPosition
+exported routine SaveCursorPosition();
+begin
+  WriteEscape(CsiSaveCursorPosition);
+end;
+
+/// Puts the cursor back where SaveCursorPosition saved it.
+/// @since 0.2
+exported routine RestoreCursorPosition();
+begin
+  WriteEscape(CsiRestoreCursorPosition);
+end;
+
+/// Hides the cursor.
+/// @since 0.2
+exported routine HideCursor();
+begin
+  WriteEscape(CsiHideCursor);
+end;
+
+/// Shows the cursor.
+/// @since 0.2
+exported routine ShowCursor();
+begin
+  WriteEscape(CsiShowCursor);
+end;
+
+/// Clears the screen and its scrollback and puts the cursor at the top left.
+/// @since 0.2
+exported routine ClearScreen();
+begin
+  WriteEscape(CsiClearScreen);
+  WriteEscape(CsiClearScrollback);
+  WriteEscape(CsiCursorPosition(0, 0));
+end;
+
+/// Clears the cursor's line; the cursor stays where it is.
+/// @since 0.2
+exported routine ClearLine();
+begin
+  WriteEscape(CsiClearLine);
+end;
+
+/// Clears the cursor's line; AToLineStart also puts the cursor at its start
+/// (a carriage return, a cursor move: a file or a pipe does not get it).
+/// @param AToLineStart true to move the cursor to the line's start
+/// @since 0.2
+exported routine ClearLine(const AToLineStart: bool);
+begin
+  WriteEscape(CsiClearLine);
+  if AToLineStart then
+    WriteEscape(CsiCr);
+  end;
+end;
+
+/// Clears from the cursor to the end of its line.
+/// @since 0.2
+exported routine ClearToEndOfLine();
+begin
+  WriteEscape(CsiClearToEndOfLine);
+end;
+
+/// Inserts one blank line at the cursor.
+/// @since 0.2
+exported routine InsertLines();
+begin
+  WriteEscape(CsiInsertLines(1));
+end;
+
+/// Inserts ALines blank lines at the cursor (<= 0: none).
+/// @param ALines how many
+/// @since 0.2
+exported routine InsertLines(const ALines: int32);
+begin
+  WriteEscape(CsiInsertLines(ALines));
+end;
+
+/// Deletes the cursor's line.
+/// @since 0.2
+exported routine DeleteLines();
+begin
+  WriteEscape(CsiDeleteLines(1));
+end;
+
+/// Deletes ALines lines at the cursor (<= 0: none).
+/// @param ALines how many
+/// @since 0.2
+exported routine DeleteLines(const ALines: int32);
+begin
+  WriteEscape(CsiDeleteLines(ALines));
+end;
+
+/// Scrolls the screen up one line.
+/// @since 0.2
+exported routine ScrollUp();
+begin
+  WriteEscape(CsiScrollUp(1));
+end;
+
+/// Scrolls the screen up ALines lines (<= 0: not at all).
+/// @param ALines how far
+/// @since 0.2
+exported routine ScrollUp(const ALines: int32);
+begin
+  WriteEscape(CsiScrollUp(ALines));
+end;
+
+/// Scrolls the screen down one line.
+/// @since 0.2
+exported routine ScrollDown();
+begin
+  WriteEscape(CsiScrollDown(1));
+end;
+
+/// Scrolls the screen down ALines lines (<= 0: not at all).
+/// @param ALines how far
+/// @since 0.2
+exported routine ScrollDown(const ALines: int32);
+begin
+  WriteEscape(CsiScrollDown(ALines));
+end;
+
+/// Inserts one blank at the cursor.
+/// @since 0.2
+exported routine InsertChars();
+begin
+  WriteEscape(CsiInsertChars(1));
+end;
+
+/// Inserts ACount blanks at the cursor (<= 0: none).
+/// @param ACount how many
+/// @since 0.2
+exported routine InsertChars(const ACount: int32);
+begin
+  WriteEscape(CsiInsertChars(ACount));
+end;
+
+/// Deletes the character at the cursor.
+/// @since 0.2
+exported routine DeleteChars();
+begin
+  WriteEscape(CsiDeleteChars(1));
+end;
+
+/// Deletes ACount characters at the cursor (<= 0: none).
+/// @param ACount how many
+/// @since 0.2
+exported routine DeleteChars(const ACount: int32);
+begin
+  WriteEscape(CsiDeleteChars(ACount));
+end;
+
+/// Blanks the character at the cursor.
+/// @since 0.2
+exported routine EraseChars();
+begin
+  WriteEscape(CsiEraseChars(1));
+end;
+
+/// Blanks ACount characters at the cursor (<= 0: none).
+/// @param ACount how many
+/// @since 0.2
+exported routine EraseChars(const ACount: int32);
+begin
+  WriteEscape(CsiEraseChars(ACount));
+end;
+
+/// Bold text from here (until ResetFormat or the next Write's reset).
+/// @since 0.2
+exported routine SetBold();
+begin
+  WriteEscape(CsiBold);
+end;
+
+/// Resets bold, the colours and every other attribute.
+/// @since 0.2
+exported routine ResetFormat();
+begin
+  WriteEscape(CsiResetFormat);
+end;
+
+/// The text colour from here, a standard colour.
+/// @param AColor the colour
+/// @since 0.2
+exported routine SetForegroundColor(const AColor: TextColor);
+begin
+  WriteEscape(CsiForeground(AColor));
+end;
+
+/// The text colour from here, a 24-bit colour.
+/// @param AColor the colour
+/// @since 0.2
+exported routine SetForegroundColor(const AColor: Rgb);
+begin
+  WriteEscape(CsiForeground(AColor));
+end;
+
+/// The background colour from here, a standard colour.
+/// @param AColor the colour
+/// @since 0.2
+exported routine SetBackgroundColor(const AColor: TextColor);
+begin
+  WriteEscape(CsiBackground(AColor));
+end;
+
+/// The background colour from here, a 24-bit colour.
+/// @param AColor the colour
+/// @since 0.2
+exported routine SetBackgroundColor(const AColor: Rgb);
+begin
+  WriteEscape(CsiBackground(AColor));
+end;
+
+/// The standard colour with the number AIndex, held to 0-15 (below 0 is
+/// Black, past 15 BrightWhite): a loop's counter picks colours in turn.
+/// @param AIndex the colour's number (TextColor's order)
+/// @returns the colour
+/// @since 0.2
+/// @example `SetForegroundColor(TextColorAt(LIndex mod 16));`
+exported routine TextColorAt(const AIndex: int32): TextColor;
+var
+  LIndex: int32;
+begin
+  LIndex := AIndex;
+  if LIndex < 0 then
+    LIndex := 0;
+  end;
+  if LIndex > 15 then
+    LIndex := 15;
+  end;
+  return (TextColor)LIndex;
+end;
+
+/// The terminal's visible width in columns; 80 when standard output is not
+/// a terminal.
+/// @returns the width
+/// @since 0.2
+exported routine GetTerminalWidth(): int32;
+begin
+  return TerminalColumns();
+end;
+
+/// The terminal's visible height in lines; 25 when standard output is not a
+/// terminal.
+/// @returns the height
+/// @since 0.2
+exported routine GetTerminalHeight(): int32;
+begin
+  return TerminalRows();
+end;
+
+/// The columns a text takes in a terminal: UTF-8 code points count 1, East
+/// Asian wide / fullwidth characters and emoji 2, combining marks,
+/// zero-width characters and control characters 0; a byte that is not
+/// UTF-8 counts 1.
+/// @param AText UTF-8 text
+/// @returns the columns
+/// @since 0.2
+/// @example `DisplayWidth("日本語")` is 6
+exported routine DisplayWidth(const AText: string): int64;
+begin
+  return Utf8Columns(AText);
+end;
+
+/// The text padded with spaces after it to AWidth columns; a text at least
+/// that wide is returned as it is.
+/// @param AText the text
+/// @param AWidth the columns to fill
+/// @returns the padded text
+/// @since 0.2
+exported routine PadText(const AText: string; const AWidth: int32): string;
+begin
+  return AText + FillColumns(" ", int64(AWidth) - DisplayWidth(AText));
+end;
+
+/// The text padded with APad after it to AWidth columns; see PadText(AText,
+/// AWidth, APad, AAlign).
+/// @param AText the text
+/// @param AWidth the columns to fill
+/// @param APad the pad character
+/// @returns the padded text
+/// @since 0.2
+exported routine PadText(const AText: string; const AWidth: int32; const APad: string): string;
+begin
+  return AText + FillColumns(APad, int64(AWidth) - DisplayWidth(AText));
+end;
+
+/// The text padded with APad to AWidth columns, placed by AAlign (Center:
+/// the odd column on the right). APad is one character; a wide one fills
+/// two columns, a column left over is a space; an empty pad is a space. A
+/// text at least AWidth wide is returned as it is.
+/// @param AText the text
+/// @param AWidth the columns to fill
+/// @param APad the pad character
+/// @param AAlign where the text sits
+/// @returns the padded text
+/// @since 0.2
+/// @example `PadText("ab", 7, ".", TextAlign.Center)` is "..ab..."
+exported routine PadText(const AText: string; const AWidth: int32; const APad: string; const AAlign: TextAlign): string;
+var
+  LPadTotal: int64;
+  LPadLeft: int64;
+begin
+  LPadTotal := int64(AWidth) - DisplayWidth(AText);
+  if LPadTotal <= 0 then
+    return AText;
+  end;
+  if AAlign = TextAlign.Right then
+    return FillColumns(APad, LPadTotal) + AText;
+  end;
+  if AAlign = TextAlign.Center then
+    LPadLeft := LPadTotal div 2;
+    return FillColumns(APad, LPadLeft) + AText + FillColumns(APad, LPadTotal - LPadLeft);
+  end;
+  return AText + FillColumns(APad, LPadTotal);
+end;
+
+/// AWidth columns of AChar, filled as PadText fills.
+/// @param AChar the character
+/// @param AWidth the columns; <= 0 gives ""
+/// @returns the rule
+/// @since 0.2
+exported routine RuleText(const AChar: string; const AWidth: int32): string;
+begin
+  return FillColumns(AChar, int64(AWidth));
+end;
+
+/// A progress bar, "[====    ]  50%": ACurrent of ATotal, held to 0..ATotal,
+/// floored (full and 100% only at the end); ATotal <= 0 counts as nothing
+/// done.
+/// @param ACurrent the work done
+/// @param ATotal all the work
+/// @param AWidth the bar's columns between the brackets (below 0 counts as 0)
+/// @returns the bar text
+/// @since 0.2
+exported routine ProgressBarText(const ACurrent: int64; const ATotal: int64; const AWidth: int32): string;
+var
+  LWidth: int64;
+  LDone: int64;
+  LFilled: int64;
+  LPercent: int64;
+begin
+  LWidth := int64(AWidth);
+  if LWidth < 0 then
+    LWidth := 0;
+  end;
+  LFilled := 0;
+  LPercent := 0;
+  if ATotal > 0 then
+    LDone := ACurrent;
+    if LDone < 0 then
+      LDone := 0;
+    end;
+    if LDone > ATotal then
+      LDone := ATotal;
+    end;
+    LFilled := ScaledFloor(LDone, LWidth, ATotal);
+    LPercent := ScaledFloor(LDone, 100, ATotal);
+  end;
+  return FormatStr("[{}{}] {:3}%", FillColumns("=", LFilled), FillColumns(" ", LWidth - LFilled), LPercent);
+end;
+
+/// The spinner's character for a frame: | / - \ in turn, any frame
+/// (negative ones too).
+/// @param AFrame the frame number
+/// @returns the character
+/// @since 0.2
+exported routine SpinnerFrame(const AFrame: int32): string;
+var
+  LIndex: int32;
+begin
+  // a remainder 0..3 for a negative frame too
+  LIndex := ((AFrame mod 4) + 4) mod 4;
+  if LIndex = 0 then
+    return "|";
+  end;
+  if LIndex = 1 then
+    return "/";
+  end;
+  if LIndex = 2 then
+    return "-";
+  end;
+  return "\\";
+end;
+
+/// A line of "-" as wide as the terminal, then a line break.
+/// @since 0.2
+exported routine HorizontalRule();
+begin
+  WriteText(RuleText("-", GetTerminalWidth()));
+  WriteText(CsiLf);
+end;
+
+/// A line of AChar as wide as the terminal, then a line break.
+/// @param AChar the character
+/// @since 0.2
+exported routine HorizontalRule(const AChar: string);
+begin
+  WriteText(RuleText(AChar, GetTerminalWidth()));
+  WriteText(CsiLf);
+end;
+
+/// A line of AChar AWidth columns wide (<= 0: the terminal's width), then a
+/// line break.
+/// @param AChar the character
+/// @param AWidth the columns
+/// @since 0.2
+exported routine HorizontalRule(const AChar: string; const AWidth: int32);
+var
+  LWidth: int32;
+begin
+  LWidth := AWidth;
+  if LWidth <= 0 then
+    LWidth := GetTerminalWidth();
+  end;
+  WriteText(RuleText(AChar, LWidth));
+  WriteText(CsiLf);
+end;
+
+/// Writes PadText(AText, AWidth).
+/// @param AText the text
+/// @param AWidth the columns to fill
+/// @since 0.2
+exported routine WritePadded(const AText: string; const AWidth: int32);
+begin
+  WriteText(PadText(AText, AWidth));
+end;
+
+/// Writes PadText(AText, AWidth, APad).
+/// @param AText the text
+/// @param AWidth the columns to fill
+/// @param APad the pad character
+/// @since 0.2
+exported routine WritePadded(const AText: string; const AWidth: int32; const APad: string);
+begin
+  WriteText(PadText(AText, AWidth, APad));
+end;
+
+/// Writes PadText(AText, AWidth, APad, AAlign).
+/// @param AText the text
+/// @param AWidth the columns to fill
+/// @param APad the pad character
+/// @param AAlign where the text sits
+/// @since 0.2
+exported routine WritePadded(const AText: string; const AWidth: int32; const APad: string; const AAlign: TextAlign);
+begin
+  WriteText(PadText(AText, AWidth, APad, AAlign));
+end;
+
+/// A carriage return, then ProgressBarText 40 columns wide in green: called
+/// again, it redraws the line.
+/// @param ACurrent the work done
+/// @param ATotal all the work
+/// @since 0.2
+exported routine ProgressBar(const ACurrent: int64; const ATotal: int64);
+begin
+  WriteText(CsiCr);
+  WriteEscape(CsiForeground(TextColor.Green));
+  WriteText(ProgressBarText(ACurrent, ATotal, 40));
+  WriteEscape(CsiResetFormat);
+end;
+
+/// A carriage return, then ProgressBarText AWidth columns wide in green.
+/// @param ACurrent the work done
+/// @param ATotal all the work
+/// @param AWidth the bar's columns
+/// @since 0.2
+exported routine ProgressBar(const ACurrent: int64; const ATotal: int64; const AWidth: int32);
+begin
+  WriteText(CsiCr);
+  WriteEscape(CsiForeground(TextColor.Green));
+  WriteText(ProgressBarText(ACurrent, ATotal, AWidth));
+  WriteEscape(CsiResetFormat);
+end;
+
+/// A carriage return, then ProgressBarText in a standard colour.
+/// @param ACurrent the work done
+/// @param ATotal all the work
+/// @param AWidth the bar's columns
+/// @param AColor the bar's colour
+/// @since 0.2
+exported routine ProgressBar(const ACurrent: int64; const ATotal: int64; const AWidth: int32; const AColor: TextColor);
+begin
+  WriteText(CsiCr);
+  WriteEscape(CsiForeground(AColor));
+  WriteText(ProgressBarText(ACurrent, ATotal, AWidth));
+  WriteEscape(CsiResetFormat);
+end;
+
+/// A carriage return, then ProgressBarText in a 24-bit colour.
+/// @param ACurrent the work done
+/// @param ATotal all the work
+/// @param AWidth the bar's columns
+/// @param AColor the bar's colour
+/// @since 0.2
+exported routine ProgressBar(const ACurrent: int64; const ATotal: int64; const AWidth: int32; const AColor: Rgb);
+begin
+  WriteText(CsiCr);
+  WriteEscape(CsiForeground(AColor));
+  WriteText(ProgressBarText(ACurrent, ATotal, AWidth));
+  WriteEscape(CsiResetFormat);
+end;
+
+/// Waits for a key press on the console's keyboard (a modifier key alone
+/// does not count); returns at once when standard input is not a console /
+/// terminal.
+/// @since 0.2
+exported routine WaitForAnyKey();
+begin
+  WaitKeyPress();
+end;
+
+/// Whether a key press waits to be read (it is left there); other input
+/// events in front of it are taken off the queue.
+/// @returns true when a key waits
+/// @since 0.2
+exported routine AnyKeyPressed(): bool;
+begin
+  return KeyWaiting();
+end;
+
+/// Writes the message in the colour on a new line and waits for a key.
+/// Without AForce it pauses only when the program's console closes with it:
+/// on Windows a console no other process shares (the program was started
+/// from Explorer), never on Linux (a terminal outlives the program). Keys
+/// typed before are dropped first; no keyboard = no pause.
+/// @param AForce true to pause always
+/// @param AColor the message's colour
+/// @param AMessage the message; "" gives "Press any key to continue... "
+/// @since 0.2
+exported routine Pause(const AForce: bool; const AColor: TextColor; const AMessage: string);
+var
+  LKeyboard: bool;
+  LCloses: bool;
+begin
+  LKeyboard := KeyboardPresent();
+  if not LKeyboard then
+    return;
+  end;
+  LCloses := ClosesWithProgram();
+  if (not AForce) and (not LCloses) then
+    return;
+  end;
+  DropKeys();
+  WriteText(CsiLf);
+  WriteEscape(CsiForeground(AColor));
+  if len(AMessage) = 0 then
+    WriteText("Press any key to continue... ");
+  else
+    WriteText(AMessage);
+  end;
+  WriteEscape(CsiResetFormat);
+  WaitForAnyKey();
+  WriteText(CsiLf);
+end;
+
+/// Pause(false, TextColor.White, "Press any key to continue... ").
+/// @since 0.2
+exported routine Pause();
+begin
+  Pause(false, TextColor.White, "");
+end;
+
+/// Pause(AForce, TextColor.White, "Press any key to continue... ").
+/// @param AForce true to pause always
+/// @since 0.2
+exported routine Pause(const AForce: bool);
+begin
+  Pause(AForce, TextColor.White, "");
+end;
+
+/// Pause(AForce, AColor, "Press any key to continue... ").
+/// @param AForce true to pause always
+/// @param AColor the message's colour
+/// @since 0.2
+exported routine Pause(const AForce: bool; const AColor: TextColor);
+begin
+  Pause(AForce, AColor, "");
+end;
+
+/// Sets the console window's title: on Windows through the console API, on
+/// Linux as CsiTitle (written while EscapesEnabled).
+/// @param ATitle the title (UTF-8)
+/// @since 0.2
+exported routine SetTitle(const ATitle: string);
+var
+  LDone: bool;
+begin
+  LDone := OsSetTitle(ATitle);
+  if not LDone then
+    WriteEscape(CsiTitle(ATitle));
+  end;
+end;
+
+/// Waits for a key that types a character and returns it as UTF-8 text, the
+/// same on both targets: Enter KeyEnter, Backspace KeyBackspace, Escape
+/// KeyEscape; keys that type nothing (an arrow, a modifier alone) are
+/// skipped.
+/// @returns the key's text; "" when standard input is not a console /
+///   terminal
+/// @since 0.2
+/// @see IsEnterKey
+exported routine ReadKey(): string;
+begin
+  return ReadKeyText();
+end;
+
+/// Whether a ReadKey result is Enter.
+/// @param AKey a ReadKey result
+/// @returns true for Enter
+/// @since 0.2
+/// @example `if IsEnterKey(ReadKey()) then ... end;`
+exported routine IsEnterKey(const AKey: string): bool;
+begin
+  return AKey = KeyEnter;
+end;
+
+/// Whether a ReadKey result is Escape.
+/// @param AKey a ReadKey result
+/// @returns true for Escape
+/// @since 0.2
+exported routine IsEscapeKey(const AKey: string): bool;
+begin
+  return AKey = KeyEscape;
+end;
+
+/// Waits until ReadKey gives AKey; returns at once with no keyboard (ReadKey
+/// gives "").
+/// @param AKey the key's text (KeyEnter, KeyEscape, "q" ...)
+/// @since 0.2
+exported routine WaitForKey(const AKey: string);
+var
+  LKey: string;
+begin
+  repeat
+    LKey := ReadKey();
+  until (len(LKey) = 0) or (LKey = AKey);
+end;
+
+/// Waits until ReadKey gives Enter; returns at once with no keyboard.
+/// @since 0.2
+exported routine WaitForKey();
+begin
+  WaitForKey(KeyEnter);
+end;
+
+/// Writes the message on a new line, reads a line from standard input and
+/// tells whether it equals AQuitWord, ASCII letters compared without case.
+/// @param AMessage the message; "" gives "Press ENTER to continue..."
+/// @param AQuitWord the word that answers true; "" never does
+/// @returns true when the line is AQuitWord
+/// @since 0.2
+/// @example `if WaitForEnter("Again? (q quits) ", "q") then ... end;`
+exported routine WaitForEnter(const AMessage: string; const AQuitWord: string): bool;
+var
+  LLine: string;
+begin
+  WriteText(CsiLf);
+  if len(AMessage) = 0 then
+    WriteText("Press ENTER to continue...");
+  else
+    WriteText(AMessage);
+  end;
+  WriteEscape(CsiResetFormat);
+  LLine := ReadLineText();
+  WriteText(CsiLf);
+  if len(AQuitWord) = 0 then
+    return false;
+  end;
+  return AsciiSameText(LLine, AQuitWord);
+end;
+
+/// WaitForEnter("Press ENTER to continue...", "").
+/// @returns false
+/// @since 0.2
+exported routine WaitForEnter(): bool;
+begin
+  return WaitForEnter("", "");
+end;
+
+/// WaitForEnter(AMessage, "").
+/// @param AMessage the message; "" gives "Press ENTER to continue..."
+/// @returns false
+/// @since 0.2
+exported routine WaitForEnter(const AMessage: string): bool;
+begin
+  return WaitForEnter(AMessage, "");
+end;
+
+// Write(AFormat, ...) writes its arguments formatted as FormatStr formats
+// them, then the format reset (a colour or bold set before it lasts for this
+// one write); WriteLn adds a line break; Write() / WriteLn() alone write the
+// reset (and the break). WriteKeepFormat / WriteLnKeepFormat leave the reset
+// out: a colour or bold set before it, or inside the text, lasts past it. C++
+// variadic templates (as FormatStr), so they are in the unit's header (cpp
+// header;) and the format string is checked against the arguments when the
+// program is built. Example:
+//   WriteLn("{} of {} done", LDone, LTotal);
+cpp header;
+
+#include <format>
+#include <string>
+
+template <class... TArgs>
+void Write(std::format_string<::pcpp::format_arg_t<TArgs>...> AFormat, const TArgs&... AArgs)
+{
+    ::pcpp_m_Console::WriteText(FormatStr(AFormat, AArgs...));
+    ::pcpp_m_Console::WriteEscape(::pcpp_m_Console::CsiResetFormat);
+}
+
+template <class... TArgs>
+void WriteLn(std::format_string<::pcpp::format_arg_t<TArgs>...> AFormat, const TArgs&... AArgs)
+{
+    ::pcpp_m_Console::WriteText(FormatStr(AFormat, AArgs...));
+    ::pcpp_m_Console::WriteEscape(::pcpp_m_Console::CsiResetFormat);
+    ::pcpp_m_Console::WriteText(::pcpp_m_Console::CsiLf);
+}
+
+inline void Write()
+{
+    ::pcpp_m_Console::WriteEscape(::pcpp_m_Console::CsiResetFormat);
+}
+
+inline void WriteLn()
+{
+    ::pcpp_m_Console::WriteEscape(::pcpp_m_Console::CsiResetFormat);
+    ::pcpp_m_Console::WriteText(::pcpp_m_Console::CsiLf);
+}
+
+template <class... TArgs>
+void WriteKeepFormat(std::format_string<::pcpp::format_arg_t<TArgs>...> AFormat, const TArgs&... AArgs)
+{
+    ::pcpp_m_Console::WriteText(FormatStr(AFormat, AArgs...));
+}
+
+template <class... TArgs>
+void WriteLnKeepFormat(std::format_string<::pcpp::format_arg_t<TArgs>...> AFormat, const TArgs&... AArgs)
+{
+    ::pcpp_m_Console::WriteText(FormatStr(AFormat, AArgs...));
+    ::pcpp_m_Console::WriteText(::pcpp_m_Console::CsiLf);
+}
+
+end.

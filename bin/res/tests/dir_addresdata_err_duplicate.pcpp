@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addresdata_err_duplicate.pcpp - break step of dir_addresdata.pcpp:
+  a key the imported unit dir_addresdata_err_duplicate_unit.pcpp already adds
+  (SM0121; a note points at the unit's directive). One program has one key
+  space: every module's entries are linked into the same binary. The unit is
+  checked first (it is imported), so the report is here.
+
+  How to check, from repo\bin:
+    pcpp res\tests\dir_addresdata_err_duplicate.pcpp
+    pcpp res\tests\dir_addresdata_err_duplicate.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe dir_addresdata_err_duplicate;
+@addresdata "hello" "$P:res/tests/dir_addresdata_hello.txt"; // ERROR SM0121@13
+import dir_addresdata_err_duplicate_unit;
+
+begin
+end.

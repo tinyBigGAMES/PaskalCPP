@@ -1,0 +1,189 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  ZipAssets.pcpp - game assets from a password zip (import sfml_ext): no
+  window, it prints what it does. The examples share one archive,
+  repo\bin\assets.zip: when it is not there, sfx::buildZip packs res\assets
+  into it, each entry encrypted, named as the file is below repo\bin
+  (res/assets/fonts/...). Delete it to pack the assets again. An sf::Font,
+  an sf::Texture and an sf::SoundBuffer open their data from
+  sfx::ZipStreams over its entries, and every byte read from the zip is
+  compared with the file on disk. A seek back reads the first bytes again; a
+  seek to the end reads nothing; a seek past it is refused, the stream still
+  usable. Last, what must not open: a wrong password, no password, a missing
+  entry, a name in another case (matched as stored, on every target) and a
+  missing archive. Every sfx path takes a $P: / $D: prefix (ResolvePath).
+==============================================================================*/
+
+module exe ZipAssets;
+
+import
+  sfml_ext,
+  SysUtils;
+
+const
+  KPassword: string = "PaskalCPP";
+  KArchive: string = "$P:../../assets.zip";
+
+// Every byte of AEntry read through a ZipStream, against the file on disk
+routine SameBytes(const AEntry: string): bool;
+var
+  LZip: sfx::ZipStream;
+  LDisk: sf::FileInputStream;
+  LFromZip: array of uint8;
+  LFromDisk: array of uint8;
+  LSize: std::optional<std::size_t>;
+  LGot: std::optional<std::size_t>;
+begin
+  if not LZip.open(KArchive, AEntry, KPassword) then
+    return false;
+  end;
+  if not LDisk.open(ResolvePath("$P:../../" + AEntry)) then
+    return false;
+  end;
+
+  LSize := LZip.getSize();
+  setlength(LFromZip, int64(LSize.value()));
+  setlength(LFromDisk, int64(LSize.value()));
+  LGot := LZip.read(address of LFromZip[0], len(LFromZip));
+  if not LGot.has_value() then
+    return false;
+  end;
+  LGot := LDisk.read(address of LFromDisk[0], len(LFromDisk));
+  if not LGot.has_value() then
+    return false;
+  end;
+
+  return (LFromZip = LFromDisk) and LZip.close();
+end;
+
+// True when AEntry cannot be read with APassword: open refuses it, or (for the
+// wrong password in about 256 that passes the header check) its data fails to
+// read or its CRC does not match when the stream closes
+routine Refused(const AArchive: string; const AEntry: string; const APassword: string): bool;
+var
+  LZip: sfx::ZipStream;
+  LBuffer: array[0..4095] of uint8;
+  LGot: std::optional<std::size_t>;
+begin
+  if not LZip.open(AArchive, AEntry, APassword) then
+    return true;
+  end;
+  repeat
+    LGot := LZip.read(address of LBuffer[0], 4096);
+  until (not LGot.has_value()) or (LGot.value() = 0);
+  return not LZip.close();
+end;
+
+routine Run();
+var
+  LFontZip: sfx::ZipStream;
+  LFont: sf::Font;
+  LImageZip: sfx::ZipStream;
+  LTexture: sf::Texture;
+  LSoundZip: sfx::ZipStream;
+  LSound: sf::SoundBuffer;
+  LProbe: sfx::ZipStream;
+  LFirst: array[0..7] of uint8;
+  LAgain: array[0..7] of uint8;
+  LSkipped: array[0..3] of uint8;
+  LGot: std::optional<std::size_t>;
+  LPos: std::optional<std::size_t>;
+  LIndex: int32;
+  LText: string;
+begin
+  // The shared archive, packed once: entries named below repo\bin ($P:../..)
+  if not FileExists(KArchive) then
+    if not sfx::buildZip("$P:../../res/assets", KArchive, KPassword, "$P:../..") then
+      println("buildZip failed");
+      return;
+    end;
+  end;
+  println("assets.zip there: {}", FileExists(KArchive));
+
+  // An sf::Font reads its stream while it is used: its ZipStream is declared
+  // first, so it lives longer than the font
+  if not LFontZip.open(KArchive, "res/assets/fonts/JetBrainsMonoRegular.ttf", KPassword) then
+    println("the font entry did not open");
+    return;
+  end;
+  if not LFont.openFromStream(LFontZip) then
+    println("the font did not load");
+    return;
+  end;
+  println("font: {}, {} bytes", LFont.getInfo().family, LFontZip.getSize().value());
+
+  if not LImageZip.open(KArchive, "res/assets/images/paskalcpp.png", KPassword) then
+    println("the image entry did not open");
+    return;
+  end;
+  if not LTexture.loadFromStream(LImageZip) then
+    println("the texture did not load");
+    return;
+  end;
+  println("texture: {} x {}, {} bytes", LTexture.getSize().x, LTexture.getSize().y, LImageZip.getSize().value());
+
+  if not LSoundZip.open(KArchive, "res/assets/audio/sfx/digthis.ogg", KPassword) then
+    println("the sound entry did not open");
+    return;
+  end;
+  if not LSound.loadFromStream(LSoundZip) then
+    println("the sound did not load");
+    return;
+  end;
+  println("sound: {} Hz, {} channel(s), {} samples, {} ms", LSound.getSampleRate(),
+    LSound.getChannelCount(), LSound.getSampleCount(), LSound.getDuration().asMilliseconds());
+
+  println("same bytes as the files: font {}, image {}, sound {}",
+    SameBytes("res/assets/fonts/JetBrainsMonoRegular.ttf"),
+    SameBytes("res/assets/images/paskalcpp.png"),
+    SameBytes("res/assets/audio/sfx/digthis.ogg"));
+
+  // A seek back starts the entry again: the first bytes read twice are the
+  // same. The name written with '\' (one escaped backslash each) is the same entry
+  if not LProbe.open(KArchive, "res\\assets\\images\\paskalcpp.png", KPassword) then
+    println("the probe entry did not open");
+    return;
+  end;
+  LGot := LProbe.read(address of LFirst[0], 8);
+  LPos := LProbe.seek(100);
+  LGot := LProbe.read(address of LSkipped[0], 4);
+  LPos := LProbe.seek(0);
+  LGot := LProbe.read(address of LAgain[0], 8);
+  LText := "";
+  for LIndex := 0 to 7 do
+    LText := LText + FormatStr("{:02x}", LFirst[LIndex]);
+  end;
+  println("png signature {}, the same after a seek back: {}, tell {}", LText, LFirst = LAgain,
+    LProbe.tell().value());
+
+  LPos := LProbe.seek(LProbe.getSize().value());
+  LGot := LProbe.read(address of LFirst[0], 8);
+  println("seek to the end: {}, then read: {} bytes", LPos.has_value(), LGot.value());
+  println("seek past the end: {}", LProbe.seek(LProbe.getSize().value() + 1).has_value());
+  println("still usable: seek back to 0 {}, close {}", LProbe.seek(0).has_value(), LProbe.close());
+
+  println("refused: wrong password {}, no password {}, missing entry {}, other case {}, missing archive {}",
+    Refused(KArchive, "res/assets/images/paskalcpp.png", "wrong"),
+    Refused(KArchive, "res/assets/images/paskalcpp.png", ""),
+    Refused(KArchive, "res/assets/images/missing.png", KPassword),
+    Refused(KArchive, "res/assets/Images/paskalcpp.png", KPassword),
+    Refused("$P:missing.zip", "res/assets/images/paskalcpp.png", KPassword));
+  println("refused with the right password: {}", Refused(KArchive, "res/assets/images/paskalcpp.png", KPassword));
+end;
+
+begin
+  Run();
+end.

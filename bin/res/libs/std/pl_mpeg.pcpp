@@ -1,0 +1,65 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  pl_mpeg.pcpp - the pl_mpeg unit (pl_mpeg, header-only): `import pl_mpeg;`
+  uses MPEG-1 video, MP2 audio and MPEG-PS demuxing from PaskalCPP. A
+  self-describing vendor module: it owns every path it needs. The
+  implementation is a static library of its own, libpl_mpeg.a (one per
+  target, built from its C source by PaskalCPP-Libs' build-pl_mpeg.cmd),
+  linked by @linklibrary: every module of the program shares the one copy,
+  and a program links only the libraries it imports.
+
+  Open a file with plm_create_with_filename_utf8 (plm_utf8.h, part of the
+  package): it takes a UTF-8 path on every target and reads files past
+  2 GiB on Windows too, where pl_mpeg's own plm_create_with_filename reads
+  the path in the ANSI code page and seeks with a 32-bit offset.
+
+  Read any other source of bytes (an archive entry, an engine's stream) with
+  plm_create_with_stream (plm_stream.h, part of the package): two callbacks,
+  read and seek, and the data's size; the video ends and loops as a file
+  does (pl_mpeg's plm_buffer_create_with_callbacks gives a callback no way to
+  say the source has ended).
+==============================================================================*/
+
+module unit pl_mpeg;
+
+@addincludepath "$P:res/libs/vendor/pl_mpeg/include";
+
+// The library of each target; Windows needs only mingw's CRT (linked by
+// default), Linux also links m.
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/pl_mpeg/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/pl_mpeg/lib/x86_64-linux-gnu";
+  @linklibrary "m";
+@else
+  @message error "pl_mpeg: unsupported target";
+@endif
+
+@linklibrary "pl_mpeg";
+
+// The declarations go to this unit's header, so every importer sees the API
+cpp header;
+
+// pl_mpeg.h's declarations use FILE without including stdio.h
+#include <stdio.h>
+#include <pl_mpeg.h>
+#include <plm_utf8.h>
+#include <plm_stream.h>
+
+end.

@@ -1,0 +1,153 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  ConsoleDemo.pcpp - std Console (import Console): the console's title, the
+  16 standard colours and 24-bit ones, bold, the cursor placed by position,
+  a padded table, a progress bar, a live key check while something animates,
+  typed keys, then a pause. Run it in a terminal: redirected to a file, only
+  the text is written. (sfml_ext's message box: examples\sfml\MessageBoxes.)
+==============================================================================*/
+
+module exe ConsoleDemo;
+
+import Console, SysUtils;
+
+// Step AStep (0-47) of a red-to-green gradient
+routine GradientAt(const AStep: int32): Rgb;
+var
+  LColor: Rgb;
+begin
+  LColor.R := uint8(AStep * 5);
+  LColor.G := uint8(255 - AStep * 5);
+  LColor.B := 128;
+  return LColor;
+end;
+
+routine ShowColors();
+var
+  LIndex: int32;
+  LGold: Rgb(255, 215, 0);
+begin
+  WriteLn("The 16 standard colours:");
+  for LIndex := 0 to 15 do
+    SetBackgroundColor(TextColorAt(LIndex));
+    Write("  {:2}  ", LIndex);
+  end;
+  WriteLn();
+  WriteLn();
+
+  WriteLn("24-bit colours (Rgb):");
+  for LIndex := 0 to 47 do
+    SetBackgroundColor(GradientAt(LIndex));
+    Write(" ");
+  end;
+  WriteLn();
+  SetForegroundColor(LGold);
+  SetBold();
+  WriteLn("Bold gold text");
+  WriteLn();
+end;
+
+routine Spin();
+var
+  LFrame: int32 = 0;
+begin
+  HideCursor();
+  SetForegroundColor(TextColor.BrightCyan);
+  WriteLn("Press a key (a modifier alone does not count)...");
+  while not AnyKeyPressed() do
+    SaveCursorPosition();
+    SetForegroundColor(TextColor.BrightYellow);
+    Write("  frame {}", LFrame);
+    RestoreCursorPosition();
+    LFrame := LFrame + 1;
+    Delay(50);
+  end;
+  // the key that ended the loop is still queued: take it
+  WaitForAnyKey();
+  ClearLine();
+  ShowCursor();
+  WriteLn("Key pressed after {} frames.", LFrame);
+end;
+
+routine ShowTable();
+begin
+  HorizontalRule("─", 40);
+  WritePadded("Name", 16);
+  WritePadded("Width", 12, " ", TextAlign.Center);
+  WritePadded("Kind", 12, " ", TextAlign.Right);
+  WriteLn();
+  HorizontalRule("─", 40);
+  WritePadded("abc", 16);
+  WritePadded("3", 12, " ", TextAlign.Center);
+  WritePadded("ASCII", 12, " ", TextAlign.Right);
+  WriteLn();
+  WritePadded("日本語", 16);
+  WritePadded("6", 12, " ", TextAlign.Center);
+  WritePadded("wide", 12, " ", TextAlign.Right);
+  WriteLn();
+  HorizontalRule("─", 40);
+  WriteLn();
+end;
+
+routine ShowProgress();
+var
+  LStep: int32;
+begin
+  HideCursor();
+  for LStep := 0 to 50 do
+    ProgressBar(LStep, 50, 30);
+    Write(" {}", SpinnerFrame(LStep));
+    Delay(40);
+  end;
+  ShowCursor();
+  WriteLn();
+  WriteLn();
+end;
+
+routine ReadKeys();
+var
+  LKey: string;
+begin
+  WriteLn("Type keys (Escape ends; arrows type nothing and are skipped):");
+  LKey := ReadKey();
+  while (LKey <> "") and not IsEscapeKey(LKey) do
+    if IsEnterKey(LKey) then
+      WriteLn("  Enter");
+    else
+      WriteLn("  [{}] {} column(s)", LKey, DisplayWidth(LKey));
+    end;
+    LKey := ReadKey();
+  end;
+end;
+
+begin
+  SetTitle("Console demo");
+  ClearScreen();
+  SetCursorPosition(4, 1);
+  SetBold();
+  WriteLn("Console demo ({} x {})", GetTerminalWidth(), GetTerminalHeight());
+  SetCursorPosition(0, 3);
+  ShowColors();
+  ShowTable();
+  ShowProgress();
+  Spin();
+  ReadKeys();
+  if WaitForEnter("Type quit to end now, or press ENTER: ", "quit") then
+    WriteLn("Quit.");
+  else
+    Pause(true, TextColor.BrightGreen);
+  end;
+end.

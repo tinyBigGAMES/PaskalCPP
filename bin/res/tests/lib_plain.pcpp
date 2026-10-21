@@ -25,36 +25,31 @@
   How to check, from repo\bin:
     pcpp res\tests\lib_plain.pcpp
     pcpp res\tests\lib_plain.pcpp -t x86_64-linux-gnu
-  CHECK: output\lib_plain\lib holds lib_plain.lib and nothing else;
-  output\lib_plain_linux\lib holds liblib_plain.a and nothing else.
+  CHECK: output\lib holds lib_plain.lib (windows) and liblib_plain.a (linux),
+  with no pcpp_runtime beside them from this build.
   Then lib_plain_host.pcpp (a PaskalCPP program that links it).
 
   A C program built by another toolchain, a C driver, the lib alone:
-    res\zig\zig.exe cc -target x86_64-windows-gnu res\tests\lib_plain_host.c output\lib_plain\lib\lib_plain.lib -o output\lib_plain_c.exe
+    res\zig\zig.exe cc -target x86_64-windows-gnu res\tests\lib_plain_host.c output\lib\lib_plain.lib -o output\lib_plain_c.exe
     output\lib_plain_c.exe
-    res\zig\zig.exe cc -target x86_64-linux-gnu res\tests\lib_plain_host.c output\lib_plain_linux\lib\liblib_plain.a -o output\lib_plain_c
+    res\zig\zig.exe cc -target x86_64-linux-gnu res\tests\lib_plain_host.c output\lib\liblib_plain.a -o output\lib_plain_c
     wsl ./output/lib_plain_c
   CHECK: both print   from C: lib_plain_add(2, 3) = 5
 
   Break it (by hand, one step at a time, undo each before the next):
     1. in this file, "AA + AB" -> "AA div AB", then build it (windows) and run
        the C program steps (windows) again.
-       CHECK: the build prints "Publishing pcpp_runtime.lib to ...output/lib_plain/lib..."
+       CHECK: the build prints "Publishing pcpp_runtime.lib to ...output/lib..."
        and pcpp_runtime.lib now sits beside lib_plain.lib (div calls the runtime);
        the C link fails: lld-link: error: undefined symbol: pcpp::init(int, char**)
        (a runtime-using lib needs pcpp_runtime and a C++ driver: lib_runtime.pcpp).
        Undo: restore the line and build it (windows) again.
-       CHECK: it prints "Removed ...output/lib_plain/lib/pcpp_runtime.lib: this
+       CHECK: it prints "Removed ...output/lib/pcpp_runtime.lib: this
        lib no longer uses the runtime" and lib_plain.lib is alone again
     2. lib_plain_host_err_nolink.pcpp: the host without its @linklibrary line
 *******************************************************************************/
 
 module lib lib_plain;
-@ifdef TARGET_X86_64_LINUX_GNU
-@outputpath "$P:output/lib_plain_linux";
-@else
-@outputpath "$P:output/lib_plain";
-@endif
 
 exported routine clink lib_plain_add(AA: int32; AB: int32): int32;
 begin

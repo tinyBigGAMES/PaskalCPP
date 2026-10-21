@@ -1,0 +1,1775 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  Math.pcpp - the Math unit: `import Math;` gives the maths a program reaches
+  for beside the language's own operators. PerceivedVolume turns a level a
+  person sets (a slider, 0 to 1) into the linear volume an audio API takes,
+  so equal steps sound like equal steps; PerceivedLevel turns a volume back
+  into its level. Beside them: the constants (Pi, DegToRad / RadToDeg, the
+  Epsilons, NaN), Clamp and Wrap, SameSign and SameValue, Lerp, AngleDifference,
+  SmoothMove, the Easing curves (Ease, EaseBetween) and Random, a seeded
+  generator whose numbers are the same on every target. And the 2D geometry
+  of a game, with no graphics library: Vector2 (laid out as SFML's, raylib's
+  and SDL's {x, y}), Rect and Extent, the oriented box Obb, and the
+  collisions between them (points, circles, triangles, rectangles, segments,
+  boxes). Angles are degrees. A name is read bare when no other imported unit
+  exports it (PerceivedVolume), or qualified (Math.PerceivedVolume).
+==============================================================================*/
+
+module unit Math;
+
+// RandomGenerator holds a std::mt19937, and the exported objects' methods
+// (Vector2, Rect, ...) are written in the header with the type: its importers'
+// C++ needs these.
+cpp header;
+
+#include <algorithm>
+#include <cmath>
+#include <random>
+
+// The C++ maths functions the bodies call; the unit's own source only.
+cpp source;
+
+#include <cmath>
+#include <cstdint>
+#include <utility>
+
+// The bit-level draws behind Random: our own mapping over std::mt19937's
+// 32-bit outputs. The engine's sequence is fixed by the C++ standard, its
+// distributions are not, so this mapping gives a seed the same numbers on
+// every target and every standard library.
+namespace
+{
+
+// 64 bits from two draws, the first one high
+std::uint64_t Draw64(std::mt19937& AEngine)
+{
+    const std::uint64_t LHigh = AEngine();
+    const std::uint64_t LLow = AEngine();
+    return (LHigh << 32) | LLow;
+}
+
+// A draw in [0, ASpan) with no bias; ASpan 0 stands for 2^64. The lowest
+// (2^bits mod ASpan) draws are rejected, so what is left is a whole number of
+// spans and every result is equally likely.
+std::uint64_t DrawBelow(std::mt19937& AEngine, const std::uint64_t ASpan)
+{
+    if (ASpan == 0)
+    {
+        return Draw64(AEngine);
+    }
+    if (ASpan <= 0x100000000ull)
+    {
+        // One 32-bit draw per try
+        const std::uint64_t LReject = 0x100000000ull % ASpan;
+        for (;;)
+        {
+            const std::uint64_t LX = AEngine();
+            if (LX >= LReject)
+            {
+                return LX % ASpan;
+            }
+        }
+    }
+    // 2^64 mod ASpan: unsigned arithmetic wraps by definition
+    const std::uint64_t LReject = (0 - ASpan) % ASpan;
+    for (;;)
+    {
+        const std::uint64_t LX = Draw64(AEngine);
+        if (LX >= LReject)
+        {
+            return LX % ASpan;
+        }
+    }
+}
+
+// An integer in [ALow, AHigh], the bounds in either order
+std::int64_t DrawInt64(std::mt19937& AEngine, std::int64_t ALow, std::int64_t AHigh)
+{
+    if (ALow > AHigh)
+    {
+        std::swap(ALow, AHigh);
+    }
+    // The count of values; the whole int64 range wraps to 0 (= 2^64)
+    const std::uint64_t LSpan = static_cast<std::uint64_t>(AHigh) - static_cast<std::uint64_t>(ALow) + 1u;
+    return static_cast<std::int64_t>(static_cast<std::uint64_t>(ALow) + DrawBelow(AEngine, LSpan));
+}
+
+std::int32_t DrawInt32(std::mt19937& AEngine, const std::int32_t ALow, const std::int32_t AHigh)
+{
+    return static_cast<std::int32_t>(DrawInt64(AEngine, ALow, AHigh));
+}
+
+// [0, 1) with 53 random bits (two draws: 27 high bits, 26 low bits)
+double DrawUnit64(std::mt19937& AEngine)
+{
+    const std::uint64_t LHigh = AEngine() >> 5;
+    const std::uint64_t LLow = AEngine() >> 6;
+    return (static_cast<double>(LHigh) * 67108864.0 + static_cast<double>(LLow)) * (1.0 / 9007199254740992.0);
+}
+
+// [0, 1) with 24 random bits (one draw)
+float DrawUnit32(std::mt19937& AEngine)
+{
+    return static_cast<float>(AEngine() >> 8) * (1.0f / 16777216.0f);
+}
+
+// The draw's top bit
+bool DrawBool(std::mt19937& AEngine)
+{
+    return (AEngine() >> 31) != 0;
+}
+
+// A seed from the system's entropy source
+std::uint32_t EntropySeed()
+{
+    std::random_device LDevice;
+    return static_cast<std::uint32_t>(LDevice());
+}
+
+// AValue on the ring [ALow, AHigh] (both ends included, either order): 128-bit
+// arithmetic, so no span or difference of two int64 values overflows
+std::int64_t WrapInteger(const std::int64_t AValue, std::int64_t ALow, std::int64_t AHigh)
+{
+    if (ALow > AHigh)
+    {
+        std::swap(ALow, AHigh);
+    }
+    const __int128 LSpan = static_cast<__int128>(AHigh) - ALow + 1;
+    __int128 LOffset = (static_cast<__int128>(AValue) - ALow) % LSpan;
+    if (LOffset < 0)
+    {
+        LOffset += LSpan;
+    }
+    return static_cast<std::int64_t>(ALow + LOffset);
+}
+
+} // namespace
+
+const
+  // Below this level the curve is a straight line from silence to the
+  // decibel curve's start, so the lowest step is never a jump in loudness
+  KKnee: float64 = 0.1;
+  // The decibel range the level spans when none is given
+  KRangeDb: float64 = 50.0;
+
+/// The linear volume for a level a person sets, so that equal steps of the
+/// level sound like equal steps of loudness. The level maps to decibels over
+/// `ARangeDb` (1 = 0 dB = `AMax`, the knee level 0.1 = -ARangeDb dB), and
+/// below the knee the volume fades in a straight line to exact silence at 0.
+/// A level past 1 gives `AMax`, at or below 0 (or NaN) gives 0. A range of 0
+/// or less makes the curve linear (`ALevel * AMax`).
+/// @param ALevel the level, 0 (silent) to 1 (full)
+/// @param AMax the volume at level 1 (100 for SFML's setVolume)
+/// @param ARangeDb the loudness range in decibels the level spans
+/// @returns the linear volume, 0 to AMax
+/// @example `LSound.setVolume(PerceivedVolume(0.5, 100.0, 40.0));`
+/// @since 0.2
+/// @see PerceivedLevel
+exported routine PerceivedVolume(const ALevel: float64; const AMax: float64; const ARangeDb: float64): float64;
+var
+  LKneeGain: float64;
+  LGain: float64;
+begin
+  // NaN fails every comparison: a NaN level or max is silence
+  if not (ALevel > 0.0) then
+    return 0.0;
+  end;
+  if not (AMax > 0.0) then
+    return 0.0;
+  end;
+  if ALevel >= 1.0 then
+    return AMax;
+  end;
+  if not (ARangeDb > 0.0) then
+    return ALevel * AMax;
+  end;
+  // The gain at the knee: -ARangeDb dB
+  LKneeGain := std::pow(10.0, -ARangeDb / 20.0);
+  if ALevel < KKnee then
+    return ALevel / KKnee * LKneeGain * AMax;
+  end;
+  // Knee .. 1 spans -ARangeDb .. 0 dB, evenly in decibels
+  LGain := std::pow(10.0, -ARangeDb * (1.0 - ALevel) / (1.0 - KKnee) / 20.0);
+  return LGain * AMax;
+end;
+
+/// PerceivedVolume over the default 50 dB range.
+/// @param ALevel the level, 0 (silent) to 1 (full)
+/// @param AMax the volume at level 1
+/// @returns the linear volume, 0 to AMax
+/// @example `LMusic.setVolume(PerceivedVolume(LSlider, 100.0));`
+/// @since 0.2
+/// @see PerceivedLevel
+exported routine PerceivedVolume(const ALevel: float64; const AMax: float64): float64;
+begin
+  return PerceivedVolume(ALevel, AMax, KRangeDb);
+end;
+
+/// PerceivedVolume for float32 values (computed in float64).
+/// @param ALevel the level, 0 (silent) to 1 (full)
+/// @param AMax the volume at level 1
+/// @param ARangeDb the loudness range in decibels the level spans
+/// @returns the linear volume, 0 to AMax
+/// @since 0.2
+exported routine PerceivedVolume(const ALevel: float32; const AMax: float32; const ARangeDb: float32): float32;
+begin
+  return float32(PerceivedVolume(float64(ALevel), float64(AMax), float64(ARangeDb)));
+end;
+
+/// PerceivedVolume for float32 values over the default 50 dB range.
+/// @param ALevel the level, 0 (silent) to 1 (full)
+/// @param AMax the volume at level 1
+/// @returns the linear volume, 0 to AMax
+/// @since 0.2
+exported routine PerceivedVolume(const ALevel: float32; const AMax: float32): float32;
+begin
+  return float32(PerceivedVolume(float64(ALevel), float64(AMax), KRangeDb));
+end;
+
+/// The level that gives a linear volume: PerceivedVolume's inverse over the
+/// same curve, so `PerceivedLevel(PerceivedVolume(L, M, R), M, R)` is `L` for
+/// any L in 0 .. 1. A volume of `AMax` or more gives 1, of 0 or less (or NaN)
+/// gives 0; a max of 0 or less gives 0.
+/// @param AVolume the linear volume
+/// @param AMax the volume at level 1
+/// @param ARangeDb the loudness range in decibels the level spans
+/// @returns the level, 0 to 1
+/// @example `LSlider := PerceivedLevel(LMusic.getVolume(), 100.0, 40.0);`
+/// @since 0.2
+/// @see PerceivedVolume
+exported routine PerceivedLevel(const AVolume: float64; const AMax: float64; const ARangeDb: float64): float64;
+var
+  LGain: float64;
+  LKneeGain: float64;
+begin
+  if not (AMax > 0.0) then
+    return 0.0;
+  end;
+  if not (AVolume > 0.0) then
+    return 0.0;
+  end;
+  LGain := AVolume / AMax;
+  if LGain >= 1.0 then
+    return 1.0;
+  end;
+  if not (ARangeDb > 0.0) then
+    return LGain;
+  end;
+  LKneeGain := std::pow(10.0, -ARangeDb / 20.0);
+  if LGain < LKneeGain then
+    return KKnee * LGain / LKneeGain;
+  end;
+  // The decibels below the max, read back onto knee .. 1
+  return 1.0 - (1.0 - KKnee) * (-20.0 * std::log10(LGain)) / ARangeDb;
+end;
+
+/// PerceivedLevel over the default 50 dB range.
+/// @param AVolume the linear volume
+/// @param AMax the volume at level 1
+/// @returns the level, 0 to 1
+/// @since 0.2
+/// @see PerceivedVolume
+exported routine PerceivedLevel(const AVolume: float64; const AMax: float64): float64;
+begin
+  return PerceivedLevel(AVolume, AMax, KRangeDb);
+end;
+
+/// PerceivedLevel for float32 values (computed in float64).
+/// @param AVolume the linear volume
+/// @param AMax the volume at level 1
+/// @param ARangeDb the loudness range in decibels the level spans
+/// @returns the level, 0 to 1
+/// @since 0.2
+exported routine PerceivedLevel(const AVolume: float32; const AMax: float32; const ARangeDb: float32): float32;
+begin
+  return float32(PerceivedLevel(float64(AVolume), float64(AMax), float64(ARangeDb)));
+end;
+
+/// PerceivedLevel for float32 values over the default 50 dB range.
+/// @param AVolume the linear volume
+/// @param AMax the volume at level 1
+/// @returns the level, 0 to 1
+/// @since 0.2
+exported routine PerceivedLevel(const AVolume: float32; const AMax: float32): float32;
+begin
+  return float32(PerceivedLevel(float64(AVolume), float64(AMax), KRangeDb));
+end;
+
+exported const
+  /// The ratio of a circle's circumference to its diameter.
+  /// @since 0.2
+  Pi: float64 = 3.141592653589793;
+  /// Degrees times DegToRad are radians: `90.0 * DegToRad` is Pi / 2.
+  /// @since 0.2
+  /// @see RadToDeg
+  DegToRad: float64 = 0.017453292519943295;
+  /// Radians times RadToDeg are degrees: `Pi * RadToDeg` is 180.
+  /// @since 0.2
+  /// @see DegToRad
+  RadToDeg: float64 = 57.29577951308232;
+  /// The float32 tolerance SameValue uses when none is given (scaled by the
+  /// values' size past 1).
+  /// @since 0.2
+  /// @see SameValue
+  Epsilon32: float32 = 0.00001f;
+  /// The float64 tolerance SameValue uses when none is given (scaled by the
+  /// values' size past 1).
+  /// @since 0.2
+  /// @see SameValue
+  Epsilon64: float64 = 0.000000000001;
+  /// Not a number. It compares unequal to everything, itself included: test
+  /// a value with `X <> X`.
+  /// @since 0.2
+  NaN: float64 = 0.0 / 0.0;
+
+/// AValue held inside the bounds: below the lower one it is the lower one,
+/// above the upper one the upper one. The bounds may come in either order. A
+/// NaN stays NaN.
+/// @param AValue the value
+/// @param AMin one bound
+/// @param AMax the other bound
+/// @returns AValue inside [AMin, AMax]
+/// @example `LHealth := Clamp(LHealth - LDamage, 0, 100);`
+/// @since 0.2
+/// @see Wrap
+exported routine Clamp(const AValue: float64; const AMin: float64; const AMax: float64): float64;
+var
+  LLow: float64;
+  LHigh: float64;
+begin
+  LLow := AMin;
+  LHigh := AMax;
+  if LLow > LHigh then
+    LLow := AMax;
+    LHigh := AMin;
+  end;
+  if AValue < LLow then
+    return LLow;
+  end;
+  if AValue > LHigh then
+    return LHigh;
+  end;
+  return AValue;
+end;
+
+/// Clamp for float32 values.
+/// @param AValue the value
+/// @param AMin one bound
+/// @param AMax the other bound
+/// @returns AValue inside [AMin, AMax]
+/// @since 0.2
+exported routine Clamp(const AValue: float32; const AMin: float32; const AMax: float32): float32;
+begin
+  return float32(Clamp(float64(AValue), float64(AMin), float64(AMax)));
+end;
+
+/// Clamp for int64 values.
+/// @param AValue the value
+/// @param AMin one bound
+/// @param AMax the other bound
+/// @returns AValue inside [AMin, AMax]
+/// @since 0.2
+exported routine Clamp(const AValue: int64; const AMin: int64; const AMax: int64): int64;
+var
+  LLow: int64;
+  LHigh: int64;
+begin
+  LLow := AMin;
+  LHigh := AMax;
+  if LLow > LHigh then
+    LLow := AMax;
+    LHigh := AMin;
+  end;
+  if AValue < LLow then
+    return LLow;
+  end;
+  if AValue > LHigh then
+    return LHigh;
+  end;
+  return AValue;
+end;
+
+/// Clamp for int32 values.
+/// @param AValue the value
+/// @param AMin one bound
+/// @param AMax the other bound
+/// @returns AValue inside [AMin, AMax]
+/// @since 0.2
+exported routine Clamp(const AValue: int32; const AMin: int32; const AMax: int32): int32;
+begin
+  return int32(Clamp(int64(AValue), int64(AMin), int64(AMax)));
+end;
+
+/// AValue wrapped around the range [AMin, AMax): going past the top comes in
+/// again at the bottom, as an angle does (`Wrap(370.0, 0.0, 360.0)` is 10),
+/// however far outside it is. The bounds may come in either order; equal
+/// bounds give AMin. A NaN stays NaN.
+/// @param AValue the value
+/// @param AMin the bottom of the range, included
+/// @param AMax the top of the range, left out
+/// @returns AValue inside [AMin, AMax)
+/// @example `LHeading := Wrap(LHeading + LTurn, 0.0, 360.0);`
+/// @since 0.2
+/// @see Clamp
+exported routine Wrap(const AValue: float64; const AMin: float64; const AMax: float64): float64;
+var
+  LLow: float64;
+  LHigh: float64;
+  LSpan: float64;
+  LOffset: float64;
+  LResult: float64;
+begin
+  LLow := AMin;
+  LHigh := AMax;
+  if LLow > LHigh then
+    LLow := AMax;
+    LHigh := AMin;
+  end;
+  LSpan := LHigh - LLow;
+  if not (LSpan > 0.0) then
+    return LLow;
+  end;
+  LOffset := std::fmod(AValue - LLow, LSpan);
+  if LOffset < 0.0 then
+    LOffset := LOffset + LSpan;
+  end;
+  LResult := LLow + LOffset;
+  // A tiny negative offset plus the span can round up onto the top
+  if LResult >= LHigh then
+    LResult := LLow;
+  end;
+  return LResult;
+end;
+
+/// Wrap for float32 values.
+/// @param AValue the value
+/// @param AMin the bottom of the range, included
+/// @param AMax the top of the range, left out
+/// @returns AValue inside [AMin, AMax)
+/// @since 0.2
+exported routine Wrap(const AValue: float32; const AMin: float32; const AMax: float32): float32;
+var
+  LResult: float32;
+begin
+  LResult := float32(Wrap(float64(AValue), float64(AMin), float64(AMax)));
+  // float64's result can round up onto float32's top
+  if (LResult >= AMax) and (AMax > AMin) then
+    return AMin;
+  end;
+  if (LResult >= AMin) and (AMin > AMax) then
+    return AMax;
+  end;
+  return LResult;
+end;
+
+/// AValue wrapped around the whole numbers AMin .. AMax, both included: one
+/// past the top is the bottom (`Wrap(360, 0, 359)` is 0), however far outside
+/// it is. The bounds may come in either order.
+/// @param AValue the value
+/// @param AMin one end of the range, included
+/// @param AMax the other end, included
+/// @returns AValue inside [AMin, AMax]
+/// @example `LFrame := Wrap(LFrame + 1, 0, LFrameCount - 1);`
+/// @since 0.2
+exported routine Wrap(const AValue: int64; const AMin: int64; const AMax: int64): int64;
+begin
+  return WrapInteger(AValue, AMin, AMax);
+end;
+
+/// Wrap for int32 values (both ends included).
+/// @param AValue the value
+/// @param AMin one end of the range, included
+/// @param AMax the other end, included
+/// @returns AValue inside [AMin, AMax]
+/// @since 0.2
+exported routine Wrap(const AValue: int32; const AMin: int32; const AMax: int32): int32;
+begin
+  return int32(WrapInteger(int64(AValue), int64(AMin), int64(AMax)));
+end;
+
+/// True when both values have the same sign: both above 0, both below 0, or
+/// both 0 (0 has its own sign, so 0 and 5 differ).
+/// @param AValue1 the first value
+/// @param AValue2 the second value
+/// @returns whether their signs match
+/// @since 0.2
+exported routine SameSign(const AValue1: int64; const AValue2: int64): bool;
+begin
+  if AValue1 > 0 then
+    return AValue2 > 0;
+  end;
+  if AValue1 < 0 then
+    return AValue2 < 0;
+  end;
+  return AValue2 = 0;
+end;
+
+/// SameSign for int32 values.
+/// @param AValue1 the first value
+/// @param AValue2 the second value
+/// @returns whether their signs match
+/// @since 0.2
+exported routine SameSign(const AValue1: int32; const AValue2: int32): bool;
+begin
+  return SameSign(int64(AValue1), int64(AValue2));
+end;
+
+/// SameSign for float64 values; -0.0 is 0, a NaN matches nothing.
+/// @param AValue1 the first value
+/// @param AValue2 the second value
+/// @returns whether their signs match
+/// @since 0.2
+exported routine SameSign(const AValue1: float64; const AValue2: float64): bool;
+begin
+  if AValue1 > 0.0 then
+    return AValue2 > 0.0;
+  end;
+  if AValue1 < 0.0 then
+    return AValue2 < 0.0;
+  end;
+  if AValue1 = 0.0 then
+    return AValue2 = 0.0;
+  end;
+  return false;
+end;
+
+/// SameSign for float32 values.
+/// @param AValue1 the first value
+/// @param AValue2 the second value
+/// @returns whether their signs match
+/// @since 0.2
+exported routine SameSign(const AValue1: float32; const AValue2: float32): bool;
+begin
+  return SameSign(float64(AValue1), float64(AValue2));
+end;
+
+/// True when A and B are no more than AEpsilon apart. Equal values (equal
+/// infinities too) are the same; a NaN is never the same as anything.
+/// @param A the first value
+/// @param B the second value
+/// @param AEpsilon the largest difference still counted as the same
+/// @returns whether A and B are the same within AEpsilon
+/// @example `if SameValue(LSpeed, 0.0, 0.001) then ... end;`
+/// @since 0.2
+/// @see Epsilon64
+exported routine SameValue(const A: float64; const B: float64; const AEpsilon: float64): bool;
+begin
+  if A = B then
+    return true;
+  end;
+  return std::fabs(A - B) <= AEpsilon;
+end;
+
+/// SameValue with Epsilon64 as the tolerance, scaled by the larger value's
+/// size once it is past 1 (1e15 and 1e15 + 0.5 are the same; 1 and 1.0001
+/// are not).
+/// @param A the first value
+/// @param B the second value
+/// @returns whether A and B are the same
+/// @since 0.2
+exported routine SameValue(const A: float64; const B: float64): bool;
+var
+  LScale: float64;
+begin
+  LScale := std::fmax(1.0, std::fmax(std::fabs(A), std::fabs(B)));
+  return SameValue(A, B, Epsilon64 * LScale);
+end;
+
+/// SameValue for float32 values.
+/// @param A the first value
+/// @param B the second value
+/// @param AEpsilon the largest difference still counted as the same
+/// @returns whether A and B are the same within AEpsilon
+/// @since 0.2
+exported routine SameValue(const A: float32; const B: float32; const AEpsilon: float32): bool;
+begin
+  if A = B then
+    return true;
+  end;
+  return std::fabs(A - B) <= AEpsilon;
+end;
+
+/// SameValue for float32 values with Epsilon32 as the tolerance, scaled by
+/// the larger value's size once it is past 1.
+/// @param A the first value
+/// @param B the second value
+/// @returns whether A and B are the same
+/// @since 0.2
+exported routine SameValue(const A: float32; const B: float32): bool;
+var
+  LScale: float32;
+begin
+  LScale := std::fmax(1.0f, std::fmax(std::fabs(A), std::fabs(B)));
+  return SameValue(A, B, Epsilon32 * LScale);
+end;
+
+/// The value AT of the way from AFrom to ATo: 0 gives AFrom, 1 gives exactly
+/// ATo, values outside 0 .. 1 go on past them (std::lerp's rule).
+/// @param AFrom the start
+/// @param ATo the end
+/// @param AT the fraction of the way
+/// @returns AFrom + (ATo - AFrom) x AT
+/// @example `LX := Lerp(LStartX, LEndX, LElapsed / LDuration);`
+/// @since 0.2
+/// @see EaseBetween
+exported routine Lerp(const AFrom: float64; const ATo: float64; const AT: float64): float64;
+begin
+  return std::lerp(AFrom, ATo, AT);
+end;
+
+/// Lerp for float32 values.
+/// @param AFrom the start
+/// @param ATo the end
+/// @param AT the fraction of the way
+/// @returns AFrom + (ATo - AFrom) x AT
+/// @since 0.2
+exported routine Lerp(const AFrom: float32; const ATo: float32; const AT: float32): float32;
+begin
+  return std::lerp(AFrom, ATo, AT);
+end;
+
+/// The shortest turn, in degrees, from the angle ASource to the angle ADest:
+/// -180 (included) to 180 (left out); positive turns the way the angles grow.
+/// `AngleDifference(350.0, 10.0)` is 20.
+/// @param ASource the angle turned from, in degrees
+/// @param ADest the angle turned to, in degrees
+/// @returns the turn, in [-180, 180)
+/// @since 0.2
+exported routine AngleDifference(const ASource: float64; const ADest: float64): float64;
+var
+  LTurn: float64;
+begin
+  LTurn := ADest - ASource;
+  LTurn := LTurn - std::floor(LTurn / 360.0) * 360.0;
+  if LTurn >= 180.0 then
+    LTurn := LTurn - 360.0;
+  end;
+  return LTurn;
+end;
+
+/// AngleDifference for float32 values.
+/// @param ASource the angle turned from, in degrees
+/// @param ADest the angle turned to, in degrees
+/// @returns the turn, in [-180, 180)
+/// @since 0.2
+exported routine AngleDifference(const ASource: float32; const ADest: float32): float32;
+begin
+  return float32(AngleDifference(float64(ASource), float64(ADest)));
+end;
+
+/// One step of a speed that is pushed and slows down by itself: a push
+/// (AAmount not 0) adds AAmount, up to AMax that way; no push slows the value
+/// toward 0 by ADrag, stopping at 0. Called once per update, the drag is per
+/// update. AMax and ADrag are taken as their size (their sign is ignored).
+/// @param AValue the speed now
+/// @param AAmount the push this update, 0 for none
+/// @param AMax the largest speed either way
+/// @param ADrag how much the speed falls per update with no push
+/// @returns the new speed
+/// @example `LSpeed := SmoothMove(LSpeed, LPush, 8.0, 0.5);`
+/// @since 0.2
+exported routine SmoothMove(const AValue: float64; const AAmount: float64; const AMax: float64; const ADrag: float64): float64;
+var
+  LMax: float64;
+  LDrag: float64;
+  LResult: float64;
+begin
+  LMax := std::fabs(AMax);
+  LDrag := std::fabs(ADrag);
+  LResult := AValue;
+  if AAmount > 0.0 then
+    LResult := LResult + AAmount;
+    if LResult > LMax then
+      LResult := LMax;
+    end;
+    return LResult;
+  end;
+  if AAmount < 0.0 then
+    LResult := LResult + AAmount;
+    if LResult < -LMax then
+      LResult := -LMax;
+    end;
+    return LResult;
+  end;
+  // No push: the drag takes the speed toward 0, never past it
+  if LResult > 0.0 then
+    LResult := LResult - LDrag;
+    if LResult < 0.0 then
+      LResult := 0.0;
+    end;
+    return LResult;
+  end;
+  if LResult < 0.0 then
+    LResult := LResult + LDrag;
+    if LResult > 0.0 then
+      LResult := 0.0;
+    end;
+  end;
+  return LResult;
+end;
+
+/// SmoothMove for float32 values.
+/// @param AValue the speed now
+/// @param AAmount the push this update, 0 for none
+/// @param AMax the largest speed either way
+/// @param ADrag how much the speed falls per update with no push
+/// @returns the new speed
+/// @since 0.2
+exported routine SmoothMove(const AValue: float32; const AAmount: float32; const AMax: float32; const ADrag: float32): float32;
+begin
+  return float32(SmoothMove(float64(AValue), float64(AAmount), float64(AMax), float64(ADrag)));
+end;
+
+exported type
+  /// The shape of an easing curve (Robert Penner's): In starts slow, Out ends
+  /// slow, InOut does both; Quad .. Quint are the powers 2 .. 5, Sine a
+  /// quarter wave, Expo powers of 2, Circle a quarter circle.
+  /// @since 0.2
+  /// @see Ease
+  Easing = choices(Linear, InQuad, OutQuad, InOutQuad, InCubic, OutCubic, InOutCubic,
+    InQuart, OutQuart, InOutQuart, InQuint, OutQuint, InOutQuint, InSine, OutSine,
+    InOutSine, InExpo, OutExpo, InOutExpo, InCircle, OutCircle, InOutCircle);
+
+/// The easing curve AKind at AFraction of the way: 0 to 1 in, 0 to 1 out.
+/// Every curve gives exactly 0 at 0 and exactly 1 at 1; a fraction below 0
+/// (or NaN) is 0, past 1 is 1.
+/// @param AKind the curve
+/// @param AFraction how far along, 0 to 1 (elapsed / duration)
+/// @returns the eased fraction, 0 to 1
+/// @example `LAlpha := Ease(Easing.OutCubic, LElapsed / LDuration);`
+/// @since 0.2
+/// @see EaseBetween
+exported routine Ease(const AKind: Easing; const AFraction: float64): float64;
+var
+  LT: float64;
+  LU: float64;
+begin
+  // NaN fails every comparison: it reads as the start
+  if not (AFraction > 0.0) then
+    return 0.0;
+  end;
+  if AFraction >= 1.0 then
+    return 1.0;
+  end;
+  LT := AFraction;
+  // LU is the distance from the curve's far end, for the Out halves
+  LU := 0.0;
+  match AKind of
+    Easing.Linear:
+      return LT;
+    Easing.InQuad:
+      return LT * LT;
+    Easing.OutQuad:
+      LU := 1.0 - LT;
+      return 1.0 - LU * LU;
+    Easing.InOutQuad:
+      if LT < 0.5 then
+        return 2.0 * LT * LT;
+      end;
+      LU := 2.0 - 2.0 * LT;
+      return 1.0 - LU * LU / 2.0;
+    Easing.InCubic:
+      return LT * LT * LT;
+    Easing.OutCubic:
+      LU := 1.0 - LT;
+      return 1.0 - LU * LU * LU;
+    Easing.InOutCubic:
+      if LT < 0.5 then
+        return 4.0 * LT * LT * LT;
+      end;
+      LU := 2.0 - 2.0 * LT;
+      return 1.0 - LU * LU * LU / 2.0;
+    Easing.InQuart:
+      return LT * LT * LT * LT;
+    Easing.OutQuart:
+      LU := 1.0 - LT;
+      return 1.0 - LU * LU * LU * LU;
+    Easing.InOutQuart:
+      if LT < 0.5 then
+        return 8.0 * LT * LT * LT * LT;
+      end;
+      LU := 2.0 - 2.0 * LT;
+      return 1.0 - LU * LU * LU * LU / 2.0;
+    Easing.InQuint:
+      return LT * LT * LT * LT * LT;
+    Easing.OutQuint:
+      LU := 1.0 - LT;
+      return 1.0 - LU * LU * LU * LU * LU;
+    Easing.InOutQuint:
+      if LT < 0.5 then
+        return 16.0 * LT * LT * LT * LT * LT;
+      end;
+      LU := 2.0 - 2.0 * LT;
+      return 1.0 - LU * LU * LU * LU * LU / 2.0;
+    Easing.InSine:
+      return 1.0 - std::cos(LT * Pi / 2.0);
+    Easing.OutSine:
+      return std::sin(LT * Pi / 2.0);
+    Easing.InOutSine:
+      return (1.0 - std::cos(Pi * LT)) / 2.0;
+    Easing.InExpo:
+      return std::pow(2.0, 10.0 * LT - 10.0);
+    Easing.OutExpo:
+      return 1.0 - std::pow(2.0, -10.0 * LT);
+    Easing.InOutExpo:
+      if LT < 0.5 then
+        return std::pow(2.0, 20.0 * LT - 10.0) / 2.0;
+      end;
+      return (2.0 - std::pow(2.0, 10.0 - 20.0 * LT)) / 2.0;
+    Easing.InCircle:
+      return 1.0 - std::sqrt(1.0 - LT * LT);
+    Easing.OutCircle:
+      LU := LT - 1.0;
+      return std::sqrt(1.0 - LU * LU);
+    Easing.InOutCircle:
+      if LT < 0.5 then
+        LU := 2.0 * LT;
+        return (1.0 - std::sqrt(1.0 - LU * LU)) / 2.0;
+      end;
+      LU := 2.0 - 2.0 * LT;
+      return (1.0 + std::sqrt(1.0 - LU * LU)) / 2.0;
+  end;
+  return LT;
+end;
+
+/// Ease for a float32 fraction (computed in float64).
+/// @param AKind the curve
+/// @param AFraction how far along, 0 to 1
+/// @returns the eased fraction, 0 to 1
+/// @since 0.2
+exported routine Ease(const AKind: Easing; const AFraction: float32): float32;
+begin
+  return float32(Ease(AKind, float64(AFraction)));
+end;
+
+/// The value AFraction of the way from AFrom to ATo along the easing curve
+/// AKind: exactly AFrom at 0 and exactly ATo at 1, the fraction held to 0 .. 1.
+/// Penner's ease(t, b, c, d) is `EaseBetween(AKind, b, b + c, t / d)`.
+/// @param AKind the curve
+/// @param AFrom the start value
+/// @param ATo the end value
+/// @param AFraction how far along, 0 to 1 (elapsed / duration)
+/// @returns the eased value between AFrom and ATo
+/// @example `LY := EaseBetween(Easing.OutQuad, 0.0, 300.0, LElapsed / 2.0);`
+/// @since 0.2
+/// @see Ease
+exported routine EaseBetween(const AKind: Easing; const AFrom: float64; const ATo: float64; const AFraction: float64): float64;
+begin
+  return std::lerp(AFrom, ATo, Ease(AKind, AFraction));
+end;
+
+/// EaseBetween for float32 values.
+/// @param AKind the curve
+/// @param AFrom the start value
+/// @param ATo the end value
+/// @param AFraction how far along, 0 to 1
+/// @returns the eased value between AFrom and ATo
+/// @since 0.2
+exported routine EaseBetween(const AKind: Easing; const AFrom: float32; const ATo: float32; const AFraction: float32): float32;
+begin
+  return std::lerp(AFrom, ATo, Ease(AKind, AFraction));
+end;
+
+exported type
+  /// A source of random numbers: std::mt19937 with this unit's own mapping,
+  /// so a seed gives the same numbers on every target and every standard
+  /// library. Built with a seed it repeats that sequence; built without one
+  /// it takes a seed from the system's entropy source. Integer ranges hold
+  /// both ends, float ranges the low end only; bounds may come in either order.
+  /// @example `LRng: RandomGenerator(42); LDie := LRng.NextInt(1, 6);`
+  /// @since 0.2
+  /// @see RandomInt
+  RandomGenerator = object
+    Engine: std::mt19937;
+    SeedValue: uint32;
+    /// A generator seeded from the system's entropy source.
+    init();
+    begin
+      // The engine is built first (its default state), then seeded
+      self.SeedValue := EntropySeed();
+      self.Engine.seed(self.SeedValue);
+    end;
+    /// A generator that gives the sequence of ASeed.
+    /// @param ASeed the seed
+    init(const ASeed: uint32);
+    begin
+      self.SeedValue := ASeed;
+      self.Engine.seed(ASeed);
+    end;
+    /// Starts the sequence of ASeed again.
+    /// @param ASeed the seed
+    method SetSeed(const ASeed: uint32);
+    begin
+      self.SeedValue := ASeed;
+      self.Engine.seed(ASeed);
+    end;
+    /// The seed the sequence started from (the last one set).
+    /// @returns the seed
+    const method Seed(): uint32;
+    begin
+      return self.SeedValue;
+    end;
+    /// A whole number from AMin to AMax, both included.
+    /// @param AMin one end
+    /// @param AMax the other end
+    /// @returns the number
+    method NextInt(const AMin: int32; const AMax: int32): int32;
+    begin
+      return DrawInt32(self.Engine, AMin, AMax);
+    end;
+    /// NextInt for int64 bounds (a method name has one form per object).
+    /// @param AMin one end
+    /// @param AMax the other end
+    /// @returns the number
+    method NextInt64(const AMin: int64; const AMax: int64): int64;
+    begin
+      return DrawInt64(self.Engine, AMin, AMax);
+    end;
+    /// A number from AMin (included) to AMax (left out); equal bounds give AMin.
+    /// @param AMin the low end, included
+    /// @param AMax the high end, left out
+    /// @returns the number
+    method NextFloat(const AMin: float64; const AMax: float64): float64;
+    var
+      LLow: float64;
+      LHigh: float64;
+      LResult: float64;
+    begin
+      LLow := AMin;
+      LHigh := AMax;
+      if LLow > LHigh then
+        LLow := AMax;
+        LHigh := AMin;
+      end;
+      if not (LHigh > LLow) then
+        return LLow;
+      end;
+      LResult := LLow + DrawUnit64(self.Engine) * (LHigh - LLow);
+      // Rounding can land on the top, which the range leaves out
+      if LResult >= LHigh then
+        LResult := std::nextafter(LHigh, LLow);
+      end;
+      return LResult;
+    end;
+    /// NextFloat for float32 bounds: AMin (included) to AMax (left out).
+    /// @param AMin the low end, included
+    /// @param AMax the high end, left out
+    /// @returns the number
+    method NextFloat32(const AMin: float32; const AMax: float32): float32;
+    var
+      LLow: float32;
+      LHigh: float32;
+      LResult: float32;
+    begin
+      LLow := AMin;
+      LHigh := AMax;
+      if LLow > LHigh then
+        LLow := AMax;
+        LHigh := AMin;
+      end;
+      if not (LHigh > LLow) then
+        return LLow;
+      end;
+      LResult := LLow + DrawUnit32(self.Engine) * (LHigh - LLow);
+      if LResult >= LHigh then
+        LResult := std::nextafter(LHigh, LLow);
+      end;
+      return LResult;
+    end;
+    /// True or false, each half the time.
+    /// @returns the value
+    method NextBool(): bool;
+    begin
+      return DrawBool(self.Engine);
+    end;
+  end;
+
+var
+  // The generator behind RandomInt and the other free routines
+  GRandom: RandomGenerator;
+
+/// A whole number from AMin to AMax, both included, from the unit's own
+/// generator (seeded from the system at start-up; SetRandomSeed repeats a
+/// sequence).
+/// @param AMin one end
+/// @param AMax the other end
+/// @returns the number
+/// @example `LDie := RandomInt(1, 6);`
+/// @since 0.2
+/// @see RandomGenerator
+exported routine RandomInt(const AMin: int32; const AMax: int32): int32;
+begin
+  return GRandom.NextInt(AMin, AMax);
+end;
+
+/// RandomInt for int64 bounds.
+/// @param AMin one end
+/// @param AMax the other end
+/// @returns the number
+/// @since 0.2
+exported routine RandomInt(const AMin: int64; const AMax: int64): int64;
+begin
+  return GRandom.NextInt64(AMin, AMax);
+end;
+
+/// A number from AMin (included) to AMax (left out), from the unit's own
+/// generator.
+/// @param AMin the low end, included
+/// @param AMax the high end, left out
+/// @returns the number
+/// @example `LX := RandomFloat(0.0, 640.0);`
+/// @since 0.2
+exported routine RandomFloat(const AMin: float64; const AMax: float64): float64;
+begin
+  return GRandom.NextFloat(AMin, AMax);
+end;
+
+/// RandomFloat for float32 bounds.
+/// @param AMin the low end, included
+/// @param AMax the high end, left out
+/// @returns the number
+/// @since 0.2
+exported routine RandomFloat(const AMin: float32; const AMax: float32): float32;
+begin
+  return GRandom.NextFloat32(AMin, AMax);
+end;
+
+/// True or false, each half the time, from the unit's own generator.
+/// @returns the value
+/// @since 0.2
+exported routine RandomBool(): bool;
+begin
+  return GRandom.NextBool();
+end;
+
+/// The seed the unit's own generator started from (the last one set).
+/// @returns the seed
+/// @since 0.2
+exported routine RandomSeed(): uint32;
+begin
+  return GRandom.Seed();
+end;
+
+/// Starts the unit's own generator on the sequence of ASeed, so the next
+/// RandomInt / RandomFloat / RandomBool calls repeat it.
+/// @param ASeed the seed
+/// @since 0.2
+exported routine SetRandomSeed(const ASeed: uint32);
+begin
+  GRandom.SetSeed(ASeed);
+end;
+
+exported type
+  /// A 2D vector or point of float32 X and Y, laid out as SFML's
+  /// sf::Vector2f, raylib's Vector2 and SDL's SDL_FPoint ({x, y}). Angles are
+  /// degrees, SFML's way: 0 points along +X, 90 along +Y (down the screen,
+  /// as sf::Transformable::setRotation turns). A zero vector is well defined
+  /// everywhere: its length, heading and normal are 0.
+  /// @example `LPos: Vector2(10.0f, 20.0f); LPos := LPos + LVel * LDelta;`
+  /// @since 0.2
+  /// @see Rect
+  Vector2 = object
+    X: float32;
+    Y: float32;
+    /// The zero vector.
+    init();
+    begin
+      self.X := 0.0f;
+      self.Y := 0.0f;
+    end;
+    /// The vector (AX, AY).
+    /// @param AX the X part
+    /// @param AY the Y part
+    init(const AX: float32; const AY: float32);
+    begin
+      self.X := AX;
+      self.Y := AY;
+    end;
+    /// Its length.
+    /// @returns the length
+    const method Length(): float32;
+    begin
+      return std::sqrt(self.X * self.X + self.Y * self.Y);
+    end;
+    /// Its length squared (no square root: for comparing lengths).
+    /// @returns the length squared
+    const method LengthSquared(): float32;
+    begin
+      return self.X * self.X + self.Y * self.Y;
+    end;
+    /// The distance between this point and AOther.
+    /// @param AOther the other point
+    /// @returns the distance
+    const method Distance(const AOther: Vector2): float32;
+    var
+      LDX: float32;
+      LDY: float32;
+    begin
+      LDX := AOther.X - self.X;
+      LDY := AOther.Y - self.Y;
+      return std::sqrt(LDX * LDX + LDY * LDY);
+    end;
+    /// The dot product with AOther.
+    /// @param AOther the other vector
+    /// @returns X x AOther.X + Y x AOther.Y
+    const method Dot(const AOther: Vector2): float32;
+    begin
+      return self.X * AOther.X + self.Y * AOther.Y;
+    end;
+    /// The 2D cross product with AOther (the Z of the 3D one): positive when
+    /// AOther turns the way the angles grow.
+    /// @param AOther the other vector
+    /// @returns X x AOther.Y - Y x AOther.X
+    const method Cross(const AOther: Vector2): float32;
+    begin
+      return self.X * AOther.Y - self.Y * AOther.X;
+    end;
+    /// The same direction at length 1; a zero vector stays zero.
+    /// @returns the unit vector
+    const method Normalized(): Vector2;
+    var
+      LLength: float32;
+      LResult: Vector2;
+    begin
+      LLength := self.Length();
+      if not (LLength > 0.0f) then
+        return LResult;
+      end;
+      LResult.X := self.X / LLength;
+      LResult.Y := self.Y / LLength;
+      return LResult;
+    end;
+    /// The same vector, shortened to AMax when it is longer; a max of 0 or
+    /// less gives the zero vector.
+    /// @param AMax the longest length
+    /// @returns the vector, at most AMax long
+    const method Truncated(const AMax: float32): Vector2;
+    var
+      LLength: float32;
+      LScale: float32;
+      LResult: Vector2;
+    begin
+      if not (AMax > 0.0f) then
+        return LResult;
+      end;
+      LResult.X := self.X;
+      LResult.Y := self.Y;
+      LLength := self.Length();
+      if LLength > AMax then
+        LScale := AMax / LLength;
+        LResult.X := self.X * LScale;
+        LResult.Y := self.Y * LScale;
+      end;
+      return LResult;
+    end;
+    /// This vector projected onto AOnto (its part along AOnto); onto a zero
+    /// vector it is the zero vector.
+    /// @param AOnto the vector projected onto
+    /// @returns the projection
+    const method Project(const AOnto: Vector2): Vector2;
+    var
+      LLengthSquared: float32;
+      LScale: float32;
+      LResult: Vector2;
+    begin
+      LLengthSquared := AOnto.X * AOnto.X + AOnto.Y * AOnto.Y;
+      if not (LLengthSquared > 0.0f) then
+        return LResult;
+      end;
+      LScale := (self.X * AOnto.X + self.Y * AOnto.Y) / LLengthSquared;
+      LResult.X := AOnto.X * LScale;
+      LResult.Y := AOnto.Y * LScale;
+      return LResult;
+    end;
+    /// The vector turned 90 degrees the way the angles grow: (-Y, X), as SFML.
+    /// @returns the perpendicular vector
+    const method Perpendicular(): Vector2;
+    var
+      LResult: Vector2;
+    begin
+      LResult.X := -self.Y;
+      LResult.Y := self.X;
+      return LResult;
+    end;
+    /// The vector turned by ADegrees (positive turns the way the angles grow);
+    /// computed in float64.
+    /// @param ADegrees the turn, in degrees
+    /// @returns the turned vector
+    const method Rotated(const ADegrees: float32): Vector2;
+    var
+      LCos: float64;
+      LSin: float64;
+      LResult: Vector2;
+    begin
+      LCos := std::cos(float64(ADegrees) * DegToRad);
+      LSin := std::sin(float64(ADegrees) * DegToRad);
+      LResult.X := float32(float64(self.X) * LCos - float64(self.Y) * LSin);
+      LResult.Y := float32(float64(self.X) * LSin + float64(self.Y) * LCos);
+      return LResult;
+    end;
+    /// The direction it points, in degrees: -180 (left out) to 180 (included),
+    /// 0 along +X, 90 along +Y; a zero vector heads 0.
+    /// @returns the heading, in degrees
+    const method Heading(): float32;
+    begin
+      if (self.X = 0.0f) and (self.Y = 0.0f) then
+        return 0.0f;
+      end;
+      return float32(std::atan2(float64(self.Y), float64(self.X)) * RadToDeg);
+    end;
+    /// This point moved ASpeed along the heading ADegrees (one step of a
+    /// thrust); computed in float64.
+    /// @param ADegrees the heading, in degrees
+    /// @param ASpeed the distance moved
+    /// @returns the moved point
+    const method Thrust(const ADegrees: float32; const ASpeed: float32): Vector2;
+    var
+      LResult: Vector2;
+    begin
+      LResult.X := float32(float64(self.X) + std::cos(float64(ADegrees) * DegToRad) * float64(ASpeed));
+      LResult.Y := float32(float64(self.Y) + std::sin(float64(ADegrees) * DegToRad) * float64(ASpeed));
+      return LResult;
+    end;
+    /// The point AT of the way to ATo (std::lerp on each part): 0 gives this
+    /// point, 1 exactly ATo.
+    /// @param ATo the end point
+    /// @param AT the fraction of the way
+    /// @returns the point between
+    const method Lerp(const ATo: Vector2; const AT: float32): Vector2;
+    var
+      LResult: Vector2;
+    begin
+      LResult.X := std::lerp(self.X, ATo.X, AT);
+      LResult.Y := std::lerp(self.Y, ATo.Y, AT);
+      return LResult;
+    end;
+    operator +(const A: Vector2; const B: Vector2): Vector2;
+    var
+      LResult: Vector2;
+    begin
+      LResult.X := A.X + B.X;
+      LResult.Y := A.Y + B.Y;
+      return LResult;
+    end;
+    operator -(const A: Vector2; const B: Vector2): Vector2;
+    var
+      LResult: Vector2;
+    begin
+      LResult.X := A.X - B.X;
+      LResult.Y := A.Y - B.Y;
+      return LResult;
+    end;
+    operator -(const A: Vector2): Vector2;
+    var
+      LResult: Vector2;
+    begin
+      LResult.X := -A.X;
+      LResult.Y := -A.Y;
+      return LResult;
+    end;
+    operator *(const A: Vector2; const AScale: float32): Vector2;
+    var
+      LResult: Vector2;
+    begin
+      LResult.X := A.X * AScale;
+      LResult.Y := A.Y * AScale;
+      return LResult;
+    end;
+    operator *(const AScale: float32; const A: Vector2): Vector2;
+    var
+      LResult: Vector2;
+    begin
+      LResult.X := A.X * AScale;
+      LResult.Y := A.Y * AScale;
+      return LResult;
+    end;
+    operator /(const A: Vector2; const AScale: float32): Vector2;
+    var
+      LResult: Vector2;
+    begin
+      LResult.X := A.X / AScale;
+      LResult.Y := A.Y / AScale;
+      return LResult;
+    end;
+    operator =(const A: Vector2; const B: Vector2): bool;
+    begin
+      return (A.X = B.X) and (A.Y = B.Y);
+    end;
+    operator <>(const A: Vector2; const B: Vector2): bool;
+    begin
+      return (A.X <> B.X) or (A.Y <> B.Y);
+    end;
+  end;
+
+  /// An axis-aligned rectangle: its corner (X, Y) and its size, laid out as
+  /// sf::FloatRect and raylib's Rectangle. It follows SFML's rules exactly: a
+  /// negative size spans the other way, a point on the far edges is outside
+  /// ([X, X + Width)), and rectangles that only touch do not overlap.
+  /// @example `LBox: Rect(0.0f, 0.0f, 32.0f, 32.0f); if LBox.Contains(LMouse) then ... end;`
+  /// @since 0.2
+  /// @see Extent
+  Rect = object
+    X: float32;
+    Y: float32;
+    Width: float32;
+    Height: float32;
+    /// The empty rectangle at (0, 0).
+    init();
+    begin
+      self.X := 0.0f;
+      self.Y := 0.0f;
+      self.Width := 0.0f;
+      self.Height := 0.0f;
+    end;
+    /// The rectangle with corner (AX, AY) and size AWidth x AHeight.
+    /// @param AX the corner's X
+    /// @param AY the corner's Y
+    /// @param AWidth the width
+    /// @param AHeight the height
+    init(const AX: float32; const AY: float32; const AWidth: float32; const AHeight: float32);
+    begin
+      self.X := AX;
+      self.Y := AY;
+      self.Width := AWidth;
+      self.Height := AHeight;
+    end;
+    /// True when APoint is inside: [left, right) x [top, bottom).
+    /// @param APoint the point
+    /// @returns whether the rectangle holds it
+    const method Contains(const APoint: Vector2): bool;
+    var
+      LMinX: float32;
+      LMaxX: float32;
+      LMinY: float32;
+      LMaxY: float32;
+    begin
+      LMinX := std::min(self.X, self.X + self.Width);
+      LMaxX := std::max(self.X, self.X + self.Width);
+      LMinY := std::min(self.Y, self.Y + self.Height);
+      LMaxY := std::max(self.Y, self.Y + self.Height);
+      return (APoint.X >= LMinX) and (APoint.X < LMaxX) and (APoint.Y >= LMinY) and (APoint.Y < LMaxY);
+    end;
+    /// The rectangle both cover, in AResult (the empty one when they do not
+    /// overlap; touching edges do not).
+    /// @param AOther the other rectangle
+    /// @param AResult the overlap
+    /// @returns whether they overlap
+    const method Intersection(const AOther: Rect; var AResult: Rect): bool;
+    var
+      LLeft: float32;
+      LTop: float32;
+      LRight: float32;
+      LBottom: float32;
+    begin
+      LLeft := std::max(std::min(self.X, self.X + self.Width), std::min(AOther.X, AOther.X + AOther.Width));
+      LTop := std::max(std::min(self.Y, self.Y + self.Height), std::min(AOther.Y, AOther.Y + AOther.Height));
+      LRight := std::min(std::max(self.X, self.X + self.Width), std::max(AOther.X, AOther.X + AOther.Width));
+      LBottom := std::min(std::max(self.Y, self.Y + self.Height), std::max(AOther.Y, AOther.Y + AOther.Height));
+      AResult.X := 0.0f;
+      AResult.Y := 0.0f;
+      AResult.Width := 0.0f;
+      AResult.Height := 0.0f;
+      if not ((LLeft < LRight) and (LTop < LBottom)) then
+        return false;
+      end;
+      AResult.X := LLeft;
+      AResult.Y := LTop;
+      AResult.Width := LRight - LLeft;
+      AResult.Height := LBottom - LTop;
+      return true;
+    end;
+    /// True when the rectangles share an area (touching is not enough).
+    /// @param AOther the other rectangle
+    /// @returns whether they overlap
+    const method Overlaps(const AOther: Rect): bool;
+    var
+      LUnused: Rect;
+    begin
+      return self.Intersection(AOther, LUnused);
+    end;
+    /// The centre point.
+    /// @returns the centre
+    const method Center(): Vector2;
+    var
+      LResult: Vector2;
+    begin
+      LResult.X := self.X + self.Width / 2.0f;
+      LResult.Y := self.Y + self.Height / 2.0f;
+      return LResult;
+    end;
+  end;
+
+  /// A rectangle as its two corners: the smallest and the largest X and Y.
+  /// @since 0.2
+  /// @see Rect
+  Extent = object
+    MinX: float32;
+    MinY: float32;
+    MaxX: float32;
+    MaxY: float32;
+    /// The empty extent at (0, 0).
+    init();
+    begin
+      self.MinX := 0.0f;
+      self.MinY := 0.0f;
+      self.MaxX := 0.0f;
+      self.MaxY := 0.0f;
+    end;
+    /// The extent from (AMinX, AMinY) to (AMaxX, AMaxY), as given.
+    /// @param AMinX the smallest X
+    /// @param AMinY the smallest Y
+    /// @param AMaxX the largest X
+    /// @param AMaxY the largest Y
+    init(const AMinX: float32; const AMinY: float32; const AMaxX: float32; const AMaxY: float32);
+    begin
+      self.MinX := AMinX;
+      self.MinY := AMinY;
+      self.MaxX := AMaxX;
+      self.MaxY := AMaxY;
+    end;
+    /// The same area as a Rect: corner (MinX, MinY), size max - min.
+    /// @returns the rectangle
+    const method ToRect(): Rect;
+    var
+      LResult: Rect;
+    begin
+      LResult.X := self.MinX;
+      LResult.Y := self.MinY;
+      LResult.Width := self.MaxX - self.MinX;
+      LResult.Height := self.MaxY - self.MinY;
+      return LResult;
+    end;
+  end;
+
+  /// How two line segments meet (LineIntersection): Miss (they do not),
+  /// Point (they cross or touch at one point), Parallel (parallel, apart),
+  /// Collinear (on one line and overlapping).
+  /// @since 0.2
+  LineHitKind = choices(Miss, Point, Parallel, Collinear);
+
+  /// Where two line segments meet: Kind, and Point when Kind is Point.
+  /// @since 0.2
+  /// @see LineIntersection
+  LineHit = object
+    Kind: LineHitKind;
+    Point: Vector2;
+    init();
+    begin
+      self.Point.init();
+      self.Kind := LineHitKind.Miss;
+    end;
+  end;
+
+  /// An oriented box: a centre, half its width and height, and the angle it
+  /// is turned by, in degrees (positive the way the angles grow).
+  /// @since 0.2
+  /// @see ObbsOverlap
+  Obb = object
+    Center: Vector2;
+    HalfSize: Vector2;
+    Angle: float32;
+    /// The box of no size at (0, 0).
+    init();
+    begin
+      self.Center.init();
+      self.HalfSize.init();
+      self.Angle := 0.0f;
+    end;
+    /// The box at ACenter, AHalfSize from its centre to its sides, turned by
+    /// ADegrees.
+    /// @param ACenter the centre
+    /// @param AHalfSize half the width and height
+    /// @param ADegrees the turn, in degrees
+    init(const ACenter: Vector2; const AHalfSize: Vector2; const ADegrees: float32);
+    begin
+      self.Center.init(ACenter.X, ACenter.Y);
+      self.HalfSize.init(AHalfSize.X, AHalfSize.Y);
+      self.Angle := ADegrees;
+    end;
+  end;
+
+/// True when APoint is in the circle (its edge included).
+/// @param APoint the point
+/// @param ACenter the circle's centre
+/// @param ARadius the circle's radius
+/// @returns whether the circle holds the point
+/// @since 0.2
+exported routine PointInCircle(const APoint: Vector2; const ACenter: Vector2; const ARadius: float32): bool;
+var
+  LDX: float32;
+  LDY: float32;
+begin
+  LDX := APoint.X - ACenter.X;
+  LDY := APoint.Y - ACenter.Y;
+  return LDX * LDX + LDY * LDY <= ARadius * ARadius;
+end;
+
+/// True when APoint is strictly inside the triangle A B C (either winding;
+/// a point on an edge is outside, a flat triangle holds nothing).
+/// @param APoint the point
+/// @param A a corner
+/// @param B a corner
+/// @param C a corner
+/// @returns whether the triangle holds the point
+/// @since 0.2
+exported routine PointInTriangle(const APoint: Vector2; const A: Vector2; const B: Vector2; const C: Vector2): bool;
+var
+  LD1: float32;
+  LD2: float32;
+  LD3: float32;
+begin
+  // Which side of each edge the point is on: all one side = inside
+  LD1 := (B.X - A.X) * (APoint.Y - A.Y) - (B.Y - A.Y) * (APoint.X - A.X);
+  LD2 := (C.X - B.X) * (APoint.Y - B.Y) - (C.Y - B.Y) * (APoint.X - B.X);
+  LD3 := (A.X - C.X) * (APoint.Y - C.Y) - (A.Y - C.Y) * (APoint.X - C.X);
+  return ((LD1 > 0.0f) and (LD2 > 0.0f) and (LD3 > 0.0f)) or ((LD1 < 0.0f) and (LD2 < 0.0f) and (LD3 < 0.0f));
+end;
+
+/// True when two circles overlap or touch.
+/// @param ACenter1 the first circle's centre
+/// @param ARadius1 the first circle's radius
+/// @param ACenter2 the second circle's centre
+/// @param ARadius2 the second circle's radius
+/// @returns whether they overlap
+/// @since 0.2
+exported routine CirclesOverlap(const ACenter1: Vector2; const ARadius1: float32; const ACenter2: Vector2;
+  const ARadius2: float32): bool;
+var
+  LDX: float32;
+  LDY: float32;
+  LReach: float32;
+begin
+  LDX := ACenter2.X - ACenter1.X;
+  LDY := ACenter2.Y - ACenter1.Y;
+  LReach := ARadius1 + ARadius2;
+  return LDX * LDX + LDY * LDY <= LReach * LReach;
+end;
+
+/// True when a circle overlaps a rectangle (touching counts): the point of
+/// the rectangle nearest the centre is within the radius.
+/// @param ACenter the circle's centre
+/// @param ARadius the circle's radius
+/// @param ARect the rectangle
+/// @returns whether they overlap
+/// @since 0.2
+exported routine CircleOverlapsRect(const ACenter: Vector2; const ARadius: float32; const ARect: Rect): bool;
+var
+  LNearX: float32;
+  LNearY: float32;
+  LDX: float32;
+  LDY: float32;
+begin
+  LNearX := Clamp(ACenter.X, ARect.X, ARect.X + ARect.Width);
+  LNearY := Clamp(ACenter.Y, ARect.Y, ARect.Y + ARect.Height);
+  LDX := ACenter.X - LNearX;
+  LDY := ACenter.Y - LNearY;
+  return LDX * LDX + LDY * LDY <= ARadius * ARadius;
+end;
+
+/// Where the segment A1 - A2 meets the segment B1 - B2 (ends included).
+/// A segment of no length is a point, which meets the other segment when it
+/// lies on it.
+/// @param A1 the first segment's start
+/// @param A2 the first segment's end
+/// @param B1 the second segment's start
+/// @param B2 the second segment's end
+/// @returns the kind of meeting and, for Point, where
+/// @since 0.2
+exported routine LineIntersection(const A1: Vector2; const A2: Vector2; const B1: Vector2; const B2: Vector2): LineHit;
+var
+  LResult: LineHit;
+  LRX: float64;
+  LRY: float64;
+  LSX: float64;
+  LSY: float64;
+  LQX: float64;
+  LQY: float64;
+  LDenom: float64;
+  LT: float64;
+  LU: float64;
+  LRR: float64;
+  LT0: float64;
+  LT1: float64;
+begin
+  // A1 + t r meets B1 + u s; computed in float64
+  LRX := float64(A2.X) - float64(A1.X);
+  LRY := float64(A2.Y) - float64(A1.Y);
+  LSX := float64(B2.X) - float64(B1.X);
+  LSY := float64(B2.Y) - float64(B1.Y);
+  LQX := float64(B1.X) - float64(A1.X);
+  LQY := float64(B1.Y) - float64(A1.Y);
+  LDenom := LRX * LSY - LRY * LSX;
+  if LDenom <> 0.0 then
+    LT := (LQX * LSY - LQY * LSX) / LDenom;
+    LU := (LQX * LRY - LQY * LRX) / LDenom;
+    if (LT >= 0.0) and (LT <= 1.0) and (LU >= 0.0) and (LU <= 1.0) then
+      LResult.Kind := LineHitKind.Point;
+      LResult.Point.X := float32(float64(A1.X) + LT * LRX);
+      LResult.Point.Y := float32(float64(A1.Y) + LT * LRY);
+    end;
+    return LResult;
+  end;
+  // Parallel: apart, or on one line
+  if LQX * LRY - LQY * LRX <> 0.0 then
+    LResult.Kind := LineHitKind.Parallel;
+    return LResult;
+  end;
+  LRR := LRX * LRX + LRY * LRY;
+  if LRR = 0.0 then
+    // A is a point on B's line: it meets B when it lies between B's ends
+    if (LSX * LSX + LSY * LSY = 0.0) then
+      if (LQX = 0.0) and (LQY = 0.0) then
+        LResult.Kind := LineHitKind.Point;
+        LResult.Point.X := A1.X;
+        LResult.Point.Y := A1.Y;
+      end;
+      return LResult;
+    end;
+    LT := -(LQX * LSX + LQY * LSY) / (LSX * LSX + LSY * LSY);
+    if (LT >= 0.0) and (LT <= 1.0) then
+      LResult.Kind := LineHitKind.Point;
+      LResult.Point.X := A1.X;
+      LResult.Point.Y := A1.Y;
+    end;
+    return LResult;
+  end;
+  // On one line: B's ends as fractions along A; they overlap when that span meets [0, 1]
+  LT0 := (LQX * LRX + LQY * LRY) / LRR;
+  LT1 := LT0 + (LSX * LRX + LSY * LRY) / LRR;
+  if (std::fmax(LT0, LT1) >= 0.0) and (std::fmin(LT0, LT1) <= 1.0) then
+    LResult.Kind := LineHitKind.Collinear;
+  end;
+  return LResult;
+end;
+
+/// True when two circles, each radius scaled by AShrink (1 = as given, 0.8 =
+/// a fifth smaller, for a forgiving hit), overlap: their centres are closer
+/// than the scaled radii's sum.
+/// @param ARadius1 the first radius
+/// @param ACenter1 the first centre
+/// @param ARadius2 the second radius
+/// @param ACenter2 the second centre
+/// @param AShrink the scale both radii take
+/// @returns whether they overlap
+/// @since 0.2
+exported routine RadiusOverlap(const ARadius1: float32; const ACenter1: Vector2; const ARadius2: float32;
+  const ACenter2: Vector2; const AShrink: float32): bool;
+var
+  LDX: float32;
+  LDY: float32;
+  LReach: float32;
+begin
+  LDX := ACenter2.X - ACenter1.X;
+  LDY := ACenter2.Y - ACenter1.Y;
+  LReach := (ARadius1 + ARadius2) * AShrink;
+  return LDX * LDX + LDY * LDY < LReach * LReach;
+end;
+
+// One corner of an OBB (ASignX / ASignY: which one), computed in float64
+routine ObbCorner(const ABox: Obb; const ASignX: float64; const ASignY: float64; var AX: float64; var AY: float64);
+var
+  LCos: float64;
+  LSin: float64;
+  LLocalX: float64;
+  LLocalY: float64;
+begin
+  LCos := std::cos(float64(ABox.Angle) * DegToRad);
+  LSin := std::sin(float64(ABox.Angle) * DegToRad);
+  LLocalX := ASignX * float64(ABox.HalfSize.X);
+  LLocalY := ASignY * float64(ABox.HalfSize.Y);
+  AX := float64(ABox.Center.X) + LLocalX * LCos - LLocalY * LSin;
+  AY := float64(ABox.Center.Y) + LLocalX * LSin + LLocalY * LCos;
+end;
+
+// The span of ABox's corners projected on the axis (AAxisX, AAxisY)
+routine ObbSpan(const ABox: Obb; const AAxisX: float64; const AAxisY: float64; var ALow: float64; var AHigh: float64);
+var
+  LX: float64;
+  LY: float64;
+  LDot: float64;
+begin
+  ObbCorner(ABox, 1.0, 1.0, LX, LY);
+  ALow := LX * AAxisX + LY * AAxisY;
+  AHigh := ALow;
+  ObbCorner(ABox, -1.0, 1.0, LX, LY);
+  LDot := LX * AAxisX + LY * AAxisY;
+  ALow := std::fmin(ALow, LDot);
+  AHigh := std::fmax(AHigh, LDot);
+  ObbCorner(ABox, 1.0, -1.0, LX, LY);
+  LDot := LX * AAxisX + LY * AAxisY;
+  ALow := std::fmin(ALow, LDot);
+  AHigh := std::fmax(AHigh, LDot);
+  ObbCorner(ABox, -1.0, -1.0, LX, LY);
+  LDot := LX * AAxisX + LY * AAxisY;
+  ALow := std::fmin(ALow, LDot);
+  AHigh := std::fmax(AHigh, LDot);
+end;
+
+// True when the two boxes' spans on the axis at ADegrees are apart
+routine ObbsApartOn(const A: Obb; const B: Obb; const ADegrees: float64): bool;
+var
+  LAxisX: float64;
+  LAxisY: float64;
+  LLowA: float64;
+  LHighA: float64;
+  LLowB: float64;
+  LHighB: float64;
+begin
+  LAxisX := std::cos(ADegrees * DegToRad);
+  LAxisY := std::sin(ADegrees * DegToRad);
+  ObbSpan(A, LAxisX, LAxisY, LLowA, LHighA);
+  ObbSpan(B, LAxisX, LAxisY, LLowB, LHighB);
+  return (LHighA < LLowB) or (LHighB < LLowA);
+end;
+
+/// True when two oriented boxes overlap or touch (the separating axis test
+/// over both boxes' sides, angles exact, in float64).
+/// @param A one box
+/// @param B the other box
+/// @returns whether they overlap
+/// @since 0.2
+exported routine ObbsOverlap(const A: Obb; const B: Obb): bool;
+begin
+  if ObbsApartOn(A, B, float64(A.Angle)) or ObbsApartOn(A, B, float64(A.Angle) + 90.0) then
+    return false;
+  end;
+  if ObbsApartOn(A, B, float64(B.Angle)) or ObbsApartOn(A, B, float64(B.Angle) + 90.0) then
+    return false;
+  end;
+  return true;
+end;
+
+/// The Extent of ARect: its smallest and largest X and Y (a negative size
+/// spans the other way).
+/// @param ARect the rectangle
+/// @returns its extent
+/// @since 0.2
+/// @see Extent
+exported routine ExtentOf(const ARect: Rect): Extent;
+var
+  LResult: Extent;
+begin
+  LResult.MinX := std::min(ARect.X, ARect.X + ARect.Width);
+  LResult.MinY := std::min(ARect.Y, ARect.Y + ARect.Height);
+  LResult.MaxX := std::max(ARect.X, ARect.X + ARect.Width);
+  LResult.MaxY := std::max(ARect.Y, ARect.Y + ARect.Height);
+  return LResult;
+end;
+
+end.

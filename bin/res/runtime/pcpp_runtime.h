@@ -62,6 +62,18 @@
     #define PCPP_EXPORT
 #endif
 
+// PLAN-RESDATA: where a ::pcpp::ResEntry the emitter writes goes. The linker
+// gathers every TU's records into one section of the binary: ELF "pcppres"
+// (a C identifier, so the linker defines __start_pcppres / __stop_pcppres),
+// COFF ".pcppres$m" (the linker sorts the $ groups by name; the runtime's
+// markers sit in $a / $z). used / retain keep the records (and the bytes they
+// point to) through unused-data removal and release stripping
+#if defined(_WIN32)
+    #define PCPP_RESDATA_ENTRY __attribute__((section(".pcppres$m"), used))
+#else
+    #define PCPP_RESDATA_ENTRY __attribute__((section("pcppres"), used, retain))
+#endif
+
 namespace pcpp {
 
 /*******************************************************************************
@@ -411,6 +423,31 @@ To* poly_cast(From* p) noexcept {
 }
 
 }  // namespace detail
+
+// PLAN-RESDATA A5b: a pointer cast (`ptr to T(x)` or a pointer type's name
+// `P(x)`) whose pointee is a class C++ may relate (an object, an interface, a
+// C/C++ type: TPCTypeExpr.IsClassPointerCast). C++ picks the cast from the
+// real classes, so the address is right through a virtual base (every
+// interface is one): an upcast and a downcast from a non-virtual base are
+// static_cast; a downcast from a virtual base and a cross-cast between
+// polymorphic classes are dynamic_cast (nil when the object is no T); any
+// other pair, or an operand that is no pointer, reinterpret_cast. nil stays nil
+template <class T, class S>
+T ptr_cast(S p) noexcept {
+    if constexpr (std::is_pointer_v<S> && std::is_pointer_v<T>) {
+        if constexpr (std::is_convertible_v<S, T>) {
+            return static_cast<T>(p);
+        } else if constexpr (requires { static_cast<T>(p); }) {
+            return static_cast<T>(p);
+        } else if constexpr (requires { dynamic_cast<T>(p); }) {
+            return dynamic_cast<T>(p);
+        } else {
+            return reinterpret_cast<T>(p);
+        }
+    } else {
+        return reinterpret_cast<T>(p);
+    }
+}
 
 template <class T, class X>
 bool is_a(const X& x) noexcept {
@@ -1956,6 +1993,33 @@ void test_assert_equal_bool(bool expected, bool actual, const char* file, std::i
 void assert_assert_equal_bool(bool expected, bool actual, const char* file, std::int32_t line);
 void test_assert_equal_ptr(const void* expected, const void* actual, const char* file, std::int32_t line);
 void assert_assert_equal_ptr(const void* expected, const void* actual, const char* file, std::int32_t line);
+
+/*******************************************************************************
+ * Built-in data (PLAN-RESDATA)
+ ******************************************************************************/
+
+// One @addresdata entry: its key (UTF-8, NUL-terminated), its bytes and their
+// count; one zero byte follows the bytes, not counted, so text reads as a C
+// string. The emitter writes one per directive into its module's source TU,
+// in the section the linker gathers (PCPP_RESDATA_ENTRY). 32 bytes and
+// 32-aligned: the linker's padding between contributions is whole records,
+// all zero (key nullptr)
+struct alignas(32) ResEntry
+{
+    const char* key;
+    const unsigned char* data;
+    std::uint64_t size;
+};
+static_assert(sizeof(ResEntry) == 32);
+
+// The entries of the binary that calls (each exe / dll reads its own image's
+// section), in key order: byte-wise over the UTF-8 key, the same on every
+// target (the order the linker placed them in differs per target). Built once,
+// on the first call, thread-safe. A key the build does not hold, and an index
+// outside 0 .. resdata_count() - 1, give nullptr
+const ResEntry* resdata_find(std::string_view key);
+std::int64_t resdata_count();
+const char* resdata_key_at(std::int64_t index);
 
 } // namespace pcpp
 

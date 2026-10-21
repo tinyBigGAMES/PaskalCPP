@@ -70,6 +70,43 @@ const
   // PLAN-RECORDS M11; case-sensitive, as C++ names are)
   PC_RESERVED_PREFIX = 'pcpp_';
 
+  { PC_RESDATA_RESERVED_PREFIX }
+  // The compiler's own @addresdata entries (the Linux window icon) use keys
+  // that start so: a key a program adds never does (SM0120, PLAN-RESDATA;
+  // case-sensitive, as every key is)
+  PC_RESDATA_RESERVED_PREFIX = 'pcpp/';
+  { PC_RESDATA_EXEICON_KEY }
+  // PLAN-RESDATA A6: a non-Windows exe's @exeicon, built in under this key
+  // (TPCModule.ExeIconEntry): width, height (uint32, little-endian), then
+  // RGBA pixels, rows top to bottom (PaskalCPP.Icon)
+  PC_RESDATA_EXEICON_KEY = PC_RESDATA_RESERVED_PREFIX + 'exeicon';
+  { PC_RESDATA_EXEICON_FILE }
+  // The decoded entry the Compiler writes beside the generated sources; the
+  // entry's #embed names it relative to them
+  PC_RESDATA_EXEICON_FILE = 'pcpp_exeicon.rgba';
+
+  { PC_RESDATA_KEY_SYMBOL_PREFIX }
+  // PLAN-RESDATA A4b: every @addresdata entry also defines a C symbol named
+  // this prefix + its key's UTF-8 bytes in lowercase hex (TPCResDataKey), so a
+  // second holder of the key in one linked binary (a lib built apart) is the
+  // linker's duplicate symbol, which the Compiler reports as SM0121
+  PC_RESDATA_KEY_SYMBOL_PREFIX = 'pcpp_rk_';
+
+  { PC_RESDATA_UNIT_NAME }
+  // PLAN-RESDATA A5 (WHAT 4): the std unit that reads the entries back, and
+  // the routines whose literal key SEM checks against the build's
+  // @addresdata keys (SM0122: a key no directive adds)
+  PC_RESDATA_UNIT_NAME = 'ResData';
+
+  { PC_RESDATA_UNIT_FILE }
+  PC_RESDATA_UNIT_FILE = PC_STD_MODULE_PATH + '/ResData.pcpp';
+
+  { PC_RESDATA_FIND }
+  PC_RESDATA_FIND = 'FindResData';
+
+  { PC_RESDATA_HAS }
+  PC_RESDATA_HAS = 'HasResData';
+
   { PC_ERR_VOC_001 }
   // A spelling is registered by both tables but is not in the shared list
   PC_ERR_VOC_001 = 'VC0001';
@@ -670,6 +707,19 @@ type
     class function IsName(const AText: string): Boolean; static;
   end;
 
+  { TPCResDataKey }
+  // A built-in data key <-> its key symbol (PC_RESDATA_KEY_SYMBOL_PREFIX):
+  // the emitter writes the symbol, the Compiler reads a linker's duplicate
+  // symbol back to the key. Exact: the key's UTF-8 bytes, two lowercase hex
+  // digits each, no hash. Pure: no RTL call that can raise
+  TPCResDataKey = record
+  public
+    class function SymbolOf(const AKey: string): string; static;
+    // False = not a key symbol (another prefix, odd length, a non-hex digit,
+    // bytes that are no UTF-8)
+    class function TryKeyOf(const ASymbol: string; out AKey: string): Boolean; static;
+  end;
+
   { TPCSourceLanguage }
   // How a toolchain source file compiles: the language clang picks from its
   // file name. ZigBuild partitions sources by it (each group its own flags),
@@ -700,12 +750,15 @@ type
     bdVIMajor, bdVIMinor, bdVIPatch, bdVIProductName, bdVIDescription, bdVIFileName,
     bdVICompanyName, bdVICopyright, bdExeIcon, bdCopyDLL, bdLinkLibrary, bdAddLibraryPath,
     bdAddModulePath, bdAddIncludePath, bdAddSourceFile, bdCppDefine, bdCppUndef, bdBreakpoint, bdMessage,
-    bdOutputPath);
+    bdOutputPath, bdAddResData);
 
   { TPCDirectiveShape }
   // The argument grammar of one build directive (BNF.md sec 2);
-  // dsOneOrTwoCStrings = a string literal, then optionally a second one
-  TPCDirectiveShape = (dsNone, dsIdentifier, dsInteger, dsCString, dsOneOrTwoCStrings, dsSeverityText);
+  // dsOneOrTwoCStrings = a string literal, then optionally a second one;
+  // dsKeyAndPath = a key string literal, then a path string literal (both
+  // required; only the second is a path: IsPath applies to it alone)
+  TPCDirectiveShape = (dsNone, dsIdentifier, dsInteger, dsCString, dsOneOrTwoCStrings, dsSeverityText,
+    dsKeyAndPath);
 
   { TPCDirectiveRow }
   // One build directive: name without the @, argument shape and rules.
@@ -1367,6 +1420,12 @@ const
   PC_CLANG_FORMAT_STRING = 'call to consteval function ''std::basic_format_string<';
   { PC_CLANG_NOT_CONSTANT }
   PC_CLANG_NOT_CONSTANT = ' is not a constant expression';
+  { PC_CLANG_UNKNOWN_TYPE }
+  // clang's error text at a type name it does not know. The Compiler owns it
+  // only at a PaskalCPP type spelled as an imported unit (TPCAst.UnitTypeAt):
+  // SM0013 there. Witnessed by the bundled clang: Compliance
+  // type_alias_err_module
+  PC_CLANG_UNKNOWN_TYPE = 'unknown type name ''';
 
   { PC_MAX_OBJECT_SIZE }
   // F47: the largest size in bytes a type has on every supported target. clang
@@ -1442,7 +1501,10 @@ const
     (DirectiveName: 'message';       Shape: dsSeverityText; IsPath: False; IsMainOnly: False; IsFilterChecked: False; IsLibName: False; IsStatement: True;  IsSingle: False),
     // The build's output folder (user 2026-10-14): the source says where it
     // builds, the same from the CLI and the editor; an explicit -o wins
-    (DirectiveName: 'outputpath';    Shape: dsCString;      IsPath: True;  IsMainOnly: True;  IsFilterChecked: False; IsLibName: False; IsStatement: False; IsSingle: True)
+    (DirectiveName: 'outputpath';    Shape: dsCString;      IsPath: True;  IsMainOnly: True;  IsFilterChecked: False; IsLibName: False; IsStatement: False; IsSingle: True),
+    // A file built into the binary under a key (PLAN-RESDATA, user 2026-10-19):
+    // any module; the path (the second value) resolves as every build path
+    (DirectiveName: 'addresdata';    Shape: dsKeyAndPath;   IsPath: True;  IsMainOnly: False; IsFilterChecked: False; IsLibName: False; IsStatement: False; IsSingle: False)
   );
 
   { PC_DIRECTIVE_VALUES }
@@ -3577,6 +3639,84 @@ begin
       Exit(False);
   end;
 
+  Result := True;
+end;
+
+{ TPCResDataKey }
+
+class function TPCResDataKey.SymbolOf(const AKey: string): string;
+const
+  { PC_HEX_DIGITS }
+  PC_HEX_DIGITS: string = '0123456789abcdef';
+var
+  LBytes: TBytes;
+  LByte: Byte;
+  LBuilder: TStringBuilder;
+begin
+  // The key's UTF-8 bytes (a valid key: SEM's SM0119), two digits each
+  LBytes := TEncoding.UTF8.GetBytes(AKey);
+  LBuilder := TStringBuilder.Create(Length(PC_RESDATA_KEY_SYMBOL_PREFIX) + Length(LBytes) * 2);
+  try
+    LBuilder.Append(PC_RESDATA_KEY_SYMBOL_PREFIX);
+    for LByte in LBytes do
+    begin
+      LBuilder.Append(PC_HEX_DIGITS.Chars[LByte shr 4]);
+      LBuilder.Append(PC_HEX_DIGITS.Chars[LByte and $0F]);
+    end;
+    Result := LBuilder.ToString();
+  finally
+    LBuilder.Free();
+  end;
+end;
+
+class function TPCResDataKey.TryKeyOf(const ASymbol: string; out AKey: string): Boolean;
+var
+  LHex: string;
+  LBytes: TBytes;
+  LI: Integer;
+  LHigh: Integer;
+  LLow: Integer;
+
+  function DoDigit(const AChar: Char): Integer;
+  begin
+    // Lowercase only: SymbolOf writes no other digit
+    if (AChar >= '0') and (AChar <= '9') then
+      Result := Ord(AChar) - Ord('0')
+    else if (AChar >= 'a') and (AChar <= 'f') then
+      Result := Ord(AChar) - Ord('a') + 10
+    else
+      Result := -1;
+  end;
+
+begin
+  AKey := '';
+  Result := False;
+  if not ASymbol.StartsWith(PC_RESDATA_KEY_SYMBOL_PREFIX) then
+    Exit;
+  LHex := ASymbol.Substring(Length(PC_RESDATA_KEY_SYMBOL_PREFIX));
+  if (LHex = '') or (Length(LHex) mod 2 <> 0) then
+    Exit;
+
+  SetLength(LBytes, Length(LHex) div 2);
+  for LI := 0 to High(LBytes) do
+  begin
+    LHigh := DoDigit(LHex.Chars[LI * 2]);
+    LLow := DoDigit(LHex.Chars[LI * 2 + 1]);
+    if (LHigh < 0) or (LLow < 0) then
+      Exit;
+    LBytes[LI] := Byte((LHigh shl 4) or LLow);
+  end;
+
+  // Strict UTF-8 (it raises on bytes that are no UTF-8): such bytes name no key
+  try
+    AKey := TEncoding.UTF8.GetString(LBytes);
+  except
+    on E: Exception do
+    begin
+      AKey := '';
+      Exit;
+    end;
+  end;
   Result := True;
 end;
 

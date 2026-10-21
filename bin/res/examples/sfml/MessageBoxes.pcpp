@@ -1,0 +1,32 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  MessageBoxes.pcpp - sfx::messageBox (import sfml_ext): a modal message box
+  of each kind, Info, Warning and Error, one after the other. Each waits for
+  OK, Enter or Escape (Windows: the system's box; Linux: a small SFML window
+  in the default font).
+==============================================================================*/
+
+module exe MessageBoxes;
+
+import
+  sfml_ext;
+
+begin
+  sfx::messageBox("MessageBoxes", "This is an info box.\nIt waits for OK, Enter or Escape.",
+    sfx::MessageBoxType::Info);
+  sfx::messageBox("MessageBoxes", "This is a warning box.", sfx::MessageBoxType::Warning);
+  sfx::messageBox("MessageBoxes", "This is an error box.", sfx::MessageBoxType::Error);
+end.
