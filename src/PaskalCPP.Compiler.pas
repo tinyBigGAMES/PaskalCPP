@@ -260,6 +260,11 @@ type
     function DoKeyTarget(const AKeys: TDictionary<string, string>;
       out ATarget: TPCTargetTriple): Boolean;
     procedure DoApplyDerived();
+    // A module's TU quote include folders, from the AST: its own .pcpp's
+    // folder, then the folders of every module reached through its imports
+    // (depth first, import order, each folder once). A unit's `cpp header;`
+    // includes land in its .pcpp.h, which its importers' TUs compile
+    function DoQuoteIncludePaths(const AModule: TPCModule): TArray<string>;
     function DoConfigureBuild(): Boolean;
     function DoValidateAutoRun(const AAutoRun: Boolean): Boolean;
     procedure DoWriteOutputRecord();
@@ -1901,10 +1906,13 @@ begin
   FZigBuild.SetTarget(LTarget.ToZig());
 
   // One TU per module, the names WriteFiles wrote (from the AST, never by
-  // listing the folder: a stale file of an earlier compile is not built)
+  // listing the folder: a stale file of an earlier compile is not built).
+  // Each TU's #include "..." searches its .pcpp's folder and its imports'
+  // (the TU itself lives in generated\, which clang searches first)
   for LIndex := 0 to FAst.ModuleCount() - 1 do
     FZigBuild.AddSourceFile(TUtils.JoinResolvedPath(FGeneratedPath,
-      FAst.ModuleAt(LIndex).ModuleName + PC_EMT_SOURCE_EXT));
+      FAst.ModuleAt(LIndex).ModuleName + PC_EMT_SOURCE_EXT),
+      DoQuoteIncludePaths(FAst.ModuleAt(LIndex)));
 
   // The runtime: its headers for every build, its TU for an exe or dll (a
   // lib carries none: the exe / dll that links it supplies the one copy; a
@@ -1928,6 +1936,70 @@ begin
   FZigBuild.SetFrontendCheck(DoFrontendCheck);
   // A data key a separately built library holds too: SM0121, as SEM's
   FZigBuild.SetDuplicateSymbolCheck(DoDuplicateSymbolCheck);
+end;
+
+function TPCCompiler.DoQuoteIncludePaths(const AModule: TPCModule): TArray<string>;
+var
+  LVisited: TList<TPCModule>;
+  LFolders: TList<string>;
+
+  procedure DoVisit(const AVisit: TPCModule);
+  var
+    LFolder: string;
+    LKnown: Boolean;
+    LI: Integer;
+    LImport: TPCImport;
+  begin
+    // A failed import has no module; an import cycle stops at a visited one
+    if (AVisit = nil) or LVisited.Contains(AVisit) then
+      Exit;
+    LVisited.Add(AVisit);
+
+    if AVisit.SourceFile <> '' then
+    begin
+      // SourceFile is the stream's spelling (forward slashes): resolved once,
+      // then its folder. A path that cannot be used costs the TU this folder
+      // only (CMP0001 warning); the build goes on
+      try
+        LFolder := TPath.GetDirectoryName(TUtils.ResolvePath(AVisit.SourceFile));
+      except
+        on E: Exception do
+        begin
+          FErrors.Add(esWarning, PC_ERR_CMP_001, RSCmpPathFailed,
+            [AVisit.SourceFile, E.Message]);
+          LFolder := '';
+        end;
+      end;
+      LKnown := False;
+      for LI := 0 to LFolders.Count - 1 do
+      begin
+        if TUtils.SamePath(LFolders[LI], LFolder) then
+        begin
+          LKnown := True;
+          Break;
+        end;
+      end;
+      if (LFolder <> '') and (not LKnown) then
+        LFolders.Add(LFolder);
+    end;
+
+    for LImport in AVisit.Imports do
+      DoVisit(LImport.ImportedModule);
+  end;
+
+begin
+  LVisited := TList<TPCModule>.Create();
+  try
+    LFolders := TList<string>.Create();
+    try
+      DoVisit(AModule);
+      Result := LFolders.ToArray();
+    finally
+      LFolders.Free();
+    end;
+  finally
+    LVisited.Free();
+  end;
 end;
 
 function TPCCompiler.DoConfigureBuild(): Boolean;

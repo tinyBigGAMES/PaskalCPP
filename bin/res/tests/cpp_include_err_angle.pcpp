@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  cpp_include_err_angle.pcpp - C++ integration compliance: an angle include
+
+  #include <...> does not search the .pcpp's own folder, as in a C++ file:
+  cpp_include_quoted.h sits beside this file, and its angle #include is
+  clang's fatal error (ZB0016 "file not found") at the .pcpp line of the
+  #include (cpp_include_quoted.pcpp includes it quoted). Built, never run.
+
+  How to check, from repo\bin:
+    pcpp res\tests\cpp_include_err_angle.pcpp
+    pcpp res\tests\cpp_include_err_angle.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe cpp_include_err_angle;
+
+#include <cpp_include_quoted.h> // ERROR ZB0016@10: 'cpp_include_quoted.h' file not found
+
+begin
+  println("unreachable");
+end.

@@ -291,6 +291,11 @@ const
   { PC_ZIG_FORM_FLAGS_SUF }
   PC_ZIG_FORM_FLAGS_SUF    = ' },';
 
+  { PC_ZIG_FLAG_IQUOTE }
+  // clang's quote include folder: a TU's .flags carry it as a pair, then the
+  // folder ("-iquote", "<folder>"), after BuildFlagsString's list
+  PC_ZIG_FLAG_IQUOTE       = '-iquote';
+
 type
 
   { TPCBuildMode }
@@ -477,8 +482,19 @@ type
     procedure DoRemovePath(const AList: TStringList; const ARaw: string;
       const AWhat: string);
     // The one gate of every source file (AddSourceFile(s), LoadBuildFile): a
-    // name the toolchain does not compile is ZB0033 and not stored
-    procedure DoAddSourcePath(const ARaw: string; const ABase: string);
+    // name the toolchain does not compile is ZB0033 and not stored. Returns
+    // the file's index in FSourceFiles (added now or stored before); -1 when
+    // the file is not stored
+    function DoAddSourcePath(const ARaw: string; const ABase: string): Integer;
+    // A TU's quote include folders (clang -iquote: searched for #include "..."
+    // after the TU's own folder, before every -I), kept in order, each once,
+    // on the TU's FSourceFiles entry (an owned TStringList)
+    procedure DoAddQuotePaths(const AIndex: Integer; const APaths: array of string;
+      const ABase: string);
+    // The TU's -iquote flags as .flags items: ', "-iquote", "<folder>"' per folder
+    function DoQuoteFlags(const ASourceFile: string): string;
+    // The folders of a .flags payload's -iquote pairs, in order
+    function DoFlagsQuotePaths(const APayload: string): TArray<string>;
     // An accepted output folder against zig's limit: ZB0021 when longer
     function DoCheckBuildRoot(const AResolved: string): Boolean;
 
@@ -488,12 +504,15 @@ type
     function DoOptimizeName(const ALevel: TPCOptimizeLevel): string;
     function DoAcceptTarget(const ATarget: string): Boolean;
     procedure DoLoadLine(const ALine: string; const ALineNo: Integer;
-      const AFilename: string; var ATURoot: string);
+      const AFilename: string; var ATURoot: string; var ATUIndex: Integer);
     function DoLoadHeaderLine(const ALine: string): Boolean;
     function DoLoadArtifactLine(const ALine: string): Boolean;
     function DoLoadModuleLine(const ALine: string): Boolean;
     function DoLoadLinkFileLine(const ARest: string): Boolean;
-    function DoLoadSourceLine(const ALine: string; var ATURoot: string): Boolean;
+    // ATURoot / ATUIndex: the TU block being read (its folder, then its
+    // FSourceFiles index once its file line is read; -1 = none)
+    function DoLoadSourceLine(const ALine: string; var ATURoot: string;
+      var ATUIndex: Integer): Boolean;
     function GetSourceLanguage(const ASourceFile: string): TPCSourceLanguage;
     procedure DoZigHeader(const ABuilder: TStringBuilder);
     procedure DoZigArtifact(const ABuilder: TStringBuilder;
@@ -612,7 +631,13 @@ type
     function GetTarget(): string;
 
     // Source files
-    procedure AddSourceFile(const ASourceFile: string);
+    procedure AddSourceFile(const ASourceFile: string); overload;
+    // A TU with its quote include folders (clang -iquote, in this order; the
+    // C++ rule for #include "...": the TU's own folder, then these, then every
+    // include path). Paths resolve as AddIncludePath's; a folder already
+    // listed for the TU is skipped
+    procedure AddSourceFile(const ASourceFile: string;
+      const AQuoteIncludePaths: array of string); overload;
     procedure AddSourceFiles(const AFiles: array of string); overload;
     procedure AddSourceFiles(const ABasePath: string;
       const AFiles: array of string); overload;
@@ -710,6 +735,8 @@ type
     function GetSubsystem(): TPCSubsystemType;
     function GetSourceFileCount(): Integer;
     function GetSourceFile(const AIndex: Integer): string;
+    // The quote include folders of source file AIndex, stored resolved, in order
+    function GetSourceQuoteIncludePaths(const AIndex: Integer): TArray<string>;
 
     // Platform extension helpers (derived from the target triple)
     function GetExeExtension(): string;
@@ -733,7 +760,8 @@ type
     function BuildFlagsString(const ALanguage: TPCSourceLanguage): string;
     function GenerateBuildZig(): string;
     // A flags payload ('"<flag>", "<flag>", ...'): its defines and undefines
-    // are set; False when it is not a list of zig string literals
+    // are set (an -iquote's folder is its pair's, never read as a flag);
+    // False when it is not a list of zig string literals
     function ParseFlagsLine(const APayload: string): Boolean;
 
     // Version info / post-build resources
@@ -1000,6 +1028,9 @@ begin
   FOptimizeLevel := olDebug;
   FSubsystem := stConsole;
   FSourceFiles := TStringList.Create();
+  // Each entry's object is its quote include folders (a TStringList, or nil):
+  // freed with the entry (Delete, Clear)
+  FSourceFiles.OwnsObjects := True;
   FIncludePaths := TStringList.Create();
   FLibraryPaths := TStringList.Create();
   FLinkLibraries := TStringList.Create();
@@ -1338,7 +1369,7 @@ end;
 
 // Source files
 
-procedure TPCZigBuild.DoAddSourcePath(const ARaw: string; const ABase: string);
+function TPCZigBuild.DoAddSourcePath(const ARaw: string; const ABase: string): Integer;
 var
   LPath: string;
   LLanguage: TPCSourceLanguage;
@@ -1347,6 +1378,7 @@ begin
   // empty = no path; stored once) plus the name check on the accepted path:
   // a name clang does not compile (a .h, a linker input) is ZB0033. Exact
   // case: a .C file is C++
+  Result := -1;
   if not DoAcceptPath(ARaw, ABase, RSZigBuildWhatSourceFile, LPath) then
     Exit;
   if LPath = '' then
@@ -1358,13 +1390,103 @@ begin
         [ARaw, TPCSourceFiles.ExtensionsText()]);
     Exit;
   end;
-  if FSourceFiles.IndexOf(LPath) < 0 then
-    FSourceFiles.Add(LPath);
+  Result := FSourceFiles.IndexOf(LPath);
+  if Result < 0 then
+    Result := FSourceFiles.Add(LPath);
+end;
+
+procedure TPCZigBuild.DoAddQuotePaths(const AIndex: Integer; const APaths: array of string;
+  const ABase: string);
+var
+  LList: TStringList;
+  LI: Integer;
+  LJ: Integer;
+  LPath: string;
+  LKnown: Boolean;
+begin
+  if (AIndex < 0) or (AIndex >= FSourceFiles.Count) then
+    Exit;
+
+  for LI := Low(APaths) to High(APaths) do
+  begin
+    // AddIncludePath's rule: one resolve (ZB0020 for a path no file routine
+    // takes), empty = no path
+    if not DoAcceptPath(APaths[LI], ABase, RSZigBuildWhatIncludePath, LPath) then
+      Continue;
+    if LPath = '' then
+      Continue;
+
+    LList := TStringList(FSourceFiles.Objects[AIndex]);
+    if LList = nil then
+    begin
+      LList := TStringList.Create();
+      FSourceFiles.Objects[AIndex] := LList;
+    end;
+
+    // Each folder once, compared as paths (two spellings of one folder)
+    LKnown := False;
+    for LJ := 0 to LList.Count - 1 do
+    begin
+      if TUtils.SamePath(LList[LJ], LPath) then
+      begin
+        LKnown := True;
+        Break;
+      end;
+    end;
+    if not LKnown then
+      LList.Add(LPath);
+  end;
+end;
+
+function TPCZigBuild.DoQuoteFlags(const ASourceFile: string): string;
+var
+  LIndex: Integer;
+  LList: TStringList;
+  LI: Integer;
+begin
+  Result := '';
+  LIndex := FSourceFiles.IndexOf(ASourceFile);
+  if LIndex < 0 then
+    Exit;
+  LList := TStringList(FSourceFiles.Objects[LIndex]);
+  if LList = nil then
+    Exit;
+  for LI := 0 to LList.Count - 1 do
+    Result := Result + ', ' + ZigStringLiteral(PC_ZIG_FLAG_IQUOTE) + ', ' +
+      ZigStringLiteral(DoZigPath(LList[LI]));
+end;
+
+function TPCZigBuild.DoFlagsQuotePaths(const APayload: string): TArray<string>;
+var
+  LFlags: TArray<string>;
+  LI: Integer;
+begin
+  // The inverse of DoQuoteFlags: every "-iquote" and the folder after it
+  Result := [];
+  if not ZigStringList(APayload, LFlags) then
+    Exit;
+  LI := 0;
+  while LI < High(LFlags) do
+  begin
+    if LFlags[LI] = PC_ZIG_FLAG_IQUOTE then
+    begin
+      Result := Result + [LFlags[LI + 1]];
+      Inc(LI, 2);
+    end
+    else
+      Inc(LI);
+  end;
 end;
 
 procedure TPCZigBuild.AddSourceFile(const ASourceFile: string);
 begin
   DoAddSourcePath(ASourceFile, '');
+end;
+
+procedure TPCZigBuild.AddSourceFile(const ASourceFile: string;
+  const AQuoteIncludePaths: array of string);
+begin
+  DoAddQuotePaths(DoAddSourcePath(ASourceFile, ''), AQuoteIncludePaths, '');
 end;
 
 // Adds a list of source files as given. Each entry is passed through
@@ -2226,6 +2348,18 @@ begin
     Result := '';
 end;
 
+function TPCZigBuild.GetSourceQuoteIncludePaths(const AIndex: Integer): TArray<string>;
+var
+  LList: TStringList;
+begin
+  Result := [];
+  if (AIndex < 0) or (AIndex >= FSourceFiles.Count) then
+    Exit;
+  LList := TStringList(FSourceFiles.Objects[AIndex]);
+  if LList <> nil then
+    Result := LList.ToStringArray();
+end;
+
 // Platform extension helpers
 
 function TPCZigBuild.GetExeExtension(): string;
@@ -2581,7 +2715,9 @@ begin
     ABuilder.AppendLine('        .files = &.{');
     ABuilder.AppendLine('            ' + ZigStringLiteral(TPath.GetFileName(AFiles[LI])));
     ABuilder.AppendLine('        },');
+    // The TU's own quote include folders follow the shared flags (DoQuoteFlags)
     ABuilder.AppendLine('        ' + PC_ZIG_FORM_FLAGS_PRE + LFlagsStr +
+      DoQuoteFlags(AFiles[LI]) +
       ', "-Xclang", "-serialize-diagnostic-file", "-Xclang", ' +
       ZigStringLiteral(LDiagPath) + PC_ZIG_FORM_FLAGS_SUF);
     ABuilder.AppendLine('    });');
@@ -2730,10 +2866,16 @@ begin
   Result := ZigStringList(APayload, LFlags);
   if not Result then
     Exit;
-  for LI := 0 to High(LFlags) do
+  LI := 0;
+  while LI <= High(LFlags) do
   begin
     LFlag := LFlags[LI];
-    if LFlag.StartsWith('-D') then
+    Inc(LI);
+    // A TU's quote include folder is read by DoFlagsQuotePaths: its folder
+    // is never a flag of its own
+    if LFlag = PC_ZIG_FLAG_IQUOTE then
+      Inc(LI)
+    else if LFlag.StartsWith('-D') then
     begin
       LEqualPos := LFlag.IndexOf('=');
       if LEqualPos > 2 then
@@ -2962,7 +3104,7 @@ begin
 end;
 
 procedure TPCZigBuild.DoLoadLine(const ALine: string; const ALineNo: Integer;
-  const AFilename: string; var ATURoot: string);
+  const AFilename: string; var ATURoot: string; var ATUIndex: Integer);
 var
   LI: Integer;
 begin
@@ -2979,7 +3121,7 @@ begin
     Exit;
   if DoLoadModuleLine(ALine) then
     Exit;
-  if DoLoadSourceLine(ALine, ATURoot) then
+  if DoLoadSourceLine(ALine, ATURoot, ATUIndex) then
     Exit;
 
   // Not a line GenerateBuildZig writes, or a payload it cannot read: said,
@@ -3107,7 +3249,8 @@ begin
   Result := True;
 end;
 
-function TPCZigBuild.DoLoadSourceLine(const ALine: string; var ATURoot: string): Boolean;
+function TPCZigBuild.DoLoadSourceLine(const ALine: string; var ATURoot: string;
+  var ATUIndex: Integer): Boolean;
 var
   LPayload: string;
   LText: string;
@@ -3124,18 +3267,26 @@ begin
       ATURoot := LResolved
     else
       ATURoot := '';
+    ATUIndex := -1;
     Exit;
   end;
 
+  // The TU's flags follow its file line: its -iquote folders are that TU's
   if DoFormPayload(ALine, PC_ZIG_FORM_FLAGS_PRE, PC_ZIG_FORM_FLAGS_SUF, LPayload) and
     ParseFlagsLine(LPayload) then
+  begin
+    DoAddQuotePaths(ATUIndex, DoFlagsQuotePaths(LPayload), FOutputPath);
+    ATUIndex := -1;
     Exit;
+  end;
 
   // A TU's file: one string literal on its own line
   if ALine.StartsWith('"') and ZigStringValue(ALine, LText) then
   begin
     if ATURoot <> '' then
-      DoAddSourcePath(LText, ATURoot);
+      ATUIndex := DoAddSourcePath(LText, ATURoot)
+    else
+      ATUIndex := -1;
     Exit;
   end;
 
@@ -3151,6 +3302,7 @@ var
   LFilename: string;
   LRoot: string;
   LTURoot: string;
+  LTUIndex: Integer;
 begin
   Result := False;
 
@@ -3194,8 +3346,9 @@ begin
 
     // Each line whole, in order: a TU's .root line comes before its file
     LTURoot := FOutputPath;
+    LTUIndex := -1;
     for LI := 0 to LLines.Count - 1 do
-      DoLoadLine(LLines[LI].Trim(), LI + 1, LFilename, LTURoot);
+      DoLoadLine(LLines[LI].Trim(), LI + 1, LFilename, LTURoot, LTUIndex);
 
     Result := not FProjectName.IsEmpty;
   finally
