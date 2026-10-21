@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  cpp_include_err_missing.pcpp - C++ integration compliance: a missing header
+
+  An #include of a header that does not exist is clang's fatal error
+  (ZB0016 "file not found"), reported at the .pcpp line of the #include
+  (BNF.md sec 10, DESIGN.md sec 5). The build never ends on only "Build
+  failed with exit code 1". This file is built, never run.
+
+  How to check, from repo\bin:
+    pcpp res\tests\cpp_include_err_missing.pcpp
+    pcpp res\tests\cpp_include_err_missing.pcpp -t x86_64-linux-gnu
+  The marked line reports that code; nothing else is reported.
+*******************************************************************************/
+
+module exe cpp_include_err_missing;
+
+#include <abcde> // ERROR ZB0016@10: 'abcde' file not found
+
+begin
+  println("unreachable");
+end.
