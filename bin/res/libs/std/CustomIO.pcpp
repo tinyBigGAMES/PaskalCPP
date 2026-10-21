@@ -1,0 +1,2723 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  CustomIO.pcpp - the CustomIO unit: `import CustomIO;` gives streams in the
+  style of SDL3's custom IO. An IO is a stream behind a table of callbacks
+  (an IOInterface: Read, Write, Seek, Tell, Size, Flush, Close), so a routine
+  that takes an IO reads from memory, a file, a zip entry or anything a
+  program writes itself: CreateIO(AInterface, AUserData) makes an IO from any
+  interface. The IO routines (IORead, IOWrite, IOSeek, IOTell, IOSize,
+  IOFlush, IOClose, IOStatus) call through the table and keep the stream's
+  state: a callback left nil is a clean failure, never a crash.
+  CreateMemoryIO makes an IO over the caller's memory (read-only, or read /
+  write within its size) or over a buffer of its own that grows as it is
+  written. CreateFileIO makes an IO over a file, opened in one of C's fopen
+  modes (FileMode), its name UTF-8 on both targets.
+  Beside the stream, an IOSource opens IOs by path (SDL3's SDL_Storage
+  split): an IOSourceInterface (Open, Exists, Size, Close) behind
+  CreateIOSource, used through IOSourceOpen, IOSourceExists, IOSourceSize
+  and IOSourceClose, which check and normalize every path once (relative,
+  `/` separated, no climbing above the root) before a callback sees it.
+  CreateFolderIOSource makes a source over a folder; CreateZipIOSource a
+  read-only source over a zip archive, which it reads through an IO (a
+  file, memory, an entry of another source), ZIP64 included, its entries
+  (stored, deflated, ZipCrypto) read-only IOs that seek without starting
+  over. CreateZipFileIO opens one entry of an archive directly.
+==============================================================================*/
+
+module unit CustomIO;
+
+import
+  SysUtils,
+  minizip,
+  zlib;
+
+// Private: the memory IO's std::memcpy, the file IO's std::filebuf and the
+// zip source's minizip bridge, this unit's own translation unit. Every helper is
+// named apart from the unit's exported names (a body in the unit's
+// namespace would find those first).
+cpp source;
+
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <ios>
+#include <new>
+#include <string>
+#include <system_error>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+// minizip's own ZipCrypto key schedule (init_keys / zdecode), for the zip
+// entry IO's password check and its in-place reading of encrypted entries;
+// zlib.h is already in through minizip's header
+#include "crypt.h"
+
+namespace {
+
+// A file IO's user data. std::filebuf (std:: first: one implementation on
+// both targets) carries C stdio's rule that output and input must be
+// separated by a seek, in either order; Pending holds the last direction so
+// the helpers insert that seek themselves.
+struct FileIOData
+{
+  std::filebuf Buffer;
+  int Pending = 0; // 0 none, 1 the last operation read, 2 it wrote
+};
+
+// Both directions: a position names the one place the file is at
+constexpr std::ios_base::openmode FileDoBoth = std::ios_base::in | std::ios_base::out;
+
+// The seek C stdio asks for when the direction changes; false when it failed
+bool FileDoTurn(FileIOData* AFile, const int ADirection)
+{
+  if ((AFile->Pending != 0) && (AFile->Pending != ADirection))
+  {
+    if (AFile->Buffer.pubseekoff(0, std::ios_base::cur, FileDoBoth) == std::streampos(-1))
+      return false;
+  }
+  AFile->Pending = ADirection;
+  return true;
+}
+
+// Opens APath (UTF-8) in mode AMode: FileMode's ordinals Read 0, Write 1,
+// ReadWrite 2, Append 3, which are C's "rb", "wb", "r+b", "ab". nullptr when
+// the mode is unknown, the path is empty or a folder, or the open fails.
+void* FileDoOpen(const std::string& APath, const std::int32_t AMode)
+{
+  std::ios_base::openmode LMode = std::ios_base::binary;
+  std::error_code LError;
+  if (AMode == 0)
+    LMode |= std::ios_base::in;
+  else if (AMode == 1)
+    LMode |= std::ios_base::out | std::ios_base::trunc;
+  else if (AMode == 2)
+    LMode |= std::ios_base::in | std::ios_base::out;
+  else if (AMode == 3)
+    LMode |= std::ios_base::out | std::ios_base::app;
+  else
+    return nullptr;
+  if (APath.empty())
+    return nullptr;
+  // The UTF-8 text goes in as char8_t, never through
+  // std::filesystem::path(std::string) (the ANSI code page on Windows)
+  const std::filesystem::path LPath(std::u8string(APath.begin(), APath.end()));
+  // A folder opens as a file on Linux (reads then fail): refused on both
+  if (std::filesystem::is_directory(LPath, LError))
+    return nullptr;
+  FileIOData* LFile = new (std::nothrow) FileIOData();
+  if (LFile == nullptr)
+    return nullptr;
+  if (LFile->Buffer.open(LPath, LMode) == nullptr)
+  {
+    delete LFile;
+    return nullptr;
+  }
+  return LFile;
+}
+
+// Up to ASize bytes into ABuffer; the count read, or -1 when the turn from
+// writing failed
+std::int64_t FileDoRead(void* AFile, void* ABuffer, const std::int64_t ASize)
+{
+  FileIOData* LFile = static_cast<FileIOData*>(AFile);
+  if (!FileDoTurn(LFile, 1))
+    return -1;
+  return static_cast<std::int64_t>(LFile->Buffer.sgetn(static_cast<char*>(ABuffer), ASize));
+}
+
+// Up to ASize bytes from ABuffer; the count written, or -1 when the turn
+// from reading failed
+std::int64_t FileDoWrite(void* AFile, const void* ABuffer, const std::int64_t ASize)
+{
+  FileIOData* LFile = static_cast<FileIOData*>(AFile);
+  if (!FileDoTurn(LFile, 2))
+    return -1;
+  return static_cast<std::int64_t>(LFile->Buffer.sputn(static_cast<const char*>(ABuffer), ASize));
+}
+
+// The current position, or -1. A seek of 0 from the current place: it also
+// ends the direction (both filebuf implementations sync there)
+std::int64_t FileDoTell(void* AFile)
+{
+  FileIOData* LFile = static_cast<FileIOData*>(AFile);
+  const std::streampos LPos = LFile->Buffer.pubseekoff(0, std::ios_base::cur, FileDoBoth);
+  if (LPos == std::streampos(-1))
+    return -1;
+  LFile->Pending = 0;
+  return static_cast<std::int64_t>(LPos);
+}
+
+// The file's size in bytes (unflushed writes included), the position kept;
+// -1 on failure
+std::int64_t FileDoSize(void* AFile)
+{
+  FileIOData* LFile = static_cast<FileIOData*>(AFile);
+  const std::int64_t LHere = FileDoTell(LFile);
+  if (LHere < 0)
+    return -1;
+  const std::streampos LEnd = LFile->Buffer.pubseekoff(0, std::ios_base::end, FileDoBoth);
+  if (LEnd == std::streampos(-1))
+    return -1;
+  if (LFile->Buffer.pubseekpos(std::streampos(LHere), FileDoBoth) == std::streampos(-1))
+    return -1;
+  return static_cast<std::int64_t>(LEnd);
+}
+
+// Moves to AOffset from AOrigin (SeekOrigin's ordinals: FromStart 0,
+// FromCurrent 1, FromEnd 2). A file may be positioned past its end, as with
+// fseek; a target before 0 or past int64 fails and the position is kept.
+std::int64_t FileDoSeek(void* AFile, const std::int64_t AOffset, const std::int32_t AOrigin)
+{
+  FileIOData* LFile = static_cast<FileIOData*>(AFile);
+  std::int64_t LBase = 0;
+  if (AOrigin == 1)
+    LBase = FileDoTell(LFile);
+  else if (AOrigin == 2)
+    LBase = FileDoSize(LFile);
+  else if (AOrigin != 0)
+    return -1;
+  if (LBase < 0)
+    return -1;
+  // Compared without forming the target (no overflow)
+  if (AOffset < -LBase)
+    return -1;
+  if (AOffset > INT64_MAX - LBase)
+    return -1;
+  const std::streampos LPos = LFile->Buffer.pubseekpos(std::streampos(LBase + AOffset), FileDoBoth);
+  if (LPos == std::streampos(-1))
+    return -1;
+  LFile->Pending = 0;
+  return static_cast<std::int64_t>(LPos);
+}
+
+// Writes out what is buffered; false on failure
+bool FileDoFlush(void* AFile)
+{
+  FileIOData* LFile = static_cast<FileIOData*>(AFile);
+  return LFile->Buffer.pubsync() == 0;
+}
+
+// Closes the file (writing out what is buffered) and frees the user data;
+// false when the close failed (the data is freed either way)
+bool FileDoClose(void* AFile)
+{
+  FileIOData* LFile = static_cast<FileIOData*>(AFile);
+  const bool LOk = LFile->Buffer.close() != nullptr;
+  delete LFile;
+  return LOk;
+}
+
+// True when ASegment is a Windows device name (CON, PRN, AUX, NUL, COM1-9,
+// LPT1-9) in any case, with or without an extension. Windows opens the
+// device for such a name in any folder; it is refused on both targets so a
+// source path means the same file everywhere.
+bool SourceDoDevice(const std::string& ASegment)
+{
+  std::string LStem = ASegment.substr(0, ASegment.find('.'));
+  // Windows drops trailing spaces before the extension ("CON .txt" is CON)
+  while (!LStem.empty() && (LStem.back() == ' '))
+    LStem.pop_back();
+  for (char& LChar : LStem)
+  {
+    if ((LChar >= 'a') && (LChar <= 'z'))
+      LChar = static_cast<char>(LChar - 'a' + 'A');
+  }
+  if ((LStem == "CON") || (LStem == "PRN") || (LStem == "AUX") || (LStem == "NUL"))
+    return true;
+  if (LStem.size() != 4)
+    return false;
+  const bool LPort = (LStem.compare(0, 3, "COM") == 0) || (LStem.compare(0, 3, "LPT") == 0);
+  return LPort && (LStem[3] >= '1') && (LStem[3] <= '9');
+}
+
+// True for a character no source path may hold: `\` and `:` (a second
+// separator and a drive on Windows), the characters Windows refuses in a
+// name, and the control characters
+bool SourceDoBadChar(const char AChar)
+{
+  const unsigned char LByte = static_cast<unsigned char>(AChar);
+  if (LByte < 0x20)
+    return true;
+  return (AChar == '\\') || (AChar == ':') || (AChar == '<') || (AChar == '>') ||
+    (AChar == '"') || (AChar == '|') || (AChar == '?') || (AChar == '*');
+}
+
+// An IOSource path in its one canonical form, "" when it is refused. The path
+// is relative, `/` separated, UTF-8. `.` segments drop out and `..` removes
+// the segment before it (lexically, as in a zip); a `..` that would climb
+// above the source's root is refused. Refused too: an empty path or segment
+// (a leading, doubled or trailing `/`), a bad character, a segment ending in
+// `.` or a space (Windows drops those, two names would mean one file), a
+// device name, and a path that names the root itself.
+std::string SourceDoNormalize(const std::string& APath)
+{
+  try
+  {
+    std::vector<std::string> LParts;
+    std::string LResult;
+    std::size_t LStart = 0;
+    if (APath.empty())
+      return {};
+    for (const char LChar : APath)
+    {
+      if (SourceDoBadChar(LChar))
+        return {};
+    }
+    while (true)
+    {
+      const std::size_t LEnd = APath.find('/', LStart);
+      const std::size_t LCount = (LEnd == std::string::npos) ? std::string::npos : LEnd - LStart;
+      const std::string LSegment = APath.substr(LStart, LCount);
+      if (LSegment.empty())
+        return {};
+      if (LSegment == "..")
+      {
+        if (LParts.empty())
+          return {};
+        LParts.pop_back();
+      }
+      else if (LSegment != ".")
+      {
+        if ((LSegment.back() == '.') || (LSegment.back() == ' '))
+          return {};
+        if (SourceDoDevice(LSegment))
+          return {};
+        LParts.push_back(LSegment);
+      }
+      if (LEnd == std::string::npos)
+        break;
+      LStart = LEnd + 1;
+    }
+    for (const std::string& LPart : LParts)
+    {
+      if (!LResult.empty())
+        LResult += '/';
+      LResult += LPart;
+    }
+    return LResult;
+  }
+  catch (...)
+  {
+    return {};
+  }
+}
+
+// A folder source's user data: the folder every entry path is relative to
+struct FolderSourceData
+{
+  std::filesystem::path Root;
+};
+
+// A folder source over APath (UTF-8, already resolved); nullptr when the path
+// is empty or not an existing folder
+void* FolderDoCreate(const std::string& APath)
+{
+  try
+  {
+    std::error_code LError;
+    if (APath.empty())
+      return nullptr;
+    const std::filesystem::path LRoot(std::u8string(APath.begin(), APath.end()));
+    if (!std::filesystem::is_directory(LRoot, LError))
+      return nullptr;
+    FolderSourceData* LFolder = new FolderSourceData();
+    LFolder->Root = LRoot;
+    return LFolder;
+  }
+  catch (...)
+  {
+    return nullptr;
+  }
+}
+
+// The file an entry names: the root joined with the canonical entry path
+std::filesystem::path FolderDoPath(void* AFolder, const std::string& AEntry)
+{
+  const FolderSourceData* LFolder = static_cast<FolderSourceData*>(AFolder);
+  return LFolder->Root / std::filesystem::path(std::u8string(AEntry.begin(), AEntry.end()));
+}
+
+// The entry's file as UTF-8 text for FileDoOpen; "" on failure (which
+// FileDoOpen refuses)
+std::string FolderDoFile(void* AFolder, const std::string& AEntry)
+{
+  try
+  {
+    const std::u8string LText = FolderDoPath(AFolder, AEntry).u8string();
+    return std::string(LText.begin(), LText.end());
+  }
+  catch (...)
+  {
+    return {};
+  }
+}
+
+// True when the entry is a regular file (a folder is not an entry)
+bool FolderDoExists(void* AFolder, const std::string& AEntry)
+{
+  try
+  {
+    std::error_code LError;
+    return std::filesystem::is_regular_file(FolderDoPath(AFolder, AEntry), LError);
+  }
+  catch (...)
+  {
+    return false;
+  }
+}
+
+// The entry's size in bytes; -1 when it is not a regular file
+std::int64_t FolderDoSize(void* AFolder, const std::string& AEntry)
+{
+  try
+  {
+    std::error_code LError;
+    const std::filesystem::path LPath = FolderDoPath(AFolder, AEntry);
+    if (!std::filesystem::is_regular_file(LPath, LError))
+      return -1;
+    const std::uintmax_t LSize = std::filesystem::file_size(LPath, LError);
+    if (LError)
+      return -1;
+    if (LSize > static_cast<std::uintmax_t>(INT64_MAX))
+      return -1;
+    return static_cast<std::int64_t>(LSize);
+  }
+  catch (...)
+  {
+    return -1;
+  }
+}
+
+// Frees the folder source's user data
+bool FolderDoClose(void* AFolder)
+{
+  delete static_cast<FolderSourceData*>(AFolder);
+  return true;
+}
+
+// A zip's little-endian fields (APPNOTE 4.4: little-endian on every host)
+std::uint16_t ZipDoU16(const std::uint8_t* AAt)
+{
+  return static_cast<std::uint16_t>(AAt[0] | (AAt[1] << 8));
+}
+
+std::uint32_t ZipDoU32(const std::uint8_t* AAt)
+{
+  return static_cast<std::uint32_t>(AAt[0]) | (static_cast<std::uint32_t>(AAt[1]) << 8) |
+    (static_cast<std::uint32_t>(AAt[2]) << 16) | (static_cast<std::uint32_t>(AAt[3]) << 24);
+}
+
+// CP437's characters 0x80 .. 0xFF as Unicode: a name without the UTF-8 flag
+// is CP437 (APPNOTE appendix D). The table is Python's cp437 codec.
+constexpr std::uint16_t ZipDoCp437[128] = {
+  0x00C7, 0x00FC, 0x00E9, 0x00E2, 0x00E4, 0x00E0, 0x00E5, 0x00E7,
+  0x00EA, 0x00EB, 0x00E8, 0x00EF, 0x00EE, 0x00EC, 0x00C4, 0x00C5,
+  0x00C9, 0x00E6, 0x00C6, 0x00F4, 0x00F6, 0x00F2, 0x00FB, 0x00F9,
+  0x00FF, 0x00D6, 0x00DC, 0x00A2, 0x00A3, 0x00A5, 0x20A7, 0x0192,
+  0x00E1, 0x00ED, 0x00F3, 0x00FA, 0x00F1, 0x00D1, 0x00AA, 0x00BA,
+  0x00BF, 0x2310, 0x00AC, 0x00BD, 0x00BC, 0x00A1, 0x00AB, 0x00BB,
+  0x2591, 0x2592, 0x2593, 0x2502, 0x2524, 0x2561, 0x2562, 0x2556,
+  0x2555, 0x2563, 0x2551, 0x2557, 0x255D, 0x255C, 0x255B, 0x2510,
+  0x2514, 0x2534, 0x252C, 0x251C, 0x2500, 0x253C, 0x255E, 0x255F,
+  0x255A, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256C, 0x2567,
+  0x2568, 0x2564, 0x2565, 0x2559, 0x2558, 0x2552, 0x2553, 0x256B,
+  0x256A, 0x2518, 0x250C, 0x2588, 0x2584, 0x258C, 0x2590, 0x2580,
+  0x03B1, 0x00DF, 0x0393, 0x03C0, 0x03A3, 0x03C3, 0x00B5, 0x03C4,
+  0x03A6, 0x0398, 0x03A9, 0x03B4, 0x221E, 0x03C6, 0x03B5, 0x2229,
+  0x2261, 0x00B1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00F7, 0x2248,
+  0x00B0, 0x2219, 0x00B7, 0x221A, 0x207F, 0x00B2, 0x25A0, 0x00A0,
+};
+
+// The zip source runs on minizip (the zip engine: directory, ZIP64,
+// ZipCrypto, CRC). minizip reads the archive THROUGH the source's IO: its
+// zlib_filefunc64_def is the bridge below, which calls the IO routines the
+// PaskalCPP side hands to ZipDoCreate as plain routine values (ZipIORead,
+// ZipIOSeek, ZipIOTell), so no C++ here names the unit's routines.
+
+// The IO routines the bridge calls: the archive (an IO) first. The seek's
+// origin: 0 from the start, 1 from the current position, 2 from the end.
+using ZipDoReadFn = std::int64_t (*)(void*, void*, std::int64_t);
+using ZipDoSeekFn = std::int64_t (*)(void*, std::int64_t, std::int32_t);
+using ZipDoTellFn = std::int64_t (*)(void*);
+using ZipDoCloseFn = bool (*)(void*);
+
+// The archive a zip source reads, shared by the source and every entry IO
+// opened from it (an entry IO stays valid after IOSourceClose): Refs counts
+// them, and the last one to let go closes the archive when it is Owned (the
+// source opened it by path). Single-threaded, as every IO is.
+struct ZipArchiveData
+{
+  void* Stream = nullptr; // the archive's IO
+  ZipDoReadFn Read = nullptr;
+  ZipDoSeekFn Seek = nullptr;
+  ZipDoTellFn Tell = nullptr;
+  ZipDoCloseFn Close = nullptr;
+  bool Owned = false;
+  std::int64_t Refs = 1;
+};
+
+// Takes one more reference on the archive
+void ZipDoHold(ZipArchiveData* AArchive)
+{
+  AArchive->Refs++;
+}
+
+// Lets go of a reference: the last one closes an owned archive and frees the
+// record. False when that close failed.
+bool ZipDoLetGo(ZipArchiveData* AArchive)
+{
+  bool LOk = true;
+  if (AArchive == nullptr)
+    return true;
+  AArchive->Refs--;
+  if (AArchive->Refs > 0)
+    return true;
+  if (AArchive->Owned && (AArchive->Close != nullptr) && (AArchive->Stream != nullptr))
+    LOk = AArchive->Close(AArchive->Stream);
+  delete AArchive;
+  return LOk;
+}
+
+// Reads ASize bytes from the archive's position, calling IORead until they
+// are all in or it returns 0 (a user IO may return short counts that are not
+// the end); the count read
+std::int64_t ZipDoReadLoop(ZipArchiveData* AArchive, void* ABuffer, const std::int64_t ASize)
+{
+  std::uint8_t* LBytes = static_cast<std::uint8_t*>(ABuffer);
+  std::int64_t LDone = 0;
+  while (LDone < ASize)
+  {
+    const std::int64_t LGot = AArchive->Read(AArchive->Stream, LBytes + LDone, ASize - LDone);
+    if ((LGot <= 0) || (LGot > ASize - LDone))
+      break;
+    LDone += LGot;
+  }
+  return LDone;
+}
+
+// Reads ASize bytes at archive offset AAt: the count read (short at the end
+// or on an error), or -1 when the seek failed. Every read seeks first, so
+// the source and its entry IOs share the archive's one position safely.
+std::int64_t ZipDoReadAt(ZipArchiveData* AArchive, const std::int64_t AAt, void* ABuffer,
+  const std::int64_t ASize)
+{
+  if (AArchive->Seek(AArchive->Stream, AAt, 0) != AAt)
+    return -1;
+  return ZipDoReadLoop(AArchive, ABuffer, ASize);
+}
+
+// The bridge's state: minizip's stream and opaque pointer both point here
+struct ZipBridgeData
+{
+  ZipArchiveData* Archive = nullptr; // one reference, the source's
+  bool Failed = false; // a seek or tell failed: minizip's testerror
+};
+
+// One entry of the directory: where minizip finds it again (by file
+// position, never by name) and what reading it needs
+struct ZipEntryData
+{
+  unz64_file_pos Position{};
+  std::int64_t Compressed = 0;   // the stored bytes (an encryption header included)
+  std::int64_t Uncompressed = 0;
+  std::uint32_t Crc = 0;
+  std::uint32_t DosDate = 0;     // DOS date << 16 | DOS time: the password check of a bit-3 entry
+  std::uint16_t Method = 0;
+  std::uint16_t Flags = 0;       // bit 0: encrypted, bit 3: sizes and CRC after the data
+};
+
+// A zip source's C++ side: the bridge, minizip's handle on the archive and
+// the directory (canonical name -> entry), built once when the source is made
+struct ZipTableData
+{
+  ZipBridgeData Bridge;
+  zlib_filefunc64_def Funcs{};
+  unzFile Handle = nullptr;
+  std::string Password;
+  std::unordered_map<std::string, ZipEntryData> Entries;
+};
+
+// minizip's open: the archive is already open (the source's IO), so the
+// stream is the bridge itself
+voidpf ZCALLBACK ZipDoBridgeOpen(voidpf AOpaque, const void* AName, int AMode)
+{
+  (void)AName;
+  (void)AMode;
+  return AOpaque;
+}
+
+// Reads ASize bytes from the archive's position (ZipDoReadLoop)
+uLong ZCALLBACK ZipDoBridgeRead(voidpf AOpaque, voidpf AStream, void* ABuffer, uLong ASize)
+{
+  (void)AOpaque;
+  ZipBridgeData* LBridge = static_cast<ZipBridgeData*>(AStream);
+  return static_cast<uLong>(ZipDoReadLoop(LBridge->Archive, ABuffer, static_cast<std::int64_t>(ASize)));
+}
+
+// The source never writes
+uLong ZCALLBACK ZipDoBridgeWrite(voidpf AOpaque, voidpf AStream, const void* ABuffer, uLong ASize)
+{
+  (void)AOpaque;
+  (void)AStream;
+  (void)ABuffer;
+  (void)ASize;
+  return 0;
+}
+
+ZPOS64_T ZCALLBACK ZipDoBridgeTell(voidpf AOpaque, voidpf AStream)
+{
+  (void)AOpaque;
+  ZipBridgeData* LBridge = static_cast<ZipBridgeData*>(AStream);
+  const std::int64_t LAt = LBridge->Archive->Tell(LBridge->Archive->Stream);
+  if (LAt < 0)
+  {
+    LBridge->Failed = true;
+    return static_cast<ZPOS64_T>(-1);
+  }
+  return static_cast<ZPOS64_T>(LAt);
+}
+
+// 0 when the seek landed, -1 when it failed (minizip's contract). minizip
+// moves back over an entry's extra field with a relative seek whose offset
+// is a negative number wrapped into the unsigned ZPOS64_T; its own fopen
+// ioapi hands that to fseeko64, which reads it as signed. So a relative
+// (current / end) offset is the two's-complement int64; only a from-start
+// offset must fit in int64 as it is.
+long ZCALLBACK ZipDoBridgeSeek(voidpf AOpaque, voidpf AStream, ZPOS64_T AOffset, int AOrigin)
+{
+  (void)AOpaque;
+  ZipBridgeData* LBridge = static_cast<ZipBridgeData*>(AStream);
+  std::int32_t LOrigin = 0;
+  if (AOrigin == ZLIB_FILEFUNC_SEEK_CUR)
+    LOrigin = 1;
+  else if (AOrigin == ZLIB_FILEFUNC_SEEK_END)
+    LOrigin = 2;
+  else if (AOrigin != ZLIB_FILEFUNC_SEEK_SET)
+    LOrigin = -1;
+  if ((LOrigin == 0) && (AOffset > static_cast<ZPOS64_T>(INT64_MAX)))
+    LOrigin = -1;
+  if ((LOrigin < 0) ||
+    (LBridge->Archive->Seek(LBridge->Archive->Stream, static_cast<std::int64_t>(AOffset), LOrigin) < 0))
+  {
+    LBridge->Failed = true;
+    return -1;
+  }
+  return 0;
+}
+
+// The archive stays open: the source closes it (by path) or the caller does
+int ZCALLBACK ZipDoBridgeClose(voidpf AOpaque, voidpf AStream)
+{
+  (void)AOpaque;
+  (void)AStream;
+  return 0;
+}
+
+int ZCALLBACK ZipDoBridgeError(voidpf AOpaque, voidpf AStream)
+{
+  (void)AOpaque;
+  return static_cast<ZipBridgeData*>(AStream)->Failed ? -1 : 0;
+}
+
+// Appends ACode to AText as UTF-8 (a BMP code point: CP437's are)
+void ZipDoUtf8(std::string& AText, const std::uint32_t ACode)
+{
+  if (ACode < 0x80)
+  {
+    AText += static_cast<char>(ACode);
+  }
+  else if (ACode < 0x800)
+  {
+    AText += static_cast<char>(0xC0 | (ACode >> 6));
+    AText += static_cast<char>(0x80 | (ACode & 0x3F));
+  }
+  else
+  {
+    AText += static_cast<char>(0xE0 | (ACode >> 12));
+    AText += static_cast<char>(0x80 | ((ACode >> 6) & 0x3F));
+    AText += static_cast<char>(0x80 | (ACode & 0x3F));
+  }
+}
+
+// A CP437 name as UTF-8
+std::string ZipDoCp437Text(const std::uint8_t* AName, const std::int64_t ASize)
+{
+  std::string LText;
+  for (std::int64_t LI = 0; LI < ASize; LI++)
+  {
+    if (AName[LI] < 0x80)
+      ZipDoUtf8(LText, AName[LI]);
+    else
+      ZipDoUtf8(LText, ZipDoCp437[AName[LI] - 0x80]);
+  }
+  return LText;
+}
+
+// The Info-ZIP Unicode Path field (0x7075) in an entry's extra data (minizip
+// hands it over raw): its UTF-8 name when its CRC is the raw name's (a stale
+// one, left by a rename, is ignored), else "". A field running past the
+// extra data ends the walk: minizip's own reading decides the entry.
+std::string ZipDoUnicodePath(const std::string& ARaw, const std::vector<std::uint8_t>& AExtra)
+{
+  const std::uint8_t* LExtra = AExtra.data();
+  const std::int64_t LSize = static_cast<std::int64_t>(AExtra.size());
+  std::int64_t LAt = 0;
+  while (LSize - LAt >= 4)
+  {
+    const std::uint16_t LId = ZipDoU16(LExtra + LAt);
+    const std::int64_t LField = ZipDoU16(LExtra + LAt + 2);
+    const std::uint8_t* LData = LExtra + LAt + 4;
+    if (LSize - LAt - 4 < LField)
+      break;
+    if ((LId == 0x7075) && (LField >= 5) && (LData[0] == 1))
+    {
+      const std::uint32_t LCrc = static_cast<std::uint32_t>(
+        ::crc32(0L, reinterpret_cast<const Bytef*>(ARaw.data()), static_cast<uInt>(ARaw.size())));
+      if (LCrc == ZipDoU32(LData + 1))
+        return std::string(reinterpret_cast<const char*>(LData + 5), static_cast<std::size_t>(LField - 5));
+    }
+    LAt += 4 + LField;
+  }
+  return std::string();
+}
+
+// Reads minizip's current entry into the directory; false when minizip
+// cannot read its header. The name is UTF-8 when flag bit 11 says so, else
+// the Unicode Path field's when it is current, else CP437. A folder (a name
+// ending in `/`) is not an entry, nor is a name no source path reaches
+// (absolute, climbing out, `\`: IOSourceOpen's rules); of two entries with
+// one canonical name the later is found (as Python's zipfile).
+bool ZipDoEntry(ZipTableData* ATable)
+{
+  unz_file_info64 LInfo{};
+  if (unzGetCurrentFileInfo64(ATable->Handle, &LInfo, nullptr, 0, nullptr, 0, nullptr, 0) != UNZ_OK)
+    return false;
+  std::string LRaw(static_cast<std::size_t>(LInfo.size_filename), '\0');
+  std::vector<std::uint8_t> LExtra(static_cast<std::size_t>(LInfo.size_file_extra));
+  if (unzGetCurrentFileInfo64(ATable->Handle, &LInfo, LRaw.data(), static_cast<uLong>(LRaw.size()),
+    LExtra.data(), static_cast<uLong>(LExtra.size()), nullptr, 0) != UNZ_OK)
+    return false;
+  if ((LInfo.compressed_size > static_cast<ZPOS64_T>(INT64_MAX)) ||
+    (LInfo.uncompressed_size > static_cast<ZPOS64_T>(INT64_MAX)))
+    return false;
+  std::string LText;
+  if ((LInfo.flag & 0x0800) != 0)
+  {
+    LText = LRaw;
+  }
+  else
+  {
+    LText = ZipDoUnicodePath(LRaw, LExtra);
+    if (LText.empty())
+      LText = ZipDoCp437Text(reinterpret_cast<const std::uint8_t*>(LRaw.data()),
+        static_cast<std::int64_t>(LRaw.size()));
+  }
+  if (!LText.empty() && (LText.back() == '/'))
+    return true;
+  const std::string LName = SourceDoNormalize(LText);
+  if (LName.empty())
+    return true;
+  ZipEntryData LEntry;
+  if (unzGetFilePos64(ATable->Handle, &LEntry.Position) != UNZ_OK)
+    return false;
+  LEntry.Compressed = static_cast<std::int64_t>(LInfo.compressed_size);
+  LEntry.Uncompressed = static_cast<std::int64_t>(LInfo.uncompressed_size);
+  LEntry.Crc = static_cast<std::uint32_t>(LInfo.crc);
+  LEntry.DosDate = static_cast<std::uint32_t>(LInfo.dosDate);
+  LEntry.Method = static_cast<std::uint16_t>(LInfo.compression_method);
+  LEntry.Flags = static_cast<std::uint16_t>(LInfo.flag);
+  ATable->Entries[LName] = LEntry;
+  return true;
+}
+
+// Walks minizip's directory once into the entry table; false when an entry
+// cannot be read (a bad header signature) or the bridge failed. An archive
+// with no entries has an empty table (minizip's first-file call would read
+// a header that is not there).
+bool ZipDoDirectory(ZipTableData* ATable)
+{
+  unz_global_info64 LGlobal{};
+  if (unzGetGlobalInfo64(ATable->Handle, &LGlobal) != UNZ_OK)
+    return false;
+  if (LGlobal.number_entry == 0)
+    return !ATable->Bridge.Failed;
+  int LStatus = unzGoToFirstFile(ATable->Handle);
+  while (LStatus == UNZ_OK)
+  {
+    if (!ZipDoEntry(ATable))
+      return false;
+    LStatus = unzGoToNextFile(ATable->Handle);
+  }
+  return (LStatus == UNZ_END_OF_LIST_OF_FILE) && !ATable->Bridge.Failed;
+}
+
+// Frees a zip source's C++ side: closes minizip's handle and lets go of the
+// source's reference on the archive (the last reference closes an owned
+// archive); false when minizip's close or the archive's failed
+bool ZipDoFree(void* ATable)
+{
+  ZipTableData* LTable = static_cast<ZipTableData*>(ATable);
+  bool LOk = true;
+  if (LTable == nullptr)
+    return true;
+  if (LTable->Handle != nullptr)
+    LOk = unzClose(LTable->Handle) == UNZ_OK;
+  if (!ZipDoLetGo(LTable->Bridge.Archive))
+    LOk = false;
+  delete LTable;
+  return LOk;
+}
+
+// Opens the archive with minizip through the bridge (AArchive and the IO
+// routines the PaskalCPP side passes) and reads its directory; the C++
+// side, or nullptr when minizip refuses the archive (no end record, cut
+// short, a bad signature, several disks), an entry cannot be read or the
+// memory is not there. From the call on, an owned archive (AOwned) is this
+// side's: closed here when the source cannot be made, else by the last of
+// the source and its entry IOs to let go.
+void* ZipDoCreate(void* AArchive, const bool AOwned, const ZipDoReadFn ARead,
+  const ZipDoSeekFn ASeek, const ZipDoTellFn ATell, const ZipDoCloseFn AClose,
+  const std::string& APassword)
+{
+  ZipTableData* LTable = nullptr;
+  ZipArchiveData* LArchive = nullptr;
+  try
+  {
+    LArchive = new ZipArchiveData();
+    LArchive->Stream = AArchive;
+    LArchive->Read = ARead;
+    LArchive->Seek = ASeek;
+    LArchive->Tell = ATell;
+    LArchive->Close = AClose;
+    LArchive->Owned = AOwned;
+    LTable = new ZipTableData();
+    // The table holds the record's first reference from here on
+    LTable->Bridge.Archive = LArchive;
+    LArchive = nullptr;
+    LTable->Password = APassword;
+    LTable->Funcs.zopen64_file = ZipDoBridgeOpen;
+    LTable->Funcs.zread_file = ZipDoBridgeRead;
+    LTable->Funcs.zwrite_file = ZipDoBridgeWrite;
+    LTable->Funcs.ztell64_file = ZipDoBridgeTell;
+    LTable->Funcs.zseek64_file = ZipDoBridgeSeek;
+    LTable->Funcs.zclose_file = ZipDoBridgeClose;
+    LTable->Funcs.zerror_file = ZipDoBridgeError;
+    LTable->Funcs.opaque = &LTable->Bridge;
+    // The path is unused: the bridge's open hands back the open archive
+    LTable->Handle = unzOpen2_64("", &LTable->Funcs);
+    if ((LTable->Handle == nullptr) || !ZipDoDirectory(LTable))
+    {
+      ZipDoFree(LTable);
+      return nullptr;
+    }
+    return LTable;
+  }
+  catch (...)
+  {
+    // Whoever holds the archive now closes it (when owned): the table, the
+    // record not yet in a table, or, before either existed, this call
+    if (LTable != nullptr)
+      ZipDoFree(LTable);
+    else if (LArchive != nullptr)
+      ZipDoLetGo(LArchive);
+    else if (AOwned && (AClose != nullptr) && (AArchive != nullptr))
+      AClose(AArchive);
+    return nullptr;
+  }
+}
+
+// The entry an IOSource path names (canonical already), or nullptr
+const ZipEntryData* ZipDoFind(void* ATable, const std::string& AEntry)
+{
+  const ZipTableData* LTable = static_cast<ZipTableData*>(ATable);
+  const auto LFound = LTable->Entries.find(AEntry);
+  if (LFound == LTable->Entries.end())
+    return nullptr;
+  return &LFound->second;
+}
+
+// True when the zip has the entry
+bool ZipDoExists(void* ATable, const std::string& AEntry)
+{
+  try
+  {
+    return ZipDoFind(ATable, AEntry) != nullptr;
+  }
+  catch (...)
+  {
+    return false;
+  }
+}
+
+// The entry's uncompressed size; -1 when the zip does not have it
+std::int64_t ZipDoSize(void* ATable, const std::string& AEntry)
+{
+  try
+  {
+    const ZipEntryData* LEntry = ZipDoFind(ATable, AEntry);
+    if (LEntry == nullptr)
+      return -1;
+    return LEntry->Uncompressed;
+  }
+  catch (...)
+  {
+    return -1;
+  }
+}
+
+// The zip entry IO. minizip finds the entry and where its data starts; the
+// reading is chosen by the entry's size and kind:
+//   Whole  - under ZipDoWholeLimit: read whole through minizip when opened
+//            (its CRC check), seek free
+//   Direct - stored, not encrypted: bytes read in place at any offset
+//   Decode - deflated, or stored and encrypted: read in place from access
+//            points (zran: about every ZipDoSpan bytes of output, the
+//            byte / bit the deflate stream stands at and its last 32 KB of
+//            output; for an encrypted entry the ZipCrypto keys there too,
+//            stored entries every ZipDoKeySpan), so a seek decodes at most
+//            one interval. Points are made as the output first passes them.
+// Direct and Decode check the CRC as Python's zipfile does: over the output
+// from 0 to the furthest point ever read (the frontier); the frontier
+// reaching the end with another CRC sets the IO's error.
+
+// Entries smaller than this are read whole when opened
+constexpr std::int64_t ZipDoWholeLimit = 256 * 1024;
+// A deflated entry's access points: about this much output apart
+constexpr std::int64_t ZipDoSpan = 1024 * 1024;
+// An encrypted stored entry's points (keys only): this much apart
+constexpr std::int64_t ZipDoKeySpan = 64 * 1024;
+// Compressed bytes read from the archive per step
+constexpr std::int64_t ZipDoChunk = 16 * 1024;
+// Deflate's window: the output a deflate point remembers
+constexpr std::int64_t ZipDoWindow = 32 * 1024;
+// The ZipCrypto header in front of an encrypted entry's data
+constexpr std::int64_t ZipDoCryptHeader = 12;
+
+// How an entry IO reads (above)
+enum class ZipDoKind
+{
+  Whole,
+  Direct,
+  Decode
+};
+
+// The ZipCrypto keys (minizip's crypt.h schedule), copied by value
+struct ZipKeysData
+{
+  unsigned long Keys[3] = {0, 0, 0};
+};
+
+// A place decoding starts again from. In and KeysAt count from the entry's
+// first data byte (past the ZipCrypto header).
+struct ZipPointData
+{
+  std::int64_t Out = 0;    // the output offset it stands at
+  std::int64_t In = 0;     // the first whole compressed byte still to read
+  int Bits = 0;            // deflated: bits of the byte before In still unread
+  std::int64_t KeysAt = 0; // encrypted: where Keys hold (at or before the first byte read)
+  ZipKeysData Keys;
+  std::vector<std::uint8_t> Window; // deflated: the output before Out, up to 32 KB
+};
+
+// A zip entry IO's user data
+struct ZipEntryIOData
+{
+  ZipDoKind Kind = ZipDoKind::Whole;
+  ZipEntryData Entry;
+  std::int64_t Position = 0;
+  bool Failed = false; // a read error or a CRC mismatch: every later read fails
+  // Whole: the entry's bytes
+  std::vector<std::uint8_t> Whole;
+  // Direct and Decode: the entry's data in the archive
+  ZipArchiveData* Archive = nullptr; // one reference, let go when the IO closes
+  std::int64_t DataStart = 0;        // archive offset of the first data byte
+  std::int64_t DataSize = 0;         // compressed bytes from there
+  bool Deflated = false;
+  bool Encrypted = false;
+  // The CRC of the output from 0 to the frontier
+  std::int64_t Frontier = 0;
+  std::uint32_t FrontierCrc = 0;
+  // Decode: the cursor and the points it starts again from (Points[0] at 0)
+  bool CursorValid = false;
+  std::int64_t InAt = 0;    // the next compressed byte the archive gives
+  std::int64_t OutAt = 0;   // the output offset of the next byte decoded
+  ZipKeysData Keys;         // the keys for the byte at InAt
+  std::int64_t ChunkAt = 0; // where Input's bytes start, and the keys there
+  ZipKeysData ChunkKeys;
+  std::int64_t PrevChunkAt = 0; // the same for the chunk read before it
+  ZipKeysData PrevChunkKeys;
+  // The compressed bytes read (decrypted); Inflater.next_in / avail_in walk
+  // them for both kinds (a stored entry never calls inflate)
+  std::vector<std::uint8_t> Input;
+  z_stream Inflater{};
+  bool InflaterReady = false;
+  // Deflated: the output by offset mod 32 KB, the windows of new points
+  std::vector<std::uint8_t> Ring;
+  std::vector<ZipPointData> Points;
+};
+
+// Decrypts ACount bytes in place, moving AKeys on (minizip's zdecode)
+void ZipDoDecrypt(ZipKeysData& AKeys, std::uint8_t* ABytes, const std::int64_t ACount)
+{
+  const z_crc_t* LTable = get_crc_table();
+  for (std::int64_t LI = 0; LI < ACount; LI++)
+  {
+    int LByte = ABytes[LI];
+    zdecode(AKeys.Keys, LTable, LByte);
+    ABytes[LI] = static_cast<std::uint8_t>(LByte & 0xFF);
+  }
+}
+
+// ACrc continued over ACount bytes (zlib's crc32 takes 32-bit counts)
+std::uint32_t ZipDoCrc(std::uint32_t ACrc, const std::uint8_t* ABytes, std::int64_t ACount)
+{
+  constexpr std::int64_t LPiece = 1 << 30;
+  while (ACount > 0)
+  {
+    const std::int64_t LCount = std::min(ACount, LPiece);
+    ACrc = static_cast<std::uint32_t>(::crc32(ACrc, ABytes, static_cast<uInt>(LCount)));
+    ABytes += LCount;
+    ACount -= LCount;
+  }
+  return ACrc;
+}
+
+// ACount output bytes at offset AAt: the part past the frontier goes into
+// the CRC; the frontier at the end with another CRC than the directory's
+// fails the IO. Bytes that start past the frontier (a direct read after a
+// seek) leave it where it is.
+void ZipDoFrontier(ZipEntryIOData* AIO, const std::int64_t AAt, const std::uint8_t* ABytes,
+  const std::int64_t ACount)
+{
+  const std::int64_t LEnd = AAt + ACount;
+  if ((AAt > AIO->Frontier) || (LEnd <= AIO->Frontier))
+    return;
+  const std::int64_t LSkip = AIO->Frontier - AAt;
+  AIO->FrontierCrc = ZipDoCrc(AIO->FrontierCrc, ABytes + LSkip, ACount - LSkip);
+  AIO->Frontier = LEnd;
+  if ((AIO->Frontier >= AIO->Entry.Uncompressed) && (AIO->FrontierCrc != AIO->Entry.Crc))
+    AIO->Failed = true;
+}
+
+// The ZipCrypto check (APPNOTE 6.1.6, sfml_ext's zipPasswordFits): the
+// 12-byte header at the data's start, decrypted with the password, ends in
+// the CRC's high byte (the DOS time's when bit 3 puts the CRC after the
+// data). minizip never checks it, so a wrong password would only show as
+// garbage. True when it fits; AKeys are then the keys for the data's first
+// byte.
+bool ZipDoPasswordFits(ZipEntryIOData* AIO, ZipArchiveData* AArchive, const std::string& APassword,
+  ZipKeysData& AKeys)
+{
+  std::uint8_t LHeader[ZipDoCryptHeader];
+  if (ZipDoReadAt(AArchive, AIO->DataStart, LHeader, ZipDoCryptHeader) != ZipDoCryptHeader)
+    return false;
+  init_keys(APassword.c_str(), AKeys.Keys, get_crc_table());
+  ZipDoDecrypt(AKeys, LHeader, ZipDoCryptHeader);
+  std::uint32_t LCheck = (AIO->Entry.Crc >> 24) & 0xFF;
+  if ((AIO->Entry.Flags & 0x0008) != 0)
+    LCheck = (AIO->Entry.DosDate >> 8) & 0xFF;
+  return LHeader[ZipDoCryptHeader - 1] == LCheck;
+}
+
+// Reads the whole entry through minizip (minizip's current file is the
+// entry); false on a read error, a size other than the directory's or a CRC
+// mismatch (minizip's close reports it once all was read)
+bool ZipDoReadWhole(ZipTableData* ATable, ZipEntryIOData* AIO)
+{
+  const std::int64_t LSize = AIO->Entry.Uncompressed;
+  const char* LPassword = AIO->Encrypted ? ATable->Password.c_str() : nullptr;
+  int LMethod = 0;
+  int LLevel = 0;
+  std::int64_t LDone = 0;
+  int LGot = 1;
+  AIO->Whole.resize(static_cast<std::size_t>(LSize));
+  if (unzOpenCurrentFile3(ATable->Handle, &LMethod, &LLevel, 0, LPassword) != UNZ_OK)
+    return false;
+  while ((LDone < LSize) && (LGot > 0))
+  {
+    const std::int64_t LAsk = std::min<std::int64_t>(LSize - LDone, 64 * 1024);
+    LGot = unzReadCurrentFile(ATable->Handle, AIO->Whole.data() + LDone, static_cast<unsigned>(LAsk));
+    if (LGot > 0)
+      LDone += LGot;
+  }
+  // One more read must find the end: an entry longer than its size is broken
+  if ((LGot >= 0) && (LDone == LSize))
+  {
+    std::uint8_t LMore = 0;
+    LGot = unzReadCurrentFile(ATable->Handle, &LMore, 1);
+  }
+  const int LClosed = unzCloseCurrentFile(ATable->Handle);
+  return (LDone == LSize) && (LGot == 0) && (LClosed == UNZ_OK) && !ATable->Bridge.Failed;
+}
+
+// Frees an entry IO's user data, letting go of its archive reference; false
+// when the last reference's close of the archive failed
+bool ZipDoEntryFree(ZipEntryIOData* AIO)
+{
+  bool LOk = true;
+  if (AIO == nullptr)
+    return true;
+  if (AIO->InflaterReady)
+    inflateEnd(&AIO->Inflater);
+  if (AIO->Archive != nullptr)
+    LOk = ZipDoLetGo(AIO->Archive);
+  delete AIO;
+  return LOk;
+}
+
+// Opens the entry an IOSource path names (canonical already) for reading:
+// the entry IO's user data, or nullptr when the zip does not have it, it is
+// encrypted and the password is missing or wrong, its method is neither
+// stored nor deflated (in place), it cannot be read whole (a read error, a
+// CRC mismatch), or the memory is not there
+void* ZipDoEntryOpen(void* ATable, const std::string& AEntry)
+{
+  ZipTableData* LTable = static_cast<ZipTableData*>(ATable);
+  ZipEntryIOData* LIO = nullptr;
+  try
+  {
+    const ZipEntryData* LEntry = ZipDoFind(ATable, AEntry);
+    if (LEntry == nullptr)
+      return nullptr;
+    LIO = new ZipEntryIOData();
+    LIO->Entry = *LEntry;
+    LIO->Encrypted = (LEntry->Flags & 0x0001) != 0;
+    LIO->Deflated = LEntry->Method == Z_DEFLATED;
+    if (LIO->Encrypted && LTable->Password.empty())
+    {
+      ZipDoEntryFree(LIO);
+      return nullptr;
+    }
+    LTable->Bridge.Failed = false;
+    // Raw and without a password, minizip stops at the first data byte (the
+    // ZipCrypto header when there is one); its position counts the data
+    // before the archive (a self-extractor) in
+    int LMethod = 0;
+    int LLevel = 0;
+    if ((unzGoToFilePos64(LTable->Handle, &LEntry->Position) != UNZ_OK) ||
+      (unzOpenCurrentFile3(LTable->Handle, &LMethod, &LLevel, 1, nullptr) != UNZ_OK))
+    {
+      ZipDoEntryFree(LIO);
+      return nullptr;
+    }
+    const ZPOS64_T LStart = unzGetCurrentFileZStreamPos64(LTable->Handle);
+    unzCloseCurrentFile(LTable->Handle);
+    if ((LStart == 0) || (LStart > static_cast<ZPOS64_T>(INT64_MAX)))
+    {
+      ZipDoEntryFree(LIO);
+      return nullptr;
+    }
+    LIO->DataStart = static_cast<std::int64_t>(LStart);
+    LIO->DataSize = LEntry->Compressed;
+    ZipKeysData LKeys;
+    if (LIO->Encrypted)
+    {
+      if ((LIO->DataSize < ZipDoCryptHeader) ||
+        !ZipDoPasswordFits(LIO, LTable->Bridge.Archive, LTable->Password, LKeys))
+      {
+        ZipDoEntryFree(LIO);
+        return nullptr;
+      }
+      LIO->DataStart += ZipDoCryptHeader;
+      LIO->DataSize -= ZipDoCryptHeader;
+    }
+    // A small entry: read whole now, the archive no longer needed
+    if (LEntry->Uncompressed < ZipDoWholeLimit)
+    {
+      LIO->Kind = ZipDoKind::Whole;
+      if (!ZipDoReadWhole(LTable, LIO))
+      {
+        ZipDoEntryFree(LIO);
+        return nullptr;
+      }
+      return LIO;
+    }
+    // In place: stored entries have as many data bytes as output bytes
+    const bool LStored = LEntry->Method == 0;
+    if ((!LStored && !LIO->Deflated) || (LStored && (LIO->DataSize != LEntry->Uncompressed)))
+    {
+      ZipDoEntryFree(LIO);
+      return nullptr;
+    }
+    LIO->Archive = LTable->Bridge.Archive;
+    ZipDoHold(LIO->Archive);
+    if (LStored && !LIO->Encrypted)
+    {
+      LIO->Kind = ZipDoKind::Direct;
+      return LIO;
+    }
+    LIO->Kind = ZipDoKind::Decode;
+    LIO->Input.resize(static_cast<std::size_t>(ZipDoChunk));
+    if (LIO->Deflated)
+      LIO->Ring.resize(static_cast<std::size_t>(ZipDoWindow));
+    ZipPointData LFirst;
+    LFirst.Keys = LKeys;
+    LIO->Points.push_back(LFirst);
+    return LIO;
+  }
+  catch (...)
+  {
+    ZipDoEntryFree(LIO);
+    return nullptr;
+  }
+}
+
+// Reads the next chunk of compressed bytes into Input, decrypted, for the
+// decoder (InAt short of DataSize); false when the archive gave fewer
+bool ZipDoFill(ZipEntryIOData* AIO)
+{
+  const std::int64_t LCount = std::min(ZipDoChunk, AIO->DataSize - AIO->InAt);
+  AIO->PrevChunkAt = AIO->ChunkAt;
+  AIO->PrevChunkKeys = AIO->ChunkKeys;
+  AIO->ChunkAt = AIO->InAt;
+  AIO->ChunkKeys = AIO->Keys;
+  if (ZipDoReadAt(AIO->Archive, AIO->DataStart + AIO->InAt, AIO->Input.data(), LCount) != LCount)
+    return false;
+  if (AIO->Encrypted)
+    ZipDoDecrypt(AIO->Keys, AIO->Input.data(), LCount);
+  AIO->InAt += LCount;
+  AIO->Inflater.next_in = AIO->Input.data();
+  AIO->Inflater.avail_in = static_cast<uInt>(LCount);
+  return true;
+}
+
+// A deflate point where inflate stopped at a block boundary (zran's
+// addpoint): the byte / bit the stream stands at, the keys for the first
+// byte a restart reads (it reads the byte before In when Bits is not 0) and
+// the last 32 KB of output
+void ZipDoInflatePoint(ZipEntryIOData* AIO)
+{
+  ZipPointData LPoint;
+  LPoint.Out = AIO->OutAt;
+  LPoint.Bits = AIO->Inflater.data_type & 7;
+  LPoint.In = AIO->InAt - static_cast<std::int64_t>(AIO->Inflater.avail_in);
+  const std::int64_t LFirst = LPoint.In - (LPoint.Bits != 0 ? 1 : 0);
+  // In lies in the chunk Input holds, so the first byte read is in it or is
+  // the last byte of the chunk before
+  if (LFirst >= AIO->ChunkAt)
+  {
+    LPoint.KeysAt = AIO->ChunkAt;
+    LPoint.Keys = AIO->ChunkKeys;
+  }
+  else
+  {
+    LPoint.KeysAt = AIO->PrevChunkAt;
+    LPoint.Keys = AIO->PrevChunkKeys;
+  }
+  const std::int64_t LKeep = std::min(AIO->OutAt, ZipDoWindow);
+  LPoint.Window.resize(static_cast<std::size_t>(LKeep));
+  for (std::int64_t LI = 0; LI < LKeep; LI++)
+    LPoint.Window[static_cast<std::size_t>(LI)] =
+      AIO->Ring[static_cast<std::size_t>((AIO->OutAt - LKeep + LI) % ZipDoWindow)];
+  AIO->Points.push_back(std::move(LPoint));
+}
+
+// Up to AMax next output bytes of a deflated entry into ADest (nullptr:
+// discarded): the count, 0 at the stream's end, -1 on an error (bad data,
+// the stream cut short)
+std::int64_t ZipDoInflateStep(ZipEntryIOData* AIO, std::uint8_t* ADest, const std::int64_t AMax)
+{
+  for (;;)
+  {
+    if ((AIO->Inflater.avail_in == 0) && (AIO->InAt < AIO->DataSize) && !ZipDoFill(AIO))
+      return -1;
+    // Output goes into the ring at its offset, then to ADest
+    const std::int64_t LRingAt = AIO->OutAt % ZipDoWindow;
+    const std::int64_t LRoom = std::min(ZipDoWindow - LRingAt, AMax);
+    std::uint8_t* LTo = AIO->Ring.data() + LRingAt;
+    const uInt LInBefore = AIO->Inflater.avail_in;
+    AIO->Inflater.next_out = LTo;
+    AIO->Inflater.avail_out = static_cast<uInt>(LRoom);
+    // Z_BLOCK: inflate also stops at every block boundary, where a point can be
+    const int LStatus = inflate(&AIO->Inflater, Z_BLOCK);
+    const std::int64_t LMade = LRoom - static_cast<std::int64_t>(AIO->Inflater.avail_out);
+    if ((LStatus != Z_OK) && (LStatus != Z_STREAM_END) && (LStatus != Z_BUF_ERROR))
+      return -1;
+    if (LMade > 0)
+    {
+      if (ADest != nullptr)
+        std::memcpy(ADest, LTo, static_cast<std::size_t>(LMade));
+      ZipDoFrontier(AIO, AIO->OutAt, LTo, LMade);
+      AIO->OutAt += LMade;
+    }
+    // Bit 128: stopped at a block boundary; bit 64: after the last block
+    if (((AIO->Inflater.data_type & 128) != 0) && ((AIO->Inflater.data_type & 64) == 0) &&
+      (AIO->OutAt > AIO->Points.back().Out + ZipDoSpan))
+      ZipDoInflatePoint(AIO);
+    if (LMade > 0)
+      return LMade;
+    if (LStatus == Z_STREAM_END)
+      return 0;
+    // Nothing read, nothing made: the stream is cut short (or stuck)
+    if (AIO->Inflater.avail_in == LInBefore)
+      return -1;
+  }
+}
+
+// Up to AMax next output bytes of an encrypted stored entry into ADest
+// (nullptr: discarded): the count, 0 at the end, -1 on a read error. A
+// point (keys only) is kept at a chunk start every ZipDoKeySpan bytes.
+std::int64_t ZipDoStoredStep(ZipEntryIOData* AIO, std::uint8_t* ADest, const std::int64_t AMax)
+{
+  if (AIO->Inflater.avail_in == 0)
+  {
+    if (AIO->InAt >= AIO->DataSize)
+      return 0;
+    if (AIO->InAt >= AIO->Points.back().Out + ZipDoKeySpan)
+    {
+      ZipPointData LPoint;
+      LPoint.Out = AIO->InAt;
+      LPoint.In = AIO->InAt;
+      LPoint.KeysAt = AIO->InAt;
+      LPoint.Keys = AIO->Keys;
+      AIO->Points.push_back(std::move(LPoint));
+    }
+    if (!ZipDoFill(AIO))
+      return -1;
+  }
+  const std::int64_t LCount = std::min(static_cast<std::int64_t>(AIO->Inflater.avail_in), AMax);
+  const std::uint8_t* LFrom = AIO->Inflater.next_in;
+  if (ADest != nullptr)
+    std::memcpy(ADest, LFrom, static_cast<std::size_t>(LCount));
+  ZipDoFrontier(AIO, AIO->OutAt, LFrom, LCount);
+  AIO->Inflater.next_in += LCount;
+  AIO->Inflater.avail_in -= static_cast<uInt>(LCount);
+  AIO->OutAt += LCount;
+  return LCount;
+}
+
+// The decoder's next step, by the entry's kind
+std::int64_t ZipDoStep(ZipEntryIOData* AIO, std::uint8_t* ADest, const std::int64_t AMax)
+{
+  if (AIO->Deflated)
+    return ZipDoInflateStep(AIO, ADest, AMax);
+  return ZipDoStoredStep(AIO, ADest, AMax);
+}
+
+// Puts the decoder at APoint (zran's extract): the keys moved on from
+// KeysAt to the first byte read, inflate reset, primed with the bits of the
+// byte before In and given the point's window. False when the archive or
+// zlib failed.
+bool ZipDoRestart(ZipEntryIOData* AIO, const ZipPointData& APoint)
+{
+  const std::int64_t LFirst = APoint.In - (APoint.Bits != 0 ? 1 : 0);
+  AIO->CursorValid = false;
+  AIO->Keys = APoint.Keys;
+  if (AIO->Encrypted)
+  {
+    // Decrypted and dropped: only the keys move on
+    std::int64_t LAt = APoint.KeysAt;
+    while (LAt < LFirst)
+    {
+      const std::int64_t LCount = std::min(ZipDoChunk, LFirst - LAt);
+      if (ZipDoReadAt(AIO->Archive, AIO->DataStart + LAt, AIO->Input.data(), LCount) != LCount)
+        return false;
+      ZipDoDecrypt(AIO->Keys, AIO->Input.data(), LCount);
+      LAt += LCount;
+    }
+  }
+  AIO->InAt = LFirst;
+  AIO->ChunkAt = LFirst;
+  AIO->ChunkKeys = AIO->Keys;
+  AIO->PrevChunkAt = LFirst;
+  AIO->PrevChunkKeys = AIO->Keys;
+  AIO->Inflater.next_in = AIO->Input.data();
+  AIO->Inflater.avail_in = 0;
+  if (AIO->Deflated)
+  {
+    // Raw deflate (-15): a zip entry has no zlib header
+    const int LReset = AIO->InflaterReady ? inflateReset(&AIO->Inflater) : inflateInit2(&AIO->Inflater, -15);
+    if (LReset != Z_OK)
+      return false;
+    AIO->InflaterReady = true;
+    AIO->Inflater.next_in = AIO->Input.data();
+    AIO->Inflater.avail_in = 0;
+    if (APoint.Bits != 0)
+    {
+      std::uint8_t LByte = 0;
+      if (ZipDoReadAt(AIO->Archive, AIO->DataStart + LFirst, &LByte, 1) != 1)
+        return false;
+      if (AIO->Encrypted)
+        ZipDoDecrypt(AIO->Keys, &LByte, 1);
+      AIO->InAt = LFirst + 1;
+      AIO->ChunkAt = AIO->InAt;
+      AIO->ChunkKeys = AIO->Keys;
+      if (inflatePrime(&AIO->Inflater, APoint.Bits, LByte >> (8 - APoint.Bits)) != Z_OK)
+        return false;
+    }
+    if (!APoint.Window.empty())
+    {
+      if (inflateSetDictionary(&AIO->Inflater, APoint.Window.data(),
+        static_cast<uInt>(APoint.Window.size())) != Z_OK)
+        return false;
+      // The ring holds the output by offset, so points made later get
+      // their windows from it
+      const std::int64_t LKeep = static_cast<std::int64_t>(APoint.Window.size());
+      for (std::int64_t LI = 0; LI < LKeep; LI++)
+        AIO->Ring[static_cast<std::size_t>((APoint.Out - LKeep + LI) % ZipDoWindow)] =
+          APoint.Window[static_cast<std::size_t>(LI)];
+    }
+  }
+  AIO->OutAt = APoint.Out;
+  AIO->CursorValid = true;
+  return true;
+}
+
+// Reads ASize bytes (at most what is left) at the position of a Decode
+// entry: from the cursor when it is at or before the position with no point
+// nearer, else from the last point at or before it; the count read
+std::int64_t ZipDoDecodeRead(ZipEntryIOData* AIO, std::uint8_t* ABuffer, const std::int64_t ASize)
+{
+  // The last point at or before the position (Points[0] is at 0)
+  const auto LAfter = std::upper_bound(AIO->Points.begin(), AIO->Points.end(), AIO->Position,
+    [](const std::int64_t AAt, const ZipPointData& APoint) { return AAt < APoint.Out; });
+  const std::size_t LPoint = static_cast<std::size_t>((LAfter - AIO->Points.begin()) - 1);
+  if (!AIO->CursorValid || (AIO->OutAt > AIO->Position) || (AIO->Points[LPoint].Out > AIO->OutAt))
+  {
+    // A copy: restarting never adds points, but the vector is not held across it
+    const ZipPointData LFrom = AIO->Points[LPoint];
+    if (!ZipDoRestart(AIO, LFrom))
+    {
+      AIO->Failed = true;
+      return 0;
+    }
+  }
+  // Up to the position, the output dropped
+  while (AIO->OutAt < AIO->Position)
+  {
+    if (ZipDoStep(AIO, nullptr, AIO->Position - AIO->OutAt) <= 0)
+    {
+      AIO->Failed = true;
+      AIO->CursorValid = false;
+      return 0;
+    }
+  }
+  std::int64_t LDone = 0;
+  while (LDone < ASize)
+  {
+    // ASize is at most what is left, so the end here is an error too
+    const std::int64_t LGot = ZipDoStep(AIO, ABuffer + LDone, ASize - LDone);
+    if (LGot <= 0)
+    {
+      AIO->Failed = true;
+      AIO->CursorValid = false;
+      break;
+    }
+    LDone += LGot;
+  }
+  AIO->Position += LDone;
+  return LDone;
+}
+
+// Reads ASize bytes (at most what is left) at the position of a Direct
+// entry, in place; the count read
+std::int64_t ZipDoDirectRead(ZipEntryIOData* AIO, std::uint8_t* ABuffer, const std::int64_t ASize)
+{
+  std::int64_t LGot = ZipDoReadAt(AIO->Archive, AIO->DataStart + AIO->Position, ABuffer, ASize);
+  if (LGot < ASize)
+    AIO->Failed = true;
+  if (LGot < 0)
+    LGot = 0;
+  ZipDoFrontier(AIO, AIO->Position, ABuffer, LGot);
+  AIO->Position += LGot;
+  return LGot;
+}
+
+// The entry IO's read: up to ASize bytes into ABuffer, the count read (short
+// at the end, or with ZipDoEntryFailed true after an error)
+std::int64_t ZipDoEntryRead(void* AIO, void* ABuffer, const std::int64_t ASize)
+{
+  ZipEntryIOData* LIO = static_cast<ZipEntryIOData*>(AIO);
+  try
+  {
+    if (LIO->Failed)
+      return 0;
+    const std::int64_t LCount = std::min(ASize, LIO->Entry.Uncompressed - LIO->Position);
+    if (LCount <= 0)
+      return 0;
+    std::uint8_t* LBytes = static_cast<std::uint8_t*>(ABuffer);
+    if (LIO->Kind == ZipDoKind::Whole)
+    {
+      std::memcpy(LBytes, LIO->Whole.data() + LIO->Position, static_cast<std::size_t>(LCount));
+      LIO->Position += LCount;
+      return LCount;
+    }
+    if (LIO->Kind == ZipDoKind::Direct)
+      return ZipDoDirectRead(LIO, LBytes, LCount);
+    return ZipDoDecodeRead(LIO, LBytes, LCount);
+  }
+  catch (...)
+  {
+    LIO->Failed = true;
+    LIO->CursorValid = false;
+    return 0;
+  }
+}
+
+// True when the entry IO has failed (a read error or a CRC mismatch)
+bool ZipDoEntryFailed(void* AIO)
+{
+  return static_cast<ZipEntryIOData*>(AIO)->Failed;
+}
+
+// The entry IO's seek (AOrigin: 0 start, 1 current, 2 end): the new
+// position, or -1 when the target lies outside 0 .. the entry's size (as the
+// memory IO). Only the position moves; the next read decodes.
+std::int64_t ZipDoEntrySeek(void* AIO, const std::int64_t AOffset, const std::int32_t AOrigin)
+{
+  ZipEntryIOData* LIO = static_cast<ZipEntryIOData*>(AIO);
+  std::int64_t LBase = 0;
+  if (AOrigin == 1)
+    LBase = LIO->Position;
+  else if (AOrigin == 2)
+    LBase = LIO->Entry.Uncompressed;
+  // The target must lie in 0 .. size; compared without forming it (no overflow)
+  if ((AOffset > LIO->Entry.Uncompressed - LBase) || (AOffset < -LBase))
+    return -1;
+  LIO->Position = LBase + AOffset;
+  return LIO->Position;
+}
+
+std::int64_t ZipDoEntryTell(void* AIO)
+{
+  return static_cast<ZipEntryIOData*>(AIO)->Position;
+}
+
+std::int64_t ZipDoEntrySize(void* AIO)
+{
+  return static_cast<ZipEntryIOData*>(AIO)->Entry.Uncompressed;
+}
+
+// The entry IO's close: frees it, letting go of its archive reference
+bool ZipDoEntryClose(void* AIO)
+{
+  return ZipDoEntryFree(static_cast<ZipEntryIOData*>(AIO));
+}
+
+} // namespace
+
+exported type
+  /// The state of an IO after its last operation, read with IOStatus.
+  /// A short count from IORead / IOWrite says why here: Eof (no more to
+  /// read), Error, ReadOnly (the IO cannot write), WriteOnly (it cannot
+  /// read), NotReady (a non-blocking source has nothing yet).
+  /// @since 0.2
+  /// @see IOStatus
+  IOState = choices(Ready, Error, Eof, NotReady, ReadOnly, WriteOnly);
+
+  /// Where IOSeek counts its offset from.
+  /// @since 0.2
+  /// @see IOSeek
+  SeekOrigin = choices(FromStart, FromCurrent, FromEnd);
+
+  /// How CreateFileIO opens its file, by C's fopen rules: Read ("rb") the
+  /// file must exist, read-only; Write ("wb") created or emptied,
+  /// write-only; ReadWrite ("r+b") the file must exist, kept, read and
+  /// write; Append ("ab") created when missing, write-only, every write
+  /// lands at the end whatever the position.
+  /// @since 0.2
+  /// @see CreateFileIO
+  FileMode = choices(Read, Write, ReadWrite, Append);
+
+  /// The table of callbacks behind an IO (SDL3's SDL_IOStreamInterface).
+  /// Every callback takes the user pointer given to CreateIO. Fill the
+  /// routines the stream supports and leave the rest nil: the IO routines
+  /// turn a nil callback into a failure with the state set.
+  /// @example `LI.Read := MyRead; LI.Write := nil; LIO := CreateIO(LI, LData);`
+  /// @since 0.2
+  /// @see CreateIO
+  IOInterface = record
+    /// Reads up to ASize bytes into ABuffer; returns the count read. A short
+    /// count sets AState (Eof, Error, NotReady); AState comes in as Ready.
+    Read: routine(const AUserData: ptr; const ABuffer: ptr; const ASize: int64; var AState: IOState): int64;
+    /// Writes up to ASize bytes from ABuffer; returns the count written. A
+    /// short count sets AState (Error, NotReady); AState comes in as Ready.
+    Write: routine(const AUserData: ptr; const ABuffer: ptr; const ASize: int64; var AState: IOState): int64;
+    /// Moves to AOffset from AOrigin; returns the new position, or -1.
+    Seek: routine(const AUserData: ptr; const AOffset: int64; const AOrigin: SeekOrigin): int64;
+    /// The current position, or -1.
+    Tell: routine(const AUserData: ptr): int64;
+    /// The stream's size in bytes, or -1 when it has none.
+    Size: routine(const AUserData: ptr): int64;
+    /// Writes out anything buffered; false on failure (AState says why).
+    Flush: routine(const AUserData: ptr; var AState: IOState): bool;
+    /// Releases the stream's own resources; false when that failed.
+    Close: routine(const AUserData: ptr): bool;
+  end;
+
+  /// What an IO points at: the callbacks, their user pointer and the state.
+  /// Reach it only through the IO routines.
+  /// @since 0.2
+  /// @see IO
+  IOStream = record
+    /// The callbacks CreateIO was given
+    Callbacks: IOInterface;
+    /// The user pointer every callback receives
+    UserData: ptr;
+    /// The state after the last operation
+    State: IOState;
+  end;
+
+  /// A stream: made by CreateIO or a Create*IO routine, used through the IO
+  /// routines, ended with IOClose. nil is no stream (a Create* that failed).
+  /// @example `LIO := CreateMemoryIO(); IOWrite(LIO, LData, 4); IOClose(LIO);`
+  /// @since 0.2
+  /// @see CreateIO
+  /// @see IOClose
+  IO = ptr to IOStream;
+
+/// Makes an IO from a table of callbacks and the user pointer they receive
+/// (SDL3's SDL_OpenIO). The interface is copied; the user pointer is the
+/// caller's and is never freed by the IO (its Close callback may free it).
+/// @param AInterface the callbacks
+/// @param AUserData the pointer every callback receives
+/// @returns the new IO, state Ready
+/// @example `LIO := CreateIO(LCallbacks, address of LCounter);`
+/// @since 0.2
+/// @see IOInterface
+/// @see IOClose
+exported routine CreateIO(const AInterface: IOInterface; const AUserData: ptr): IO;
+var
+  LIO: IO;
+begin
+  create(LIO);
+  LIO->Callbacks := AInterface;
+  LIO->UserData := AUserData;
+  LIO->State := IOState.Ready;
+  return LIO;
+end;
+
+/// Reads up to ASize bytes into ABuffer. A short count means the end, an
+/// error or no data yet: IOStatus tells which (Eof, Error, NotReady, or
+/// WriteOnly when the IO cannot read).
+/// @param AIO the stream
+/// @param ABuffer where the bytes go (at least ASize bytes)
+/// @param ASize how many bytes to read
+/// @returns the count read, 0 to ASize (0 for a nil IO or ASize <= 0)
+/// @example `LGot := IORead(LIO, address of LHeader, 16);`
+/// @since 0.2
+/// @see IOStatus
+exported routine IORead(const AIO: IO; const ABuffer: ptr; const ASize: int64): int64;
+var
+  LCount: int64;
+begin
+  if AIO = nil then
+    return 0;
+  end;
+  if ASize <= 0 then
+    return 0;
+  end;
+  if ABuffer = nil then
+    AIO->State := IOState.Error;
+    return 0;
+  end;
+  if AIO->Callbacks.Read = nil then
+    AIO->State := IOState.WriteOnly;
+    return 0;
+  end;
+  AIO->State := IOState.Ready;
+  LCount := AIO->Callbacks.Read(AIO->UserData, ABuffer, ASize, AIO->State);
+  // A callback outside 0 .. ASize broke its contract: an error, held in range
+  if LCount < 0 then
+    AIO->State := IOState.Error;
+    return 0;
+  end;
+  if LCount > ASize then
+    AIO->State := IOState.Error;
+    return ASize;
+  end;
+  // A short read the callback did not explain is the end of the stream
+  if (LCount < ASize) and (AIO->State = IOState.Ready) then
+    AIO->State := IOState.Eof;
+  end;
+  return LCount;
+end;
+
+/// Writes up to ASize bytes from ABuffer. A short count means an error or
+/// no room yet: IOStatus tells which (Error, NotReady, or ReadOnly when the
+/// IO cannot write).
+/// @param AIO the stream
+/// @param ABuffer the bytes to write (at least ASize bytes)
+/// @param ASize how many bytes to write
+/// @returns the count written, 0 to ASize (0 for a nil IO or ASize <= 0)
+/// @example `IOWrite(LIO, address of LHeader, 16);`
+/// @since 0.2
+/// @see IOStatus
+exported routine IOWrite(const AIO: IO; const ABuffer: ptr; const ASize: int64): int64;
+var
+  LCount: int64;
+begin
+  if AIO = nil then
+    return 0;
+  end;
+  if ASize <= 0 then
+    return 0;
+  end;
+  if ABuffer = nil then
+    AIO->State := IOState.Error;
+    return 0;
+  end;
+  if AIO->Callbacks.Write = nil then
+    AIO->State := IOState.ReadOnly;
+    return 0;
+  end;
+  AIO->State := IOState.Ready;
+  LCount := AIO->Callbacks.Write(AIO->UserData, ABuffer, ASize, AIO->State);
+  if LCount < 0 then
+    AIO->State := IOState.Error;
+    return 0;
+  end;
+  if LCount > ASize then
+    AIO->State := IOState.Error;
+    return ASize;
+  end;
+  // A short write the callback did not explain is an error
+  if (LCount < ASize) and (AIO->State = IOState.Ready) then
+    AIO->State := IOState.Error;
+  end;
+  return LCount;
+end;
+
+/// Moves the stream's position to AOffset counted from AOrigin. A move
+/// that succeeds sets the state Ready (an Eof is over).
+/// @param AIO the stream
+/// @param AOffset the offset, negative to go back
+/// @param AOrigin what the offset counts from
+/// @returns the new position, or -1 (state Error) when it cannot move there
+/// @example `IOSeek(LIO, -4, SeekOrigin.FromEnd);`
+/// @since 0.2
+/// @see IOTell
+exported routine IOSeek(const AIO: IO; const AOffset: int64; const AOrigin: SeekOrigin): int64;
+var
+  LPosition: int64;
+begin
+  if AIO = nil then
+    return -1;
+  end;
+  if AIO->Callbacks.Seek = nil then
+    AIO->State := IOState.Error;
+    return -1;
+  end;
+  LPosition := AIO->Callbacks.Seek(AIO->UserData, AOffset, AOrigin);
+  if LPosition < 0 then
+    AIO->State := IOState.Error;
+    return -1;
+  end;
+  AIO->State := IOState.Ready;
+  return LPosition;
+end;
+
+/// The stream's current position.
+/// @param AIO the stream
+/// @returns the position, or -1 when the IO has none (state Error)
+/// @since 0.2
+/// @see IOSeek
+exported routine IOTell(const AIO: IO): int64;
+var
+  LPosition: int64;
+begin
+  if AIO = nil then
+    return -1;
+  end;
+  if AIO->Callbacks.Tell = nil then
+    AIO->State := IOState.Error;
+    return -1;
+  end;
+  LPosition := AIO->Callbacks.Tell(AIO->UserData);
+  if LPosition < 0 then
+    AIO->State := IOState.Error;
+    return -1;
+  end;
+  return LPosition;
+end;
+
+/// The stream's size in bytes.
+/// @param AIO the stream
+/// @returns the size, or -1 when the IO has none (a pipe, a nil IO)
+/// @since 0.2
+exported routine IOSize(const AIO: IO): int64;
+var
+  LSize: int64;
+begin
+  if AIO = nil then
+    return -1;
+  end;
+  if AIO->Callbacks.Size = nil then
+    return -1;
+  end;
+  LSize := AIO->Callbacks.Size(AIO->UserData);
+  if LSize < 0 then
+    return -1;
+  end;
+  return LSize;
+end;
+
+/// Writes out anything the stream has buffered. An IO with no Flush
+/// callback has nothing to flush.
+/// @param AIO the stream
+/// @returns true when flushed (or nothing to flush), false on failure
+/// @since 0.2
+/// @see IOClose
+exported routine IOFlush(const AIO: IO): bool;
+var
+  LOk: bool;
+begin
+  if AIO = nil then
+    return false;
+  end;
+  if AIO->Callbacks.Flush = nil then
+    return true;
+  end;
+  AIO->State := IOState.Ready;
+  LOk := AIO->Callbacks.Flush(AIO->UserData, AIO->State);
+  if (not LOk) and (AIO->State = IOState.Ready) then
+    AIO->State := IOState.Error;
+  end;
+  return LOk;
+end;
+
+/// Ends the stream: calls its Close callback, then frees the IO. The IO is
+/// gone afterwards, whatever the result.
+/// @param AIO the stream
+/// @returns false for a nil IO or when the Close callback failed
+/// @example `if not IOClose(LIO) then println("close failed"); end;`
+/// @since 0.2
+/// @see CreateIO
+exported routine IOClose(const AIO: IO): bool;
+var
+  LIO: IO;
+  LOk: bool;
+begin
+  if AIO = nil then
+    return false;
+  end;
+  LOk := true;
+  if AIO->Callbacks.Close <> nil then
+    LOk := AIO->Callbacks.Close(AIO->UserData);
+  end;
+  LIO := AIO;
+  destroy(LIO);
+  return LOk;
+end;
+
+/// The state after the stream's last operation: why a count came up short.
+/// @param AIO the stream
+/// @returns the state (Error for a nil IO)
+/// @example `if IOStatus(LIO) = IOState.Eof then ... end;`
+/// @since 0.2
+/// @see IOState
+exported routine IOStatus(const AIO: IO): IOState;
+begin
+  if AIO = nil then
+    return IOState.Error;
+  end;
+  return AIO->State;
+end;
+
+type
+  // A memory IO's user data. Caller memory: Capacity = DataSize, never
+  // grows. Owned: the block grows (doubling) as writes pass its end.
+  MemoryData = record
+    Data: ptr to uint8;
+    DataSize: int64;
+    Capacity: int64;
+    Position: int64;
+    Owned: bool;
+  end;
+
+// Grows an owned block to hold at least ANeeded bytes
+routine MemoryGrow(const AMemory: ptr to MemoryData; const ANeeded: int64): bool;
+var
+  LCapacity: int64;
+  LBlock: ptr;
+begin
+  LCapacity := AMemory->Capacity;
+  if LCapacity < 256 then
+    LCapacity := 256;
+  end;
+  while LCapacity < ANeeded do
+    // Doubling stops short of overflow: past 2^62 take exactly what is needed
+    if LCapacity > 4611686018427387903 then
+      LCapacity := ANeeded;
+    else
+      LCapacity := LCapacity * 2;
+    end;
+  end;
+  if AMemory->Data = nil then
+    LBlock := getmem(LCapacity);
+  else
+    LBlock := resizemem(AMemory->Data, LCapacity);
+  end;
+  if LBlock = nil then
+    return false;
+  end;
+  AMemory->Data := ptr to uint8(LBlock);
+  AMemory->Capacity := LCapacity;
+  return true;
+end;
+
+routine MemoryRead(const AUserData: ptr; const ABuffer: ptr; const ASize: int64; var AState: IOState): int64;
+var
+  LMemory: ptr to MemoryData;
+  LCount: int64;
+begin
+  LMemory := ptr to MemoryData(AUserData);
+  LCount := LMemory->DataSize - LMemory->Position;
+  if LCount > ASize then
+    LCount := ASize;
+  end;
+  if LCount <= 0 then
+    AState := IOState.Eof;
+    return 0;
+  end;
+  std::memcpy(ABuffer, LMemory->Data + LMemory->Position, LCount);
+  LMemory->Position := LMemory->Position + LCount;
+  if LCount < ASize then
+    AState := IOState.Eof;
+  end;
+  return LCount;
+end;
+
+routine MemoryWrite(const AUserData: ptr; const ABuffer: ptr; const ASize: int64; var AState: IOState): int64;
+var
+  LMemory: ptr to MemoryData;
+  LCount: int64;
+begin
+  LMemory := ptr to MemoryData(AUserData);
+  LCount := ASize;
+  // Position + ASize past int64 is no room at all
+  if LCount > 9223372036854775807 - LMemory->Position then
+    AState := IOState.Error;
+    return 0;
+  end;
+  if LMemory->Position + LCount > LMemory->Capacity then
+    if LMemory->Owned then
+      if not MemoryGrow(LMemory, LMemory->Position + LCount) then
+        AState := IOState.Error;
+        return 0;
+      end;
+    else
+      // Caller memory never grows: write what fits
+      LCount := LMemory->Capacity - LMemory->Position;
+    end;
+  end;
+  if LCount <= 0 then
+    AState := IOState.Error;
+    return 0;
+  end;
+  std::memcpy(LMemory->Data + LMemory->Position, ABuffer, LCount);
+  LMemory->Position := LMemory->Position + LCount;
+  if LMemory->Position > LMemory->DataSize then
+    LMemory->DataSize := LMemory->Position;
+  end;
+  if LCount < ASize then
+    AState := IOState.Error;
+  end;
+  return LCount;
+end;
+
+routine MemorySeek(const AUserData: ptr; const AOffset: int64; const AOrigin: SeekOrigin): int64;
+var
+  LMemory: ptr to MemoryData;
+  LBase: int64;
+begin
+  LMemory := ptr to MemoryData(AUserData);
+  LBase := 0;
+  match AOrigin of
+    SeekOrigin.FromStart:
+      LBase := 0;
+    SeekOrigin.FromCurrent:
+      LBase := LMemory->Position;
+    SeekOrigin.FromEnd:
+      LBase := LMemory->DataSize;
+  end;
+  // The target must lie in 0 .. DataSize; compared without forming it (no overflow)
+  if AOffset > LMemory->DataSize - LBase then
+    return -1;
+  end;
+  if AOffset < -LBase then
+    return -1;
+  end;
+  LMemory->Position := LBase + AOffset;
+  return LMemory->Position;
+end;
+
+routine MemoryTell(const AUserData: ptr): int64;
+begin
+  return ptr to MemoryData(AUserData)->Position;
+end;
+
+routine MemorySize(const AUserData: ptr): int64;
+begin
+  return ptr to MemoryData(AUserData)->DataSize;
+end;
+
+routine MemoryFlush(const AUserData: ptr; var AState: IOState): bool;
+begin
+  return true;
+end;
+
+routine MemoryClose(const AUserData: ptr): bool;
+var
+  LMemory: ptr to MemoryData;
+begin
+  LMemory := ptr to MemoryData(AUserData);
+  if LMemory->Owned and (LMemory->Data <> nil) then
+    freemem(LMemory->Data);
+  end;
+  destroy(LMemory);
+  return true;
+end;
+
+// The memory IO's callbacks; a read-only one has no Write
+routine MemoryInterface(const AReadOnly: bool): IOInterface;
+var
+  LInterface: IOInterface;
+begin
+  LInterface.Read := MemoryRead;
+  LInterface.Write := nil;
+  if not AReadOnly then
+    LInterface.Write := MemoryWrite;
+  end;
+  LInterface.Seek := MemorySeek;
+  LInterface.Tell := MemoryTell;
+  LInterface.Size := MemorySize;
+  LInterface.Flush := MemoryFlush;
+  LInterface.Close := MemoryClose;
+  return LInterface;
+end;
+
+/// Makes an IO over the caller's memory: ASize bytes at AData, read-only
+/// or read / write. It never grows: a write past the end is a short count
+/// (state Error), a seek outside 0 .. ASize fails. The memory stays the
+/// caller's; it must outlive the IO.
+/// @param AData the memory (nil only when ASize is 0)
+/// @param ASize its size in bytes
+/// @param AReadOnly true: IOWrite fails with state ReadOnly
+/// @returns the IO, or nil when AData / ASize are not a valid block
+/// @example `LIO := CreateMemoryIO(address of LBuffer, 64, true);`
+/// @since 0.2
+/// @see IOClose
+exported routine CreateMemoryIO(const AData: ptr; const ASize: int64; const AReadOnly: bool): IO;
+var
+  LMemory: ptr to MemoryData;
+begin
+  if ASize < 0 then
+    return nil;
+  end;
+  if (AData = nil) and (ASize > 0) then
+    return nil;
+  end;
+  create(LMemory);
+  LMemory->Data := ptr to uint8(AData);
+  LMemory->DataSize := ASize;
+  LMemory->Capacity := ASize;
+  LMemory->Position := 0;
+  LMemory->Owned := false;
+  return CreateIO(MemoryInterface(AReadOnly), LMemory);
+end;
+
+/// Makes a read / write IO over the caller's memory (CreateMemoryIO with
+/// AReadOnly false).
+/// @param AData the memory (nil only when ASize is 0)
+/// @param ASize its size in bytes
+/// @returns the IO, or nil when AData / ASize are not a valid block
+/// @since 0.2
+exported routine CreateMemoryIO(const AData: ptr; const ASize: int64): IO;
+begin
+  return CreateMemoryIO(AData, ASize, false);
+end;
+
+/// Makes a read / write IO over a buffer of its own, empty at first, that
+/// grows as writes pass its end. IOClose frees the buffer.
+/// @returns the IO
+/// @example `LIO := CreateMemoryIO(); IOWrite(LIO, LData, LCount);`
+/// @since 0.2
+/// @see IOClose
+exported routine CreateMemoryIO(): IO;
+var
+  LMemory: ptr to MemoryData;
+begin
+  create(LMemory);
+  LMemory->Data := nil;
+  LMemory->DataSize := 0;
+  LMemory->Capacity := 0;
+  LMemory->Position := 0;
+  LMemory->Owned := true;
+  return CreateIO(MemoryInterface(false), LMemory);
+end;
+
+// The file IO's callbacks: the user pointer is the FileIOData that
+// FileDoOpen made; the std::filebuf work is in the helpers above
+routine FileRead(const AUserData: ptr; const ABuffer: ptr; const ASize: int64; var AState: IOState): int64;
+var
+  LCount: int64;
+begin
+  LCount := FileDoRead(AUserData, ABuffer, ASize);
+  if LCount < 0 then
+    AState := IOState.Error;
+    return 0;
+  end;
+  return LCount;
+end;
+
+routine FileWrite(const AUserData: ptr; const ABuffer: ptr; const ASize: int64; var AState: IOState): int64;
+var
+  LCount: int64;
+begin
+  LCount := FileDoWrite(AUserData, ABuffer, ASize);
+  if LCount < 0 then
+    AState := IOState.Error;
+    return 0;
+  end;
+  return LCount;
+end;
+
+routine FileSeek(const AUserData: ptr; const AOffset: int64; const AOrigin: SeekOrigin): int64;
+begin
+  return FileDoSeek(AUserData, AOffset, int32(AOrigin));
+end;
+
+routine FileTell(const AUserData: ptr): int64;
+begin
+  return FileDoTell(AUserData);
+end;
+
+routine FileSize(const AUserData: ptr): int64;
+begin
+  return FileDoSize(AUserData);
+end;
+
+routine FileFlush(const AUserData: ptr; var AState: IOState): bool;
+begin
+  if not FileDoFlush(AUserData) then
+    AState := IOState.Error;
+    return false;
+  end;
+  return true;
+end;
+
+routine FileClose(const AUserData: ptr): bool;
+begin
+  return FileDoClose(AUserData);
+end;
+
+// The file IO's callbacks for a mode: Read has no Write, Write and Append
+// have no Read
+routine FileInterface(const AMode: FileMode): IOInterface;
+var
+  LInterface: IOInterface;
+begin
+  LInterface.Read := nil;
+  LInterface.Write := nil;
+  if (AMode = FileMode.Read) or (AMode = FileMode.ReadWrite) then
+    LInterface.Read := FileRead;
+  end;
+  if AMode <> FileMode.Read then
+    LInterface.Write := FileWrite;
+  end;
+  LInterface.Seek := FileSeek;
+  LInterface.Tell := FileTell;
+  LInterface.Size := FileSize;
+  LInterface.Flush := FileFlush;
+  LInterface.Close := FileClose;
+  return LInterface;
+end;
+
+/// Makes an IO over a file. The path is UTF-8 and resolved as ResolvePath
+/// resolves it (`$P:` beside the program, `$D:` the current folder); the
+/// mode is one of C's fopen modes (see FileMode). A Read IO fails IOWrite
+/// with state ReadOnly, a Write or Append one fails IORead with state
+/// WriteOnly. A file may be positioned past its end, as with fseek; a write
+/// there fills the gap with zero bytes. IOClose writes out what is
+/// buffered and closes the file.
+/// @param APath the file (UTF-8)
+/// @param AMode how to open it
+/// @returns the IO, or nil when the file cannot be opened in that mode (a
+///   missing file for Read / ReadWrite, a folder, no permission)
+/// @example `LIO := CreateFileIO("$P:save.dat", FileMode.Write);`
+/// @since 0.2
+/// @see FileMode
+/// @see IOClose
+exported routine CreateFileIO(const APath: string; const AMode: FileMode): IO;
+var
+  LFile: ptr;
+begin
+  LFile := FileDoOpen(ResolvePath(APath), int32(AMode));
+  if LFile = nil then
+    return nil;
+  end;
+  return CreateIO(FileInterface(AMode), LFile);
+end;
+
+exported type
+  /// The table of callbacks behind an IOSource (SDL3's SDL_StorageInterface,
+  /// read side): a source opens IOs by path, so a format with several files
+  /// (a glTF and its .bin, an .obj and its .mtl) opens its siblings through
+  /// the source it came from. Every callback takes the user pointer given to
+  /// CreateIOSource and an entry path already in canonical form (relative,
+  /// `/` separated, no `.` or `..`): the IOSource routines check and
+  /// normalize a path before any callback sees it. Leave a callback nil when
+  /// the source has no such operation.
+  /// @example `LI.Open := MyOpen; LI.Exists := MyExists; LSrc := CreateIOSource(LI, LData);`
+  /// @since 0.2
+  /// @see CreateIOSource
+  IOSourceInterface = record
+    /// Opens the entry in AMode; returns its IO, or nil (missing, or a mode
+    /// the source does not offer).
+    Open: routine(const AUserData: ptr; const APath: string; const AMode: FileMode): IO;
+    /// True when the entry exists and can be opened (a folder is not one).
+    Exists: routine(const AUserData: ptr; const APath: string): bool;
+    /// The entry's size in bytes, or -1 when it does not exist.
+    Size: routine(const AUserData: ptr; const APath: string): int64;
+    /// Releases the source's own resources; false when that failed. IOs
+    /// already opened stay valid until their own IOClose.
+    Close: routine(const AUserData: ptr): bool;
+  end;
+
+  /// What an IOSource points at: the callbacks and their user pointer.
+  /// Reach it only through the IOSource routines.
+  /// @since 0.2
+  /// @see IOSource
+  IOSourceRecord = record
+    /// The callbacks CreateIOSource was given
+    Callbacks: IOSourceInterface;
+    /// The user pointer every callback receives
+    UserData: ptr;
+  end;
+
+  /// A source of IOs by path: made by CreateIOSource or a Create*IOSource
+  /// routine, used through the IOSource routines, ended with
+  /// IOSourceClose. nil is no source (a Create* that failed).
+  /// @example `LSrc := CreateFolderIOSource("$P:assets"); LIO := IOSourceOpen(LSrc, "models/ship.bin");`
+  /// @since 0.2
+  /// @see CreateIOSource
+  /// @see IOSourceClose
+  IOSource = ptr to IOSourceRecord;
+
+/// Makes an IOSource from a table of callbacks and the user pointer they
+/// receive. The interface is copied; the user pointer is the caller's and is
+/// never freed by the source (its Close callback may free it).
+/// @param AInterface the callbacks
+/// @param AUserData the pointer every callback receives
+/// @returns the new source
+/// @example `LSrc := CreateIOSource(LCallbacks, LPack);`
+/// @since 0.2
+/// @see IOSourceInterface
+/// @see IOSourceClose
+exported routine CreateIOSource(const AInterface: IOSourceInterface; const AUserData: ptr): IOSource;
+var
+  LSource: IOSource;
+begin
+  create(LSource);
+  LSource->Callbacks := AInterface;
+  LSource->UserData := AUserData;
+  return LSource;
+end;
+
+/// Opens an entry of the source as an IO. The path is relative to the
+/// source, `/` separated, UTF-8; `.` and `..` are resolved (a `..` above the
+/// source's root is refused). Refused, before the source is asked: an
+/// absolute or empty path, an empty segment (`a//b`, a trailing `/`), `\`,
+/// `:`, the other characters Windows refuses in a name, a segment ending in
+/// `.` or a space, and a Windows device name (`nul`, `com1.txt`), on both
+/// targets alike.
+/// @param ASource the source
+/// @param APath the entry
+/// @param AMode how to open it (a read-only source offers only Read)
+/// @returns the IO, or nil (refused path, missing entry, mode not offered,
+///   nil source or no Open callback)
+/// @example `LIO := IOSourceOpen(LSrc, "save/slot1.dat", FileMode.Write);`
+/// @since 0.2
+/// @see IOSourceExists
+exported routine IOSourceOpen(const ASource: IOSource; const APath: string; const AMode: FileMode): IO;
+var
+  LPath: string;
+begin
+  if ASource = nil then
+    return nil;
+  end;
+  if ASource->Callbacks.Open = nil then
+    return nil;
+  end;
+  LPath := SourceDoNormalize(APath);
+  if LPath = "" then
+    return nil;
+  end;
+  return ASource->Callbacks.Open(ASource->UserData, LPath, AMode);
+end;
+
+/// Opens an entry of the source for reading (IOSourceOpen with
+/// FileMode.Read).
+/// @param ASource the source
+/// @param APath the entry
+/// @returns the IO, or nil
+/// @example `LIO := IOSourceOpen(LSrc, "models/ship.bin");`
+/// @since 0.2
+/// @see IOSourceOpen
+exported routine IOSourceOpen(const ASource: IOSource; const APath: string): IO;
+begin
+  return IOSourceOpen(ASource, APath, FileMode.Read);
+end;
+
+/// True when the source has the entry (a file it can open; a folder is not
+/// an entry). The path follows IOSourceOpen's rules; a refused path does not
+/// exist.
+/// @param ASource the source
+/// @param APath the entry
+/// @returns true when the entry exists
+/// @example `if IOSourceExists(LSrc, "models/ship.mtl") then ... end;`
+/// @since 0.2
+/// @see IOSourceOpen
+exported routine IOSourceExists(const ASource: IOSource; const APath: string): bool;
+var
+  LPath: string;
+begin
+  if ASource = nil then
+    return false;
+  end;
+  if ASource->Callbacks.Exists = nil then
+    return false;
+  end;
+  LPath := SourceDoNormalize(APath);
+  if LPath = "" then
+    return false;
+  end;
+  return ASource->Callbacks.Exists(ASource->UserData, LPath);
+end;
+
+/// The size in bytes of an entry of the source, without opening it. The
+/// path follows IOSourceOpen's rules.
+/// @param ASource the source
+/// @param APath the entry
+/// @returns the size, or -1 (no such entry, refused path, nil source or no
+///   Size callback)
+/// @example `LBytes := IOSourceSize(LSrc, "models/ship.bin");`
+/// @since 0.2
+/// @see IOSourceExists
+exported routine IOSourceSize(const ASource: IOSource; const APath: string): int64;
+var
+  LPath: string;
+  LSize: int64;
+begin
+  if ASource = nil then
+    return -1;
+  end;
+  if ASource->Callbacks.Size = nil then
+    return -1;
+  end;
+  LPath := SourceDoNormalize(APath);
+  if LPath = "" then
+    return -1;
+  end;
+  LSize := ASource->Callbacks.Size(ASource->UserData, LPath);
+  if LSize < 0 then
+    return -1;
+  end;
+  return LSize;
+end;
+
+/// Ends the source: calls its Close callback, then frees the IOSource. IOs
+/// opened from it stay valid until their own IOClose.
+/// @param ASource the source
+/// @returns false for a nil source or when the Close callback failed
+/// @example `IOSourceClose(LSrc);`
+/// @since 0.2
+/// @see CreateIOSource
+exported routine IOSourceClose(const ASource: IOSource): bool;
+var
+  LSource: IOSource;
+  LOk: bool;
+begin
+  if ASource = nil then
+    return false;
+  end;
+  LOk := true;
+  if ASource->Callbacks.Close <> nil then
+    LOk := ASource->Callbacks.Close(ASource->UserData);
+  end;
+  LSource := ASource;
+  destroy(LSource);
+  return LOk;
+end;
+
+routine FolderOpen(const AUserData: ptr; const APath: string; const AMode: FileMode): IO;
+var
+  LFile: ptr;
+begin
+  LFile := FileDoOpen(FolderDoFile(AUserData, APath), int32(AMode));
+  if LFile = nil then
+    return nil;
+  end;
+  return CreateIO(FileInterface(AMode), LFile);
+end;
+
+routine FolderExists(const AUserData: ptr; const APath: string): bool;
+begin
+  return FolderDoExists(AUserData, APath);
+end;
+
+routine FolderSize(const AUserData: ptr; const APath: string): int64;
+begin
+  return FolderDoSize(AUserData, APath);
+end;
+
+routine FolderClose(const AUserData: ptr): bool;
+begin
+  return FolderDoClose(AUserData);
+end;
+
+// The folder source's callbacks
+routine FolderInterface(): IOSourceInterface;
+var
+  LInterface: IOSourceInterface;
+begin
+  LInterface.Open := FolderOpen;
+  LInterface.Exists := FolderExists;
+  LInterface.Size := FolderSize;
+  LInterface.Close := FolderClose;
+  return LInterface;
+end;
+
+/// Makes an IOSource over a folder: every entry is a file under it, its
+/// IOs file IOs (CreateFileIO's rules, every FileMode). The folder's path is
+/// UTF-8 and resolved as ResolvePath resolves it; entry paths are relative
+/// to it (IOSourceOpen's rules), so nothing outside the folder is reached
+/// by a `..`. Opening in Write or Append creates the file, never a folder.
+/// @param APath the folder (UTF-8)
+/// @returns the source, or nil when the path is not an existing folder
+/// @example `LSrc := CreateFolderIOSource("$P:assets");`
+/// @since 0.2
+/// @see IOSourceOpen
+/// @see IOSourceClose
+exported routine CreateFolderIOSource(const APath: string): IOSource;
+var
+  LFolder: ptr;
+begin
+  LFolder := FolderDoCreate(ResolvePath(APath));
+  if LFolder = nil then
+    return nil;
+  end;
+  return CreateIOSource(FolderInterface(), LFolder);
+end;
+
+// The zip source's user data is its C++ side (ZipTableData: minizip's
+// handle, the directory and the shared archive record); an entry IO's is a
+// ZipEntryIOData. The IO routines the C++ calls on the archive (minizip's
+// bridge, the entry IO's reads, the last close) are handed to ZipDoCreate
+// as plain routine values: the C++ never names the unit's routines.
+// AArchive is the archive's IO.
+routine ZipIORead(const AArchive: ptr; const ABuffer: ptr; const ASize: int64): int64;
+begin
+  return IORead(ptr to IOStream(AArchive), ABuffer, ASize);
+end;
+
+// AOrigin is the bridge's: 0 from the start, 1 from the current position,
+// 2 from the end (it never passes anything else)
+routine ZipIOSeek(const AArchive: ptr; const AOffset: int64; const AOrigin: int32): int64;
+var
+  LArchive: IO;
+begin
+  LArchive := ptr to IOStream(AArchive);
+  if AOrigin = 1 then
+    return IOSeek(LArchive, AOffset, SeekOrigin.FromCurrent);
+  end;
+  if AOrigin = 2 then
+    return IOSeek(LArchive, AOffset, SeekOrigin.FromEnd);
+  end;
+  return IOSeek(LArchive, AOffset, SeekOrigin.FromStart);
+end;
+
+routine ZipIOTell(const AArchive: ptr): int64;
+begin
+  return IOTell(ptr to IOStream(AArchive));
+end;
+
+// The last of an owned archive's holders closes it through this
+routine ZipIOClose(const AArchive: ptr): bool;
+begin
+  return IOClose(ptr to IOStream(AArchive));
+end;
+
+// The zip entry IO's callbacks: the user pointer is the ZipEntryIOData that
+// ZipDoEntryOpen made; the reading is in the C++ helpers above
+routine ZipEntryRead(const AUserData: ptr; const ABuffer: ptr; const ASize: int64; var AState: IOState): int64;
+var
+  LCount: int64;
+begin
+  LCount := ZipDoEntryRead(AUserData, ABuffer, ASize);
+  // A read error or a CRC mismatch; a short count otherwise is the end
+  if ZipDoEntryFailed(AUserData) then
+    AState := IOState.Error;
+  end;
+  return LCount;
+end;
+
+routine ZipEntrySeek(const AUserData: ptr; const AOffset: int64; const AOrigin: SeekOrigin): int64;
+begin
+  return ZipDoEntrySeek(AUserData, AOffset, int32(AOrigin));
+end;
+
+routine ZipEntryTell(const AUserData: ptr): int64;
+begin
+  return ZipDoEntryTell(AUserData);
+end;
+
+routine ZipEntrySize(const AUserData: ptr): int64;
+begin
+  return ZipDoEntrySize(AUserData);
+end;
+
+routine ZipEntryClose(const AUserData: ptr): bool;
+begin
+  return ZipDoEntryClose(AUserData);
+end;
+
+// The zip entry IO's callbacks: read-only, nothing to flush
+routine ZipEntryInterface(): IOInterface;
+var
+  LInterface: IOInterface;
+begin
+  LInterface.Read := ZipEntryRead;
+  LInterface.Write := nil;
+  LInterface.Seek := ZipEntrySeek;
+  LInterface.Tell := ZipEntryTell;
+  LInterface.Size := ZipEntrySize;
+  LInterface.Flush := nil;
+  LInterface.Close := ZipEntryClose;
+  return LInterface;
+end;
+
+// Opens an entry as a read-only IO; nil for any other mode, a missing entry,
+// a missing or wrong password, a method other than stored / deflated, or an
+// entry that cannot be read
+routine ZipOpen(const AUserData: ptr; const APath: string; const AMode: FileMode): IO;
+var
+  LEntry: ptr;
+begin
+  if AMode <> FileMode.Read then
+    return nil;
+  end;
+  LEntry := ZipDoEntryOpen(AUserData, APath);
+  if LEntry = nil then
+    return nil;
+  end;
+  return CreateIO(ZipEntryInterface(), LEntry);
+end;
+
+routine ZipExists(const AUserData: ptr; const APath: string): bool;
+begin
+  return ZipDoExists(AUserData, APath);
+end;
+
+routine ZipSize(const AUserData: ptr; const APath: string): int64;
+begin
+  return ZipDoSize(AUserData, APath);
+end;
+
+// Frees the directory, letting go of the source's hold on the archive (the
+// last holder closes an owned archive); false when a close failed
+routine ZipClose(const AUserData: ptr): bool;
+begin
+  return ZipDoFree(AUserData);
+end;
+
+// The zip source's callbacks
+routine ZipInterface(): IOSourceInterface;
+var
+  LInterface: IOSourceInterface;
+begin
+  LInterface.Open := ZipOpen;
+  LInterface.Exists := ZipExists;
+  LInterface.Size := ZipSize;
+  LInterface.Close := ZipClose;
+  return LInterface;
+end;
+
+// A zip source over AArchive: minizip opens it through the bridge and the
+// directory is read once; nil when minizip refuses it or an entry cannot be
+// read. An owned archive (AOwned) is the C++ side's from the call on: it is
+// closed there when the source cannot be made, else by the last of the
+// source and its entry IOs to let go.
+routine ZipCreate(const AArchive: IO; const AOwned: bool; const APassword: string): IOSource;
+var
+  LTable: ptr;
+begin
+  if AArchive = nil then
+    return nil;
+  end;
+  LTable := ZipDoCreate(AArchive, AOwned, ZipIORead, ZipIOSeek, ZipIOTell, ZipIOClose, APassword);
+  if LTable = nil then
+    return nil;
+  end;
+  return CreateIOSource(ZipInterface(), LTable);
+end;
+
+// One entry of a fresh zip source as an IO; the source is closed at once
+// (the entry IO keeps the archive open on its own)
+routine ZipEntryOf(const ASource: IOSource; const AEntry: string): IO;
+var
+  LIO: IO;
+begin
+  if ASource = nil then
+    return nil;
+  end;
+  LIO := IOSourceOpen(ASource, AEntry);
+  IOSourceClose(ASource);
+  return LIO;
+end;
+
+/// Makes a read-only IOSource over a zip archive read through an IO: the
+/// archive may be a file, memory, an entry of another source or any IO that
+/// reads and seeks. Its central directory is read once, here: ZIP64
+/// archives, data before the archive (a self-extractor) and names in UTF-8,
+/// CP437 or an Info-ZIP Unicode Path field are read. Entry paths follow
+/// IOSourceOpen's rules and match the archive's names exactly (case
+/// included, on both targets); a folder is not an entry, a name no path can
+/// reach (absolute, `..` above the root, `\`) is never found, and of two
+/// entries with one name the later is found. IOSourceSize gives an entry's
+/// uncompressed size; IOSourceOpen opens an entry (FileMode.Read only) as a
+/// read-only IO that seeks without reading from the start again (stored
+/// and deflated entries, ZipCrypto encrypted or not): an entry under 256 KB
+/// is read whole when opened, a larger one in place. An encrypted entry
+/// opens only with the right password. A CRC that does not match gives nil
+/// from the open (small entry) or fails the read that reaches the end
+/// (large entry, state Error). An entry IO stays valid after IOSourceClose. The
+/// archive IO stays the caller's: never closed by the source, its position
+/// moved by every read, it must outlive the source and its entry IOs.
+/// @param AArchive the archive
+/// @param APassword the password for its encrypted entries ("" for none)
+/// @returns the source, or nil when AArchive is nil or not a valid zip (no
+///   end record, cut short, a bad signature, several disks)
+/// @example `LSrc := CreateZipIOSource(LMemoryIO, "secret");`
+/// @since 0.2
+/// @see IOSourceOpen
+/// @see IOSourceClose
+exported routine CreateZipIOSource(const AArchive: IO; const APassword: string): IOSource;
+begin
+  return ZipCreate(AArchive, false, APassword);
+end;
+
+/// Makes a read-only IOSource over a zip archive read through an IO, with
+/// no password (CreateZipIOSource(AArchive, "")).
+/// @param AArchive the archive
+/// @returns the source, or nil
+/// @example `LSrc := CreateZipIOSource(LMemoryIO);`
+/// @since 0.2
+/// @see CreateZipIOSource
+exported routine CreateZipIOSource(const AArchive: IO): IOSource;
+begin
+  return ZipCreate(AArchive, false, "");
+end;
+
+/// Makes a read-only IOSource over a zip file: CreateZipIOSource over the
+/// file opened as CreateFileIO(APath, FileMode.Read) opens it (UTF-8,
+/// ResolvePath's `$P:` / `$D:`). The source owns that file: it is closed
+/// once the source (IOSourceClose) and every entry IO opened from it
+/// (IOClose) are closed.
+/// @param APath the zip file (UTF-8)
+/// @param APassword the password for its encrypted entries ("" for none)
+/// @returns the source, or nil when the file cannot be opened or is not a
+///   valid zip
+/// @example `LSrc := CreateZipIOSource("$P:assets.zip", "secret");`
+/// @since 0.2
+/// @see CreateZipIOSource
+exported routine CreateZipIOSource(const APath: string; const APassword: string): IOSource;
+begin
+  return ZipCreate(CreateFileIO(APath, FileMode.Read), true, APassword);
+end;
+
+/// Makes a read-only IOSource over a zip file, with no password
+/// (CreateZipIOSource(APath, "")).
+/// @param APath the zip file (UTF-8)
+/// @returns the source, or nil
+/// @example `LSrc := CreateZipIOSource("$P:assets.zip");`
+/// @since 0.2
+/// @see CreateZipIOSource
+exported routine CreateZipIOSource(const APath: string): IOSource;
+begin
+  return ZipCreate(CreateFileIO(APath, FileMode.Read), true, "");
+end;
+
+/// Opens one entry of a zip archive read through an IO as a read-only IO:
+/// IOSourceOpen on CreateZipIOSource(AArchive, APassword), the source
+/// closed again at once (the entry IO keeps what it needs). Reading,
+/// seeking, passwords and CRC as CreateZipIOSource says.
+/// @param AArchive the archive (the caller's: it must outlive the IO)
+/// @param AEntry the entry's path (IOSourceOpen's rules)
+/// @param APassword the password when the entry is encrypted ("" for none)
+/// @returns the IO, or nil (not a valid zip, no such entry, a missing or
+///   wrong password, an entry that cannot be read)
+/// @example `LIO := CreateZipFileIO(LPackIO, "models/ship.bin", "secret");`
+/// @since 0.2
+/// @see CreateZipIOSource
+/// @see IOClose
+exported routine CreateZipFileIO(const AArchive: IO; const AEntry: string; const APassword: string): IO;
+begin
+  return ZipEntryOf(ZipCreate(AArchive, false, APassword), AEntry);
+end;
+
+/// Opens one entry of a zip archive read through an IO, with no password
+/// (CreateZipFileIO(AArchive, AEntry, "")).
+/// @param AArchive the archive (the caller's: it must outlive the IO)
+/// @param AEntry the entry's path
+/// @returns the IO, or nil
+/// @example `LIO := CreateZipFileIO(LPackIO, "readme.txt");`
+/// @since 0.2
+/// @see CreateZipFileIO
+exported routine CreateZipFileIO(const AArchive: IO; const AEntry: string): IO;
+begin
+  return ZipEntryOf(ZipCreate(AArchive, false, ""), AEntry);
+end;
+
+/// Opens one entry of a zip file as a read-only IO: the file opened as
+/// CreateZipIOSource(APath, APassword) opens it and closed when the IO is
+/// (IOClose).
+/// @param APath the zip file (UTF-8)
+/// @param AEntry the entry's path (IOSourceOpen's rules)
+/// @param APassword the password when the entry is encrypted ("" for none)
+/// @returns the IO, or nil (the file cannot be opened or is not a valid
+///   zip, no such entry, a missing or wrong password, an entry that cannot
+///   be read)
+/// @example `LIO := CreateZipFileIO("$P:assets.zip", "models/ship.bin", "secret");`
+/// @since 0.2
+/// @see CreateZipIOSource
+/// @see IOClose
+exported routine CreateZipFileIO(const APath: string; const AEntry: string; const APassword: string): IO;
+begin
+  return ZipEntryOf(ZipCreate(CreateFileIO(APath, FileMode.Read), true, APassword), AEntry);
+end;
+
+/// Opens one entry of a zip file, with no password
+/// (CreateZipFileIO(APath, AEntry, "")).
+/// @param APath the zip file (UTF-8)
+/// @param AEntry the entry's path
+/// @returns the IO, or nil
+/// @example `LIO := CreateZipFileIO("$P:assets.zip", "readme.txt");`
+/// @since 0.2
+/// @see CreateZipFileIO
+exported routine CreateZipFileIO(const APath: string; const AEntry: string): IO;
+begin
+  return ZipEntryOf(ZipCreate(CreateFileIO(APath, FileMode.Read), true, ""), AEntry);
+end;
+
+end.
