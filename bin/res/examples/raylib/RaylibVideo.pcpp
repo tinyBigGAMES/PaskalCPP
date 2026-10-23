@@ -1,0 +1,182 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  RaylibVideo.pcpp - an MPEG-1 video with its sound, played from the shared
+  password zip (import raylib_ext), as examples\sfml\VideoPlayer plays it.
+  LoadVideoZip reads res/assets/videos/intro.mpg from repo\bin\assets.zip
+  while it plays (the SFML examples pack the zip when it is not there,
+  examples\sfml\ZipPlayer); UpdateVideo decodes once a frame, DrawVideoPro
+  draws it fitted to the window. Space pauses / resumes, L turns looping on
+  and off, Up / Down change the volume, Escape or the close button ends it.
+  The window shows the program's icon (@exeicon), as raylib_ext gives it.
+==============================================================================*/
+
+module exe RaylibVideo;
+
+@exeicon "$P:res/assets/icons/paskalcpp.ico";
+
+import
+  raylib,
+  raylib_ext,
+  SysUtils;
+
+const
+  CScreenWidth: int32  = 960;
+  CScreenHeight: int32 = 540;
+  CPassword: string = "PaskalCPP";
+  CArchive: string = "$P:../../assets.zip";
+  CEntry: string = "res/assets/videos/intro.mpg";
+
+var
+  GLastStatus: VideoStatus;
+
+// A raylib color from its red, green and blue parts (0 .. 255)
+routine Rgb(const AR: int32; const AG: int32; const AB: int32): Color;
+var
+  LResult: Color;
+begin
+  LResult.r := AR;
+  LResult.g := AG;
+  LResult.b := AB;
+  LResult.a := 255;
+  return LResult;
+end;
+
+// A raylib Rectangle from its place and size
+routine Rect(const AX: float32; const AY: float32; const AWidth: float32; const AHeight: float32): Rectangle;
+var
+  LResult: Rectangle;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  LResult.width := AWidth;
+  LResult.height := AHeight;
+  return LResult;
+end;
+
+// Every status change, the end of the video included
+routine OnStatus(const AStatus: VideoStatus; const AName: ptr to const char);
+begin
+  GLastStatus := AStatus;
+end;
+
+routine OnOff(const AValue: bool): string;
+begin
+  if AValue then
+    return "on";
+  end;
+  return "off";
+end;
+
+routine StatusText(const AStatus: VideoStatus): string;
+begin
+  if AStatus = VideoStatus.VideoPlaying then
+    return "playing";
+  end;
+  if AStatus = VideoStatus.VideoPaused then
+    return "paused";
+  end;
+  return "stopped";
+end;
+
+routine Run();
+var
+  LVideo: Video;
+  LVolume: float32;
+  LScale: float32;
+  LWidth: float32;
+  LHeight: float32;
+  LOrigin: Vector2;
+begin
+  if not FileExists(CArchive) then
+    println("assets.zip is not there: run examples\\sfml\\ZipPlayer once, it packs res\\assets into it");
+    return;
+  end;
+
+  SetConfigFlags(FLAG_VSYNC_HINT | FLAG_WINDOW_HIGHDPI | FLAG_WINDOW_RESIZABLE);
+  InitWindow(CScreenWidth, CScreenHeight, "PaskalCPP + raylib: video from a zip");
+  InitAudioDevice();
+  SetTargetFPS(60);
+
+  LVideo := LoadVideoZip(CArchive, CEntry, CPassword);
+  if not IsVideoValid(LVideo) then
+    println("the video did not load");
+    CloseAudioDevice();
+    CloseWindow();
+    return;
+  end;
+  SetVideoStatusCallback(LVideo, OnStatus);
+  LVolume := 0.8f;
+  SetVideoVolume(LVideo, LVolume);
+  PlayVideo(LVideo);
+
+  LOrigin.x := 0.0f;
+  LOrigin.y := 0.0f;
+  while not WindowShouldClose() do
+    if IsKeyPressed(KEY_SPACE) then
+      if IsVideoPlaying(LVideo) then
+        PauseVideo(LVideo);
+      else
+        PlayVideo(LVideo);
+      end;
+    end;
+    if IsKeyPressed(KEY_L) then
+      SetVideoLooping(LVideo, not IsVideoLooping(LVideo));
+    end;
+    if IsKeyPressed(KEY_UP) then
+      LVolume := LVolume + 0.1f;
+      if LVolume > 1.0f then
+        LVolume := 1.0f;
+      end;
+      SetVideoVolume(LVideo, LVolume);
+    end;
+    if IsKeyPressed(KEY_DOWN) then
+      LVolume := LVolume - 0.1f;
+      if LVolume < 0.0f then
+        LVolume := 0.0f;
+      end;
+      SetVideoVolume(LVideo, LVolume);
+    end;
+
+    UpdateVideo(LVideo);
+
+    // The video fitted to the window, its sides kept
+    LScale := float32(GetScreenWidth()) / float32(LVideo.width);
+    if (float32(LVideo.height) * LScale) > float32(GetScreenHeight() - 60) then
+      LScale := float32(GetScreenHeight() - 60) / float32(LVideo.height);
+    end;
+    LWidth := float32(LVideo.width) * LScale;
+    LHeight := float32(LVideo.height) * LScale;
+
+    BeginDrawing();
+    ClearBackground(Rgb(16, 16, 20));
+    DrawVideoPro(LVideo, Rect(0.0f, 0.0f, float32(LVideo.width), float32(LVideo.height)),
+      Rect((float32(GetScreenWidth()) - LWidth) / 2.0f, 0.0f, LWidth, LHeight), LOrigin, 0.0f, WHITE);
+    DrawText(TextFormat("%s   %.1f / %.1f s   volume %d%%   looping %s", StatusText(GLastStatus).c_str(),
+      GetVideoTime(LVideo), GetVideoDuration(LVideo), int32(LVolume * 100.0f + 0.5f),
+      OnOff(IsVideoLooping(LVideo)).c_str()), 16, GetScreenHeight() - 50, 20, Rgb(230, 230, 230));
+    DrawText("Space pause / resume   L looping   Up / Down volume   Escape quit", 16,
+      GetScreenHeight() - 24, 16, Rgb(160, 200, 160));
+    EndDrawing();
+  end;
+
+  UnloadVideo(LVideo);
+  CloseAudioDevice();
+  CloseWindow();
+end;
+
+begin
+  Run();
+end.

@@ -447,7 +447,7 @@ type
     function DoRawSlots(const AFrameId: Integer; const AParams: Boolean;
       const AKnown: TList<string>): TArray<TPCDebugSlot>;
     function DoIsHiddenName(const ACppName: string): Boolean;
-    function DoIsByReference(const AParam: TPCParam): Boolean;
+    function DoIsByReference(const AParam: TPCParam; const ALinkage: TPCLinkage): Boolean;
 
     // Types and memory
     function DoPdbType(const AModuleBase: UInt64; const ATypeIndex: Cardinal; out AType: TPCDebugType): Boolean;
@@ -2245,12 +2245,13 @@ begin
   Result := False;
 end;
 
-function TPCDebugRuntime.DoIsByReference(const AParam: TPCParam): Boolean;
+function TPCDebugRuntime.DoIsByReference(const AParam: TPCParam; const ALinkage: TPCLinkage): Boolean;
 begin
-  // The emitter's passing (debugger-names.md): var = T&, const of a
-  // non-scalar = T const&; the PDB symbol of a reference holds the address
-  Result := (AParam.ParamMode = pmVar) or
-    ((AParam.ParamMode = pmConst) and (AParam.TypeExpr <> nil) and (not AParam.TypeExpr.IsScalarOrPointer()));
+  // The emitter's passing (debugger-names.md), the one rule in
+  // TPCParam.IsPassedByReference: var = T&, const of a non-scalar = T const&
+  // except under C linkage (by value); the PDB symbol of a reference holds
+  // the address
+  Result := AParam.IsPassedByReference(ALinkage);
 end;
 
 function TPCDebugRuntime.DoSymbolSlot(const AInfo: TPCDebugFrameInfo; const ASymbol: TPCDebugSymbol;
@@ -2455,7 +2456,7 @@ begin
     for LParam in LRoutine.Params do
     begin
       if not DoLocalSlot(AFrameId, LSymbols, LParam.ParamName, LParam.ParamName, LParam.TypeExpr,
-        DoIsByReference(LParam), LSlot) then
+        DoIsByReference(LParam, LRoutine.MeantLinkage()), LSlot) then
       begin
         LSlot := Default(TPCDebugSlot);
         LSlot.DisplayName := LParam.ParamName;

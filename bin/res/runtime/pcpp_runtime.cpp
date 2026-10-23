@@ -30,6 +30,7 @@
 #include <cstring>
 #include <exception>
 #include <mutex>
+#include <new>
 #include <unordered_map>
 
 #if defined(_WIN32)
@@ -41,6 +42,7 @@
     #include <signal.h>
     #include <pthread.h>
     #include <unistd.h>
+    #include <dlfcn.h>
     #include <sys/resource.h>
     #if defined(__linux__)
         #include <sys/syscall.h>
@@ -86,22 +88,54 @@ struct RuntimeException {
     std::string Text;
 };
 
-// The last exception a guard of this thread caught; the text is owned here
+// The last exception a guard of this thread caught (its code; the text and
+// the C++ exception object itself, nullptr for a hardware fault, so
+// Caught::pass_on raises the same one again)
 thread_local std::int32_t t_exc_code = 0;
+
+// This thread's text and exception object. Linux: they live in the thread's
+// ThreadState (below), never in a thread_local with a destructor: glibc
+// keeps a shared object loaded while any thread holds a thread_local it must
+// destroy (__cxa_thread_atexit_impl), so a pcpp-built .so could never be
+// unloaded by dlclose while such a thread lives. nullptr only when the
+// state cannot be made (out of memory).
+std::string* thread_exc_text() noexcept;
+std::exception_ptr* thread_exc_object() noexcept;
+
+#if defined(_WIN32)
 thread_local std::string t_exc_text;
-// The C++ exception object itself (a raise or a C++ exception; nullptr for a
-// hardware fault), so Caught::pass_on raises the same one again
 thread_local std::exception_ptr t_exc_object;
+
+std::string* thread_exc_text() noexcept {
+    return &t_exc_text;
+}
+
+std::exception_ptr* thread_exc_object() noexcept {
+    return &t_exc_object;
+}
+#endif
 
 // The one setter, noexcept: a text that cannot be copied leaves a fixed one,
 // the code is kept. Never called from a fault handler
 void set_exc(const std::int32_t code, const char* text) noexcept {
+    std::string* LText = thread_exc_text();
     t_exc_code = code;
+    if (LText == nullptr) {
+        return;
+    }
     try {
-        t_exc_text.assign(text != nullptr ? text : "");
+        LText->assign(text != nullptr ? text : "");
     }
     catch (...) {
-        t_exc_text.clear();
+        LText->clear();
+    }
+}
+
+// The thread's exception object set (nothing when the state cannot be made)
+void set_exc_object(const std::exception_ptr& object) noexcept {
+    std::exception_ptr* LObject = thread_exc_object();
+    if (LObject != nullptr) {
+        *LObject = object;
     }
 }
 
@@ -260,13 +294,50 @@ LONG WINAPI unguarded_fault_filter(PEXCEPTION_POINTERS ep) {
     report_unguarded_fault(fault_code(LCode));
 }
 
+// The vectored handler this copy of the runtime added and the unhandled
+// filter it replaced: a dll's copy removes the one and puts the other back
+// when it unloads (restore_fault_handlers), so nothing is left pointing into
+// unloaded code
+PVOID g_veh_handle = nullptr;
+LPTOP_LEVEL_EXCEPTION_FILTER g_previous_filter = nullptr;
+bool g_filter_set = false;
+
 void install_fault_handler() {
     // A function-local static is initialized exactly once, thread-safely
-    static const PVOID s_handle = AddVectoredExceptionHandler(1, veh_handler);
-    static_cast<void>(s_handle);
-    static const LPTOP_LEVEL_EXCEPTION_FILTER s_filter = SetUnhandledExceptionFilter(unguarded_fault_filter);
-    static_cast<void>(s_filter);
+    static const bool s_installed = []() {
+        g_veh_handle = AddVectoredExceptionHandler(1, veh_handler);
+        g_previous_filter = SetUnhandledExceptionFilter(unguarded_fault_filter);
+        g_filter_set = true;
+        return true;
+    }();
+    static_cast<void>(s_installed);
 }
+
+#if defined(PCPP_BUILD_DLL)
+// A dll detaching (DLL_PROCESS_DETACH): its vectored handler removed; the
+// unhandled filter back to the one it replaced while the filter is still
+// this copy's (a filter set after ours is its owner's and stays), never a
+// previous one whose module is gone (another dll's copy, unloaded first)
+void restore_fault_handlers() noexcept {
+    if (g_veh_handle != nullptr) {
+        RemoveVectoredExceptionHandler(g_veh_handle);
+        g_veh_handle = nullptr;
+    }
+    if (g_filter_set) {
+        LPTOP_LEVEL_EXCEPTION_FILTER LBack = g_previous_filter;
+        HMODULE LOwner = nullptr;
+        if ((LBack != nullptr) && !GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(LBack), &LOwner)) {
+            LBack = nullptr;
+        }
+        const LPTOP_LEVEL_EXCEPTION_FILTER LNow = SetUnhandledExceptionFilter(LBack);
+        if (LNow != unguarded_fault_filter) {
+            SetUnhandledExceptionFilter(LNow);
+        }
+        g_filter_set = false;
+    }
+}
+#endif
 
 // After a fault, once the guard's frame is back: a caught stack overflow used
 // up the thread's guard page; without re-arming it the next overflow on this
@@ -299,7 +370,85 @@ struct AltStack {
     }
 };
 
-thread_local AltStack t_alt_stack;
+// Everything a thread keeps that needs destroying, made at its first use and
+// destroyed by the key's destructor when the thread exits (pthread keys
+// pin no shared object). Only t_state, a plain pointer, is thread_local.
+// The library's unload deletes the key (no destructor of this library runs
+// after it) and frees the unloading thread's own state; a thread still
+// alive then keeps its alternate stack installed (malloc'd memory, valid)
+// and its state is left behind.
+struct ThreadState {
+    std::string ExcText;
+    std::exception_ptr ExcObject;
+    AltStack Alt;
+};
+
+thread_local ThreadState* t_state = nullptr;
+pthread_key_t g_state_key;
+pthread_once_t g_state_once = PTHREAD_ONCE_INIT;
+bool g_state_key_made = false;
+
+void destroy_thread_state(void* state) {
+    delete static_cast<ThreadState*>(state);
+}
+
+void make_state_key() {
+    g_state_key_made = pthread_key_create(&g_state_key, destroy_thread_state) == 0;
+}
+
+// This thread's state, made on first use; nullptr when it cannot be made
+ThreadState* thread_state() noexcept {
+    if (t_state != nullptr) {
+        return t_state;
+    }
+    pthread_once(&g_state_once, make_state_key);
+    if (!g_state_key_made) {
+        return nullptr;
+    }
+    ThreadState* LState = new (std::nothrow) ThreadState();
+    if (LState == nullptr) {
+        return nullptr;
+    }
+    if (pthread_setspecific(g_state_key, LState) != 0) {
+        delete LState;
+        return nullptr;
+    }
+    t_state = LState;
+    return LState;
+}
+
+// The unloading thread's own state, then the key (pcpp_dll_finalize)
+void release_thread_states() noexcept {
+    if (!g_state_key_made) {
+        return;
+    }
+    if (t_state != nullptr) {
+        pthread_setspecific(g_state_key, nullptr);
+        delete t_state;
+        t_state = nullptr;
+    }
+    pthread_key_delete(g_state_key);
+    g_state_key_made = false;
+}
+
+std::string* thread_exc_text() noexcept {
+    ThreadState* LState = thread_state();
+    return (LState != nullptr) ? &LState->ExcText : nullptr;
+}
+
+std::exception_ptr* thread_exc_object() noexcept {
+    ThreadState* LState = thread_state();
+    return (LState != nullptr) ? &LState->ExcObject : nullptr;
+}
+
+// The thread's alternate stack record; a zeroed fallback when the state
+// cannot be made (no stack recorded: no overflow detection on that thread)
+AltStack& thread_alt_stack() noexcept {
+    static AltStack s_none;
+    ThreadState* LState = thread_state();
+    return (LState != nullptr) ? LState->Alt : s_none;
+}
+
 constexpr std::size_t ALT_STACK_SIZE = 64 * 1024;
 // A SIGSEGV this close to the low end of the thread's stack is a stack overflow
 constexpr std::uintptr_t STACK_GUARD_SLACK = 64 * 1024;
@@ -310,8 +459,8 @@ void record_stack_bounds() {
         void* LAddr = nullptr;
         std::size_t LSize = 0;
         if (pthread_attr_getstack(&LAttr, &LAddr, &LSize) == 0) {
-            t_alt_stack.StackLo = reinterpret_cast<std::uintptr_t>(LAddr);
-            t_alt_stack.StackHi = reinterpret_cast<std::uintptr_t>(LAddr) + LSize;
+            thread_alt_stack().StackLo = reinterpret_cast<std::uintptr_t>(LAddr);
+            thread_alt_stack().StackHi = reinterpret_cast<std::uintptr_t>(LAddr) + LSize;
         }
         pthread_attr_destroy(&LAttr);
     }
@@ -320,13 +469,13 @@ void record_stack_bounds() {
     // that limit as the stack size; musl reports only what is mapped now, so a
     // later overflow would fall below the recorded bounds. Take the limit from
     // the kernel, whatever the libc
-    if ((t_alt_stack.StackHi != 0) && (syscall(SYS_gettid) == getpid())) {
+    if ((thread_alt_stack().StackHi != 0) && (syscall(SYS_gettid) == getpid())) {
         struct rlimit LLimit;
         if ((getrlimit(RLIMIT_STACK, &LLimit) == 0) && (LLimit.rlim_cur != RLIM_INFINITY) &&
-            (static_cast<std::uintptr_t>(LLimit.rlim_cur) < t_alt_stack.StackHi)) {
-            const std::uintptr_t LLo = t_alt_stack.StackHi - static_cast<std::uintptr_t>(LLimit.rlim_cur);
-            if (LLo < t_alt_stack.StackLo) {
-                t_alt_stack.StackLo = LLo;
+            (static_cast<std::uintptr_t>(LLimit.rlim_cur) < thread_alt_stack().StackHi)) {
+            const std::uintptr_t LLo = thread_alt_stack().StackHi - static_cast<std::uintptr_t>(LLimit.rlim_cur);
+            if (LLo < thread_alt_stack().StackLo) {
+                thread_alt_stack().StackLo = LLo;
             }
         }
     }
@@ -335,7 +484,8 @@ void record_stack_bounds() {
 
 bool is_stack_overflow(void* fault_addr) {
     const std::uintptr_t LAddr = reinterpret_cast<std::uintptr_t>(fault_addr);
-    const std::uintptr_t LLo = t_alt_stack.StackLo;
+    // Runs in the signal handler: reads the state that exists, never makes it
+    const std::uintptr_t LLo = (t_state != nullptr) ? t_state->Alt.StackLo : 0;
     if (LLo == 0) {
         return false;
     }
@@ -391,6 +541,14 @@ void signal_handler(int sig, siginfo_t* info, void* uctx) {
     siglongjmp(*t_jump_target, signal_fault_code(sig, info));
 }
 
+// The fault signals the runtime handles, and what each one's handler was
+// before this copy of the runtime installed its own: a shared library's
+// copy puts them back when it unloads (restore_fault_handlers), so no
+// handler is left pointing into unmapped code
+constexpr int FAULT_SIGNALS[] = { SIGFPE, SIGSEGV, SIGBUS, SIGILL };
+struct sigaction g_previous_actions[4];
+bool g_previous_saved[4] = { false, false, false, false };
+
 void install_fault_handler() {
     // Process-wide handlers, installed exactly once (thread-safe local static)
     static const bool s_installed = []() {
@@ -400,17 +558,16 @@ void install_fault_handler() {
         sigemptyset(&LAction.sa_mask);
         // SA_SIGINFO: si_code / si_addr. SA_ONSTACK: run on the alternate stack
         LAction.sa_flags = SA_SIGINFO | SA_ONSTACK;
-        sigaction(SIGFPE, &LAction, nullptr);
-        sigaction(SIGSEGV, &LAction, nullptr);
-        sigaction(SIGBUS, &LAction, nullptr);
-        sigaction(SIGILL, &LAction, nullptr);
+        for (int LI = 0; LI < 4; ++LI) {
+            g_previous_saved[LI] = sigaction(FAULT_SIGNALS[LI], &LAction, &g_previous_actions[LI]) == 0;
+        }
         return true;
     }();
     static_cast<void>(s_installed);
 
     // Per-thread alternate stack, once per thread. A stack the program already
     // installed on this thread is kept
-    if (t_alt_stack.StackLo == 0) {
+    if (thread_alt_stack().StackLo == 0) {
         stack_t LCurrent;
         if ((sigaltstack(nullptr, &LCurrent) == 0) && ((LCurrent.ss_flags & SS_DISABLE) == 0)) {
             record_stack_bounds();
@@ -428,10 +585,41 @@ void install_fault_handler() {
             std::free(LMem);
             return;
         }
-        t_alt_stack.Mem = LMem;
+        thread_alt_stack().Mem = LMem;
         record_stack_bounds();
     }
 }
+
+#if defined(PCPP_BUILD_DLL)
+// A shared library unloading (so_unload): each fault signal whose handler is
+// still this copy's goes back to the one it replaced, the program's own
+// runtime's or the default. A handler someone installed after ours is theirs
+// and stays. A previous handler that is no longer mapped (another library's
+// copy, unloaded first) is never put back: the default instead.
+void restore_fault_handlers() noexcept {
+    for (int LI = 0; LI < 4; ++LI) {
+        struct sigaction LNow;
+        if (!g_previous_saved[LI] || (sigaction(FAULT_SIGNALS[LI], nullptr, &LNow) != 0)) {
+            continue;
+        }
+        if (((LNow.sa_flags & SA_SIGINFO) != 0) && (LNow.sa_sigaction == signal_handler)) {
+            struct sigaction LBack = g_previous_actions[LI];
+            void* LEntry = ((LBack.sa_flags & SA_SIGINFO) != 0)
+                ? reinterpret_cast<void*>(LBack.sa_sigaction)
+                : reinterpret_cast<void*>(LBack.sa_handler);
+            Dl_info LInfo;
+            const bool LSpecial = (LBack.sa_handler == SIG_DFL) || (LBack.sa_handler == SIG_IGN);
+            if (!LSpecial && (dladdr(LEntry, &LInfo) == 0)) {
+                std::memset(&LBack, 0, sizeof(LBack));
+                LBack.sa_handler = SIG_DFL;
+                sigemptyset(&LBack.sa_mask);
+            }
+            sigaction(FAULT_SIGNALS[LI], &LBack, nullptr);
+        }
+        g_previous_saved[LI] = false;
+    }
+}
+#endif
 
 void after_fault(const std::int32_t code) {
     static_cast<void>(code);
@@ -569,7 +757,8 @@ std::int32_t exc_code() {
 }
 
 std::string exc_msg() {
-    return t_exc_text;
+    const std::string* LText = thread_exc_text();
+    return (LText != nullptr) ? *LText : std::string();
 }
 
 std::int32_t detail::guard_call(void (*fn)(void*), void* context) {
@@ -595,20 +784,20 @@ std::int32_t detail::guard_call(void (*fn)(void*), void* context) {
         catch (const RuntimeException& e) {
             t_jump_target = LOuter;
             set_exc(e.Code, e.Text.c_str());
-            t_exc_object = std::current_exception();
+            set_exc_object(std::current_exception());
             return 1;
         }
         catch (const std::exception& e) {
             t_jump_target = LOuter;
             // Copied while the exception lives: it dies with this arm
             set_exc(EXC_CPP, e.what());
-            t_exc_object = std::current_exception();
+            set_exc_object(std::current_exception());
             return 1;
         }
         catch (...) {
             t_jump_target = LOuter;
             set_exc(EXC_CPP, "unknown C++ exception");
-            t_exc_object = std::current_exception();
+            set_exc_object(std::current_exception());
             return 1;
         }
     }
@@ -617,7 +806,7 @@ std::int32_t detail::guard_call(void (*fn)(void*), void* context) {
     t_jump_target = LOuter;
     after_fault(LJumped);
     set_exc(LJumped, fault_text(LJumped));
-    t_exc_object = nullptr;
+    set_exc_object(nullptr);
     return 1;
 }
 
@@ -627,9 +816,15 @@ Caught Caught::take(const std::int32_t caught) {
     Caught LCaught;
     if (caught != 0) {
         LCaught.FCaught = true;
-        LCaught.FObject = t_exc_object;
+        const std::exception_ptr* LObject = thread_exc_object();
+        const std::string* LText = thread_exc_text();
+        if (LObject != nullptr) {
+            LCaught.FObject = *LObject;
+        }
         LCaught.FCode = t_exc_code;
-        LCaught.FText = t_exc_text;
+        if (LText != nullptr) {
+            LCaught.FText = *LText;
+        }
     }
     return LCaught;
 }
@@ -1364,6 +1559,8 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved
     }
     else if (reason == DLL_PROCESS_DETACH) {
         pcpp_dll_finalize();
+        // No fault handler of this dll may stay installed once it is gone
+        pcpp::restore_fault_handlers();
 #if defined(PCPP_DEBUG)
         // The dll's own heap counts, after its finalizers
         pcpp::detail_report_leaks();
@@ -1374,6 +1571,13 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE instance, DWORD reason, LPVOID reserved
 
 #else
 
+// This library's C++ ABI exit handle (the compiler emits it hidden, one per
+// shared object) and libc's finalizer. The library's own __cxa_atexit
+// registrations carry &__dso_handle, so finalizing it runs and removes
+// exactly this library's module-static / local-static destructors.
+extern "C" void* __dso_handle;
+extern "C" void __cxa_finalize(void*);
+
 namespace pcpp {
 namespace {
 
@@ -1383,6 +1587,15 @@ __attribute__((constructor)) void so_load() {
 
 __attribute__((destructor)) void so_unload() {
     pcpp_dll_finalize();
+    // Run and remove this library's own C++ static destructors now, while its
+    // code is still mapped: a destructor left on libc's exit list would run
+    // against unmapped code at process exit (glibc does not always finalize a
+    // dlclosed object's handlers on unload)
+    __cxa_finalize(&__dso_handle);
+    // No fault handler of this library may stay installed once it is gone
+    restore_fault_handlers();
+    // No thread-state destructor of this library may run once it is gone
+    release_thread_states();
 #if defined(PCPP_DEBUG)
     // The shared object's own counts, after its finalizers
     detail_report_leaks();

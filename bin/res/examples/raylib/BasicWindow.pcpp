@@ -28,6 +28,7 @@ const
   CScreenHeight: int32 = 450;
 
 begin
+  SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | FLAG_WINDOW_HIGHDPI);
   InitWindow(CScreenWidth, CScreenHeight, "Raylib Window");
   SetTargetFPS(60);
 

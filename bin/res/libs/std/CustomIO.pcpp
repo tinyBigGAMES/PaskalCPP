@@ -18,22 +18,24 @@
 -------------------------------------------------------------------------------
   CustomIO.pcpp - the CustomIO unit: `import CustomIO;` gives streams in the
   style of SDL3's custom IO. An IO is a stream behind a table of callbacks
-  (an IOInterface: Read, Write, Seek, Tell, Size, Flush, Close), so a routine
-  that takes an IO reads from memory, a file, a zip entry or anything a
-  program writes itself: CreateIO(AInterface, AUserData) makes an IO from any
-  interface. The IO routines (IORead, IOWrite, IOSeek, IOTell, IOSize,
-  IOFlush, IOClose, IOStatus) call through the table and keep the stream's
-  state: a callback left nil is a clean failure, never a crash.
+  (an IOInterface: Read, Write, Seek, Tell, Size, Flush, Close, Truncate), so
+  a routine that takes an IO reads from memory, a file, a zip entry or
+  anything a program writes itself: CreateIO(AInterface, AUserData) makes an
+  IO from any interface. The IO routines (IORead, IOWrite, IOSeek, IOTell,
+  IOSize, IOFlush, IOTruncate, IOClose, IOStatus) call through the table
+  and keep the stream's state: a callback left nil is a clean failure, never
+  a crash.
   CreateMemoryIO makes an IO over the caller's memory (read-only, or read /
   write within its size) or over a buffer of its own that grows as it is
   written. CreateFileIO makes an IO over a file, opened in one of C's fopen
   modes (FileMode), its name UTF-8 on both targets.
   Beside the stream, an IOSource opens IOs by path (SDL3's SDL_Storage
-  split): an IOSourceInterface (Open, Exists, Size, Close) behind
-  CreateIOSource, used through IOSourceOpen, IOSourceExists, IOSourceSize
-  and IOSourceClose, which check and normalize every path once (relative,
-  `/` separated, no climbing above the root) before a callback sees it.
-  CreateFolderIOSource makes a source over a folder; CreateZipIOSource a
+  split): an IOSourceInterface (Open, Exists, Size, Close, Remove) behind
+  CreateIOSource, used through IOSourceOpen, IOSourceExists, IOSourceSize,
+  IOSourceRemove and IOSourceClose, which check and normalize every path
+  once (relative, `/` separated, no climbing above the root) before a
+  callback sees it. CreateFolderIOSource makes a source over a folder
+  (Remove deletes the entry's file); CreateZipIOSource a
   read-only source over a zip archive, which it reads through an IO (a
   file, memory, an entry of another source), ZIP64 included, its entries
   (stored, deflated, ZipCrypto) read-only IOs that seek without starting
@@ -47,7 +49,7 @@ import
   minizip,
   zlib;
 
-// Private: the memory IO's std::memcpy, the file IO's std::filebuf and the
+// Private: the memory IO's std::memcpy, the file IO's C stdio handle and the
 // zip source's minizip bridge, this unit's own translation unit. Every helper is
 // named apart from the unit's exported names (a body in the unit's
 // namespace would find those first).
@@ -55,10 +57,9 @@ cpp source;
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
-#include <ios>
 #include <new>
 #include <string>
 #include <system_error>
@@ -66,36 +67,128 @@ cpp source;
 #include <utility>
 #include <vector>
 
+// The file IO's three calls std:: has no form for: the UTF-8 open (Windows
+// opens by UTF-16), the 64-bit seek / tell (Windows' long is 32 bits) and
+// the resize through the open handle (_chsize_s / ftruncate)
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
 // minizip's own ZipCrypto key schedule (init_keys / zdecode), for the zip
 // entry IO's password check and its in-place reading of encrypted entries;
 // zlib.h is already in through minizip's header
 #include "crypt.h"
 
+// The real file system work of the file IO and the folder source (opening a
+// file, a folder's queries) runs inside a scope that raises this thread's
+// depth. HookIO (a unit above CustomIO) reads it through InFileSystemWork:
+// while it is above 0 a plain path is never redirected (HookIO's path
+// source), so a file IO and a folder source always mean the disk. Trivially
+// destructible: registers no thread exit work.
+namespace pcpp_customio_internal {
+
+static thread_local int GFileSystemDepth = 0;
+
+// True while this thread runs CustomIO's real file system work
+bool InFileSystemWork() noexcept
+{
+  return GFileSystemDepth > 0;
+}
+
+// Raises the depth for its scope
+struct FileSystemScope
+{
+  FileSystemScope() noexcept
+  {
+    ++GFileSystemDepth;
+  }
+
+  ~FileSystemScope()
+  {
+    --GFileSystemDepth;
+  }
+
+  FileSystemScope(const FileSystemScope&) = delete;
+  FileSystemScope& operator=(const FileSystemScope&) = delete;
+};
+
+}
+
 namespace {
 
-// A file IO's user data. std::filebuf (std:: first: one implementation on
-// both targets) carries C stdio's rule that output and input must be
-// separated by a seek, in either order; Pending holds the last direction so
-// the helpers insert that seek themselves.
+// A file IO's user data: a C stdio handle (std::fopen's family: one buffered
+// stream implementation per target, the CRT's). C stdio asks for a seek
+// between output and input, in either order; Pending holds the last
+// direction so the helpers insert that seek themselves. The handle is what
+// a resize goes through (FileDoResize), never the path it was opened by: the
+// path may name another file, or none, once the file is renamed or replaced
+// while open.
 struct FileIOData
 {
-  std::filebuf Buffer;
+  std::FILE* Handle = nullptr;
   int Pending = 0; // 0 none, 1 the last operation read, 2 it wrote
 };
 
-// Both directions: a position names the one place the file is at
-constexpr std::ios_base::openmode FileDoBoth = std::ios_base::in | std::ios_base::out;
+// The handle's place in bytes, or -1 (64-bit on both targets)
+std::int64_t FileDoPlace(std::FILE* AHandle)
+{
+#ifdef _WIN32
+  return static_cast<std::int64_t>(_ftelli64(AHandle));
+#else
+  return static_cast<std::int64_t>(ftello(AHandle));
+#endif
+}
+
+// Moves the handle to AOffset from AOrigin (SEEK_SET / SEEK_CUR / SEEK_END),
+// 64-bit on both targets; false on failure
+bool FileDoMove(std::FILE* AHandle, const std::int64_t AOffset, const int AOrigin)
+{
+#ifdef _WIN32
+  return _fseeki64(AHandle, static_cast<__int64>(AOffset), AOrigin) == 0;
+#else
+  return fseeko(AHandle, static_cast<off_t>(AOffset), AOrigin) == 0;
+#endif
+}
+
+// Sets the size of the file the handle has open, through its descriptor;
+// the handle must hold no buffered bytes (the caller settles it first).
+// false on failure
+bool FileDoResize(std::FILE* AHandle, const std::int64_t ASize)
+{
+#ifdef _WIN32
+  return _chsize_s(_fileno(AHandle), static_cast<__int64>(ASize)) == 0;
+#else
+  return ftruncate(fileno(AHandle), static_cast<off_t>(ASize)) == 0;
+#endif
+}
 
 // The seek C stdio asks for when the direction changes; false when it failed
 bool FileDoTurn(FileIOData* AFile, const int ADirection)
 {
   if ((AFile->Pending != 0) && (AFile->Pending != ADirection))
   {
-    if (AFile->Buffer.pubseekoff(0, std::ios_base::cur, FileDoBoth) == std::streampos(-1))
+    if (!FileDoMove(AFile->Handle, 0, SEEK_CUR))
       return false;
   }
   AFile->Pending = ADirection;
   return true;
+}
+
+// Opens the handle on APath in mode AMode (FileMode's ordinal); nullptr when
+// the open fails. Windows opens by the path's UTF-16 form (_wfopen): the
+// narrow fopen reads the ANSI code page.
+std::FILE* FileDoOpenHandle(const std::filesystem::path& APath, const std::int32_t AMode)
+{
+#ifdef _WIN32
+  static const wchar_t* const CModes[4] = {L"rb", L"wb", L"r+b", L"ab"};
+  return _wfopen(APath.c_str(), CModes[AMode]);
+#else
+  static const char* const CModes[4] = {"rb", "wb", "r+b", "ab"};
+  return std::fopen(APath.c_str(), CModes[AMode]);
+#endif
 }
 
 // Opens APath (UTF-8) in mode AMode: FileMode's ordinals Read 0, Write 1,
@@ -103,30 +196,35 @@ bool FileDoTurn(FileIOData* AFile, const int ADirection)
 // the mode is unknown, the path is empty or a folder, or the open fails.
 void* FileDoOpen(const std::string& APath, const std::int32_t AMode)
 {
-  std::ios_base::openmode LMode = std::ios_base::binary;
-  std::error_code LError;
-  if (AMode == 0)
-    LMode |= std::ios_base::in;
-  else if (AMode == 1)
-    LMode |= std::ios_base::out | std::ios_base::trunc;
-  else if (AMode == 2)
-    LMode |= std::ios_base::in | std::ios_base::out;
-  else if (AMode == 3)
-    LMode |= std::ios_base::out | std::ios_base::app;
-  else
+  if ((AMode < 0) || (AMode > 3))
     return nullptr;
   if (APath.empty())
     return nullptr;
-  // The UTF-8 text goes in as char8_t, never through
-  // std::filesystem::path(std::string) (the ANSI code page on Windows)
-  const std::filesystem::path LPath(std::u8string(APath.begin(), APath.end()));
-  // A folder opens as a file on Linux (reads then fail): refused on both
-  if (std::filesystem::is_directory(LPath, LError))
+  // The disk, never a path HookIO would redirect
+  const pcpp_customio_internal::FileSystemScope LScope;
+  FileIOData* LFile = nullptr;
+  // The path conversion allocates: out of memory is a failed open, never an
+  // escape
+  try
+  {
+    std::error_code LError;
+    // The UTF-8 text goes in as char8_t, never through
+    // std::filesystem::path(std::string) (the ANSI code page on Windows)
+    const std::filesystem::path LPath(std::u8string(APath.begin(), APath.end()));
+    // A folder opens as a file on Linux (reads then fail): refused on both
+    if (std::filesystem::is_directory(LPath, LError))
+      return nullptr;
+    LFile = new (std::nothrow) FileIOData();
+    if (LFile == nullptr)
+      return nullptr;
+    LFile->Handle = FileDoOpenHandle(LPath, AMode);
+  }
+  catch (...)
+  {
+    delete LFile;
     return nullptr;
-  FileIOData* LFile = new (std::nothrow) FileIOData();
-  if (LFile == nullptr)
-    return nullptr;
-  if (LFile->Buffer.open(LPath, LMode) == nullptr)
+  }
+  if (LFile->Handle == nullptr)
   {
     delete LFile;
     return nullptr;
@@ -135,13 +233,18 @@ void* FileDoOpen(const std::string& APath, const std::int32_t AMode)
 }
 
 // Up to ASize bytes into ABuffer; the count read, or -1 when the turn from
-// writing failed
+// writing failed. The handle's end / error flags are cleared after a short
+// read: an IO answers each read from the file as it is now, with no
+// sticky end (a file that grew reads on)
 std::int64_t FileDoRead(void* AFile, void* ABuffer, const std::int64_t ASize)
 {
   FileIOData* LFile = static_cast<FileIOData*>(AFile);
   if (!FileDoTurn(LFile, 1))
     return -1;
-  return static_cast<std::int64_t>(LFile->Buffer.sgetn(static_cast<char*>(ABuffer), ASize));
+  const std::size_t LCount = std::fread(ABuffer, 1, static_cast<std::size_t>(ASize), LFile->Handle);
+  if (static_cast<std::int64_t>(LCount) < ASize)
+    std::clearerr(LFile->Handle);
+  return static_cast<std::int64_t>(LCount);
 }
 
 // Up to ASize bytes from ABuffer; the count written, or -1 when the turn
@@ -151,19 +254,25 @@ std::int64_t FileDoWrite(void* AFile, const void* ABuffer, const std::int64_t AS
   FileIOData* LFile = static_cast<FileIOData*>(AFile);
   if (!FileDoTurn(LFile, 2))
     return -1;
-  return static_cast<std::int64_t>(LFile->Buffer.sputn(static_cast<const char*>(ABuffer), ASize));
+  const std::size_t LCount = std::fwrite(ABuffer, 1, static_cast<std::size_t>(ASize), LFile->Handle);
+  if (static_cast<std::int64_t>(LCount) < ASize)
+    std::clearerr(LFile->Handle);
+  return static_cast<std::int64_t>(LCount);
 }
 
-// The current position, or -1. A seek of 0 from the current place: it also
-// ends the direction (both filebuf implementations sync there)
+// The current position, or -1. A seek of 0 from the current place first: it
+// ends the direction (pending writes reach the file, read-ahead is dropped),
+// as C stdio defines it for either direction
 std::int64_t FileDoTell(void* AFile)
 {
   FileIOData* LFile = static_cast<FileIOData*>(AFile);
-  const std::streampos LPos = LFile->Buffer.pubseekoff(0, std::ios_base::cur, FileDoBoth);
-  if (LPos == std::streampos(-1))
+  if (!FileDoMove(LFile->Handle, 0, SEEK_CUR))
+    return -1;
+  const std::int64_t LPos = FileDoPlace(LFile->Handle);
+  if (LPos < 0)
     return -1;
   LFile->Pending = 0;
-  return static_cast<std::int64_t>(LPos);
+  return LPos;
 }
 
 // The file's size in bytes (unflushed writes included), the position kept;
@@ -174,12 +283,12 @@ std::int64_t FileDoSize(void* AFile)
   const std::int64_t LHere = FileDoTell(LFile);
   if (LHere < 0)
     return -1;
-  const std::streampos LEnd = LFile->Buffer.pubseekoff(0, std::ios_base::end, FileDoBoth);
-  if (LEnd == std::streampos(-1))
+  if (!FileDoMove(LFile->Handle, 0, SEEK_END))
     return -1;
-  if (LFile->Buffer.pubseekpos(std::streampos(LHere), FileDoBoth) == std::streampos(-1))
+  const std::int64_t LEnd = FileDoPlace(LFile->Handle);
+  if (!FileDoMove(LFile->Handle, LHere, SEEK_SET))
     return -1;
-  return static_cast<std::int64_t>(LEnd);
+  return LEnd;
 }
 
 // Moves to AOffset from AOrigin (SeekOrigin's ordinals: FromStart 0,
@@ -202,18 +311,36 @@ std::int64_t FileDoSeek(void* AFile, const std::int64_t AOffset, const std::int3
     return -1;
   if (AOffset > INT64_MAX - LBase)
     return -1;
-  const std::streampos LPos = LFile->Buffer.pubseekpos(std::streampos(LBase + AOffset), FileDoBoth);
-  if (LPos == std::streampos(-1))
+  if (!FileDoMove(LFile->Handle, LBase + AOffset, SEEK_SET))
     return -1;
   LFile->Pending = 0;
-  return static_cast<std::int64_t>(LPos);
+  return LBase + AOffset;
 }
 
 // Writes out what is buffered; false on failure
 bool FileDoFlush(void* AFile)
 {
   FileIOData* LFile = static_cast<FileIOData*>(AFile);
-  return LFile->Buffer.pubsync() == 0;
+  return std::fflush(LFile->Handle) == 0;
+}
+
+// Sets the file's size to ASize bytes (ftruncate's rule: shorter drops the
+// tail, longer reads as zeros) through the open handle, the position kept
+// even when it now lies past the end; false on failure
+bool FileDoTruncate(void* AFile, const std::int64_t ASize)
+{
+  FileIOData* LFile = static_cast<FileIOData*>(AFile);
+  // The tell ends the direction: pending writes reach the file and read-ahead
+  // is dropped, so no stale byte past the new end survives in the buffer
+  const std::int64_t LHere = FileDoTell(LFile);
+  if (LHere < 0)
+    return false;
+  if (!FileDoResize(LFile->Handle, ASize))
+    return false;
+  // Back to the kept place, so the stream's next byte comes from the new file
+  if (!FileDoMove(LFile->Handle, LHere, SEEK_SET))
+    return false;
+  return true;
 }
 
 // Closes the file (writing out what is buffered) and frees the user data;
@@ -221,7 +348,7 @@ bool FileDoFlush(void* AFile)
 bool FileDoClose(void* AFile)
 {
   FileIOData* LFile = static_cast<FileIOData*>(AFile);
-  const bool LOk = LFile->Buffer.close() != nullptr;
+  const bool LOk = std::fclose(LFile->Handle) == 0;
   delete LFile;
   return LOk;
 }
@@ -331,6 +458,8 @@ struct FolderSourceData
 // is empty or not an existing folder
 void* FolderDoCreate(const std::string& APath)
 {
+  const pcpp_customio_internal::FileSystemScope LScope;
+
   try
   {
     std::error_code LError;
@@ -374,6 +503,8 @@ std::string FolderDoFile(void* AFolder, const std::string& AEntry)
 // True when the entry is a regular file (a folder is not an entry)
 bool FolderDoExists(void* AFolder, const std::string& AEntry)
 {
+  const pcpp_customio_internal::FileSystemScope LScope;
+
   try
   {
     std::error_code LError;
@@ -388,6 +519,8 @@ bool FolderDoExists(void* AFolder, const std::string& AEntry)
 // The entry's size in bytes; -1 when it is not a regular file
 std::int64_t FolderDoSize(void* AFolder, const std::string& AEntry)
 {
+  const pcpp_customio_internal::FileSystemScope LScope;
+
   try
   {
     std::error_code LError;
@@ -404,6 +537,27 @@ std::int64_t FolderDoSize(void* AFolder, const std::string& AEntry)
   catch (...)
   {
     return -1;
+  }
+}
+
+// Deletes the entry's file; false when it is not a regular file (a folder
+// is not an entry) or the file system refuses (read-only file, a handle
+// that does not share deletion on Windows)
+bool FolderDoRemove(void* AFolder, const std::string& AEntry)
+{
+  const pcpp_customio_internal::FileSystemScope LScope;
+
+  try
+  {
+    std::error_code LError;
+    const std::filesystem::path LPath = FolderDoPath(AFolder, AEntry);
+    if (!std::filesystem::is_regular_file(LPath, LError))
+      return false;
+    return std::filesystem::remove(LPath, LError) && (!LError);
+  }
+  catch (...)
+  {
+    return false;
   }
 }
 
@@ -1562,6 +1716,11 @@ exported type
     Flush: routine(const AUserData: ptr; var AState: IOState): bool;
     /// Releases the stream's own resources; false when that failed.
     Close: routine(const AUserData: ptr): bool;
+    /// Sets the stream's size to ASize bytes (ASize >= 0): shorter drops the
+    /// tail, longer adds zero bytes; the position is the stream's own rule.
+    /// False on failure (AState says why; it comes in as Ready). Optional: a
+    /// stream that cannot change its size leaves it nil.
+    Truncate: routine(const AUserData: ptr; const ASize: int64; var AState: IOState): bool;
   end;
 
   /// What an IO points at: the callbacks, their user pointer and the state.
@@ -1795,6 +1954,46 @@ begin
   return LOk;
 end;
 
+/// Sets the stream's size to ASize bytes, as ftruncate does: shorter drops
+/// the tail, longer adds zero bytes. A stream that cannot write cannot
+/// change its size (state ReadOnly); one without a Truncate callback cannot
+/// either (state Error). Where the position lands is the stream's rule: a
+/// file IO keeps it (it may then lie past the end, as with fseek); a memory
+/// IO, which never sits past its end, moves back to the new end.
+/// @param AIO the stream
+/// @param ASize the new size in bytes (>= 0)
+/// @returns true when the size was set; false for a nil IO, a negative size
+///   (state Error) or a refused or failed change (IOStatus tells which)
+/// @example `IOTruncate(LIO, 0);`
+/// @since 0.2
+/// @see IOSize
+exported routine IOTruncate(const AIO: IO; const ASize: int64): bool;
+var
+  LOk: bool;
+begin
+  if AIO = nil then
+    return false;
+  end;
+  if ASize < 0 then
+    AIO->State := IOState.Error;
+    return false;
+  end;
+  if AIO->Callbacks.Write = nil then
+    AIO->State := IOState.ReadOnly;
+    return false;
+  end;
+  if AIO->Callbacks.Truncate = nil then
+    AIO->State := IOState.Error;
+    return false;
+  end;
+  AIO->State := IOState.Ready;
+  LOk := AIO->Callbacks.Truncate(AIO->UserData, ASize, AIO->State);
+  if (not LOk) and (AIO->State = IOState.Ready) then
+    AIO->State := IOState.Error;
+  end;
+  return LOk;
+end;
+
 /// Ends the stream: calls its Close callback, then frees the IO. The IO is
 /// gone afterwards, whatever the result.
 /// @param AIO the stream
@@ -1976,6 +2175,34 @@ begin
   return true;
 end;
 
+// The size moves within the block: an owned block grows to hold it, caller
+// memory only up to its capacity. Bytes the IO gains read as zero; the
+// position, which never lies past the end, moves back to a shorter end.
+routine MemoryTruncate(const AUserData: ptr; const ASize: int64; var AState: IOState): bool;
+var
+  LMemory: ptr to MemoryData;
+begin
+  LMemory := ptr to MemoryData(AUserData);
+  if ASize > LMemory->Capacity then
+    if not LMemory->Owned then
+      AState := IOState.Error;
+      return false;
+    end;
+    if not MemoryGrow(LMemory, ASize) then
+      AState := IOState.Error;
+      return false;
+    end;
+  end;
+  if ASize > LMemory->DataSize then
+    std::memset(LMemory->Data + LMemory->DataSize, 0, ASize - LMemory->DataSize);
+  end;
+  LMemory->DataSize := ASize;
+  if LMemory->Position > ASize then
+    LMemory->Position := ASize;
+  end;
+  return true;
+end;
+
 routine MemoryClose(const AUserData: ptr): bool;
 var
   LMemory: ptr to MemoryData;
@@ -1988,15 +2215,17 @@ begin
   return true;
 end;
 
-// The memory IO's callbacks; a read-only one has no Write
+// The memory IO's callbacks; a read-only one has no Write and no Truncate
 routine MemoryInterface(const AReadOnly: bool): IOInterface;
 var
   LInterface: IOInterface;
 begin
   LInterface.Read := MemoryRead;
   LInterface.Write := nil;
+  LInterface.Truncate := nil;
   if not AReadOnly then
     LInterface.Write := MemoryWrite;
+    LInterface.Truncate := MemoryTruncate;
   end;
   LInterface.Seek := MemorySeek;
   LInterface.Tell := MemoryTell;
@@ -2008,7 +2237,8 @@ end;
 
 /// Makes an IO over the caller's memory: ASize bytes at AData, read-only
 /// or read / write. It never grows: a write past the end is a short count
-/// (state Error), a seek outside 0 .. ASize fails. The memory stays the
+/// (state Error), a seek outside 0 .. ASize fails, IOTruncate moves the size
+/// only within those ASize bytes. The memory stays the
 /// caller's; it must outlive the IO.
 /// @param AData the memory (nil only when ASize is 0)
 /// @param ASize its size in bytes
@@ -2067,7 +2297,7 @@ begin
 end;
 
 // The file IO's callbacks: the user pointer is the FileIOData that
-// FileDoOpen made; the std::filebuf work is in the helpers above
+// FileDoOpen made; the C stdio work is in the helpers above
 routine FileRead(const AUserData: ptr; const ABuffer: ptr; const ASize: int64; var AState: IOState): int64;
 var
   LCount: int64;
@@ -2121,19 +2351,30 @@ begin
   return FileDoClose(AUserData);
 end;
 
-// The file IO's callbacks for a mode: Read has no Write, Write and Append
-// have no Read
+routine FileTruncate(const AUserData: ptr; const ASize: int64; var AState: IOState): bool;
+begin
+  if not FileDoTruncate(AUserData, ASize) then
+    AState := IOState.Error;
+    return false;
+  end;
+  return true;
+end;
+
+// The file IO's callbacks for a mode: Read has no Write and no Truncate,
+// Write and Append have no Read
 routine FileInterface(const AMode: FileMode): IOInterface;
 var
   LInterface: IOInterface;
 begin
   LInterface.Read := nil;
   LInterface.Write := nil;
+  LInterface.Truncate := nil;
   if (AMode = FileMode.Read) or (AMode = FileMode.ReadWrite) then
     LInterface.Read := FileRead;
   end;
   if AMode <> FileMode.Read then
     LInterface.Write := FileWrite;
+    LInterface.Truncate := FileTruncate;
   end;
   LInterface.Seek := FileSeek;
   LInterface.Tell := FileTell;
@@ -2192,6 +2433,9 @@ exported type
     /// Releases the source's own resources; false when that failed. IOs
     /// already opened stay valid until their own IOClose.
     Close: routine(const AUserData: ptr): bool;
+    /// Optional: deletes the entry; false when it does not exist or the
+    /// source refuses (nil: the source deletes nothing, as a read-only one).
+    Remove: routine(const AUserData: ptr; const APath: string): bool;
   end;
 
   /// What an IOSource points at: the callbacks and their user pointer.
@@ -2336,6 +2580,52 @@ begin
   return LSize;
 end;
 
+/// Deletes an entry of the source. The path follows IOSourceOpen's rules.
+/// IOs already opened on the entry stay valid; whether the entry can go
+/// while one is open is the source's (a folder source on Windows refuses
+/// while a file IO on it is open).
+/// @param ASource the source
+/// @param APath the entry
+/// @returns true when the entry was deleted; false for a missing entry, a
+///   refused path, a source that refused, a nil source or no Remove callback
+///   (a source that deletes nothing, such as a zip)
+/// @example `if not IOSourceRemove(LSrc, "save/slot1.tmp") then ... end;`
+/// @since 0.2
+/// @see IOSourceExists
+exported routine IOSourceRemove(const ASource: IOSource; const APath: string): bool;
+var
+  LPath: string;
+begin
+  if ASource = nil then
+    return false;
+  end;
+  if ASource->Callbacks.Remove = nil then
+    return false;
+  end;
+  LPath := SourceDoNormalize(APath);
+  if LPath = "" then
+    return false;
+  end;
+  return ASource->Callbacks.Remove(ASource->UserData, LPath);
+end;
+
+/// True when the source can delete entries (it has a Remove callback), so a
+/// caller can refuse up front what IOSourceRemove would not do later (a zip
+/// source cannot).
+/// @param ASource the source
+/// @returns true when IOSourceRemove can delete an entry of it; false for a
+///   nil source or one without a Remove callback
+/// @example `if IOSourceCanRemove(LSrc) then ... end;`
+/// @since 0.2
+/// @see IOSourceRemove
+exported routine IOSourceCanRemove(const ASource: IOSource): bool;
+begin
+  if ASource = nil then
+    return false;
+  end;
+  return ASource->Callbacks.Remove <> nil;
+end;
+
 /// Ends the source: calls its Close callback, then frees the IOSource. IOs
 /// opened from it stay valid until their own IOClose.
 /// @param ASource the source
@@ -2386,6 +2676,11 @@ begin
   return FolderDoClose(AUserData);
 end;
 
+routine FolderRemove(const AUserData: ptr; const APath: string): bool;
+begin
+  return FolderDoRemove(AUserData, APath);
+end;
+
 // The folder source's callbacks
 routine FolderInterface(): IOSourceInterface;
 var
@@ -2395,6 +2690,7 @@ begin
   LInterface.Exists := FolderExists;
   LInterface.Size := FolderSize;
   LInterface.Close := FolderClose;
+  LInterface.Remove := FolderRemove;
   return LInterface;
 end;
 
@@ -2402,7 +2698,8 @@ end;
 /// IOs file IOs (CreateFileIO's rules, every FileMode). The folder's path is
 /// UTF-8 and resolved as ResolvePath resolves it; entry paths are relative
 /// to it (IOSourceOpen's rules), so nothing outside the folder is reached
-/// by a `..`. Opening in Write or Append creates the file, never a folder.
+/// by a `..`. Opening in Write or Append creates the file, never a folder;
+/// IOSourceRemove deletes the entry's file.
 /// @param APath the folder (UTF-8)
 /// @returns the source, or nil when the path is not an existing folder
 /// @example `LSrc := CreateFolderIOSource("$P:assets");`

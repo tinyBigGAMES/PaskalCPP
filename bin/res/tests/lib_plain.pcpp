@@ -44,8 +44,9 @@
        the C link fails: lld-link: error: undefined symbol: pcpp::init(int, char**)
        (a runtime-using lib needs pcpp_runtime and a C++ driver: lib_runtime.pcpp).
        Undo: restore the line and build it (windows) again.
-       CHECK: it prints "Removed ...output/lib/pcpp_runtime.lib: this
-       lib no longer uses the runtime" and lib_plain.lib is alone again
+       CHECK: it builds; pcpp_runtime.lib stays in output\lib (the output
+       folder is shared, so pcpp no longer removes a runtime library another
+       lib may have published there)
     2. lib_plain_host_err_nolink.pcpp: the host without its @linklibrary line
 *******************************************************************************/
 

@@ -1,0 +1,270 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  RaylibZip.pcpp - graphics, sound effects and streamed music from a password
+  zip (import raylib_ext). The examples share repo\bin\assets.zip (entries
+  res/assets/..., password PaskalCPP); the SFML examples pack it when it is
+  not there (examples\sfml\ZipPlayer), this one only reads it. Each asset is
+  an IO over its zip entry (CreateZipFileIO), handed to raylib_ext's IO form
+  of raylib's loader: the image and the font are drawn, the sound effects
+  play from memory, and the music streams, raylib reading its IO while it
+  plays (so that IO stays open until UnloadMusicStreamIO). 1 / 2 / 3 play a
+  sound effect, Space pauses / resumes the music, N plays the next track,
+  Escape or the close button ends it.
+==============================================================================*/
+
+module exe RaylibZip;
+
+// The program's icon, on the exe and (raylib_ext) on its raylib window
+@exeicon "$P:res/assets/icons/paskalcpp.ico";
+
+import
+  raylib,
+  raylib_ext,
+  CustomIO,
+  SysUtils;
+
+const
+  CScreenWidth: int32  = 800;
+  CScreenHeight: int32 = 450;
+  CPassword: string = "PaskalCPP";
+  CArchive: string = "$P:../../assets.zip";
+
+// The track N names, in the zip: 0 or 1
+routine TrackEntry(const ATrack: int32): string;
+begin
+  if ATrack = 0 then
+    return "res/assets/audio/music/song01.ogg";
+  end;
+  return "res/assets/audio/music/song02.ogg";
+end;
+
+// Sound effect N, in the zip: 0, 1 or 2
+routine SfxEntry(const AIndex: int32): string;
+begin
+  if AIndex = 0 then
+    return "res/assets/audio/sfx/digthis.ogg";
+  end;
+  if AIndex = 1 then
+    return "res/assets/audio/sfx/explo_enemy.ogg";
+  end;
+  return "res/assets/audio/sfx/explo_rock.ogg";
+end;
+
+// A raylib color from its red, green and blue parts (0 .. 255)
+routine Rgb(const AR: int32; const AG: int32; const AB: int32): Color;
+var
+  LResult: Color;
+begin
+  LResult.r := AR;
+  LResult.g := AG;
+  LResult.b := AB;
+  LResult.a := 255;
+  return LResult;
+end;
+
+// A raylib Vector2 from its two parts
+routine V2(const AX: float32; const AY: float32): Vector2;
+var
+  LResult: Vector2;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  return LResult;
+end;
+
+// A raylib Rectangle from its place and size
+routine Rect(const AX: float32; const AY: float32; const AWidth: float32; const AHeight: float32): Rectangle;
+var
+  LResult: Rectangle;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  LResult.width := AWidth;
+  LResult.height := AHeight;
+  return LResult;
+end;
+
+// A texture loaded from a zip entry; the entry's IO is closed once raylib has
+// read it (a texture keeps nothing of its file)
+routine ZipTexture(const AEntry: string; const AFileType: ptr to const char): Texture2D;
+var
+  LIO: IO;
+  LTexture: Texture2D;
+begin
+  LIO := CreateZipFileIO(CArchive, AEntry, CPassword);
+  LTexture := LoadTextureIO(LIO, AFileType);
+  IOClose(LIO);
+  return LTexture;
+end;
+
+// A font at ASize pixels loaded from a zip entry; its IO closed after
+routine ZipFont(const AEntry: string; const ASize: int32): Font;
+var
+  LIO: IO;
+  LFont: Font;
+begin
+  LIO := CreateZipFileIO(CArchive, AEntry, CPassword);
+  LFont := LoadFontExIO(LIO, ".ttf", ASize, nil, 0);
+  IOClose(LIO);
+  return LFont;
+end;
+
+// A sound effect loaded from a zip entry (decoded into memory); its IO closed
+// after
+routine ZipSound(const AEntry: string): Sound;
+var
+  LIO: IO;
+  LSound: Sound;
+begin
+  LIO := CreateZipFileIO(CArchive, AEntry, CPassword);
+  LSound := LoadSoundIO(LIO, ".ogg");
+  IOClose(LIO);
+  return LSound;
+end;
+
+routine Run();
+var
+  LTexture: Texture2D;
+  LFont: Font;
+  LSounds: array[0..2] of Sound;
+  LMusicIO: IO;
+  LMusic: Music;
+  LTrack: int32;
+  LIndex: int32;
+  LScale: float32;
+  LWidth: float32;
+  LHeight: float32;
+  LAngle: float32;
+  LFlash: float32;
+  LPaused: bool;
+  LStatus: string;
+begin
+  if not FileExists(CArchive) then
+    println("assets.zip is not there: run examples\\sfml\\ZipPlayer once, it packs res\\assets into it");
+    return;
+  end;
+
+  SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | FLAG_WINDOW_HIGHDPI | FLAG_WINDOW_RESIZABLE);
+  InitWindow(CScreenWidth, CScreenHeight, "PaskalCPP + raylib: assets from a zip");
+  InitAudioDevice();
+  SetTargetFPS(60);
+
+  LTexture := ZipTexture("res/assets/images/paskalcpp.png", ".png");
+  if LTexture.id = 0 then
+    println("the image did not load");
+  end;
+  SetTextureFilter(LTexture, TEXTURE_FILTER_BILINEAR);
+  LFont := ZipFont("res/assets/fonts/JetBrainsMonoRegular.ttf", 72);
+  for LIndex := 0 to 2 do
+    LSounds[LIndex] := ZipSound(SfxEntry(LIndex));
+    if LSounds[LIndex].frameCount = 0 then
+      println("sound effect {} did not load", SfxEntry(LIndex));
+    end;
+  end;
+
+  // The music's IO is read while it plays: it stays open until the music is
+  // unloaded
+  LTrack := 0;
+  LMusicIO := CreateZipFileIO(CArchive, TrackEntry(LTrack), CPassword);
+  LMusic := LoadMusicStreamIO(LMusicIO, ".ogg");
+  if LMusic.ctxData = nil then
+    println("the music did not load");
+  end;
+  PlayMusicStream(LMusic);
+  LPaused := false;
+
+  LAngle := 0.0f;
+  LFlash := 0.0f;
+  while not WindowShouldClose() do
+    UpdateMusicStream(LMusic);
+
+    if IsKeyPressed(KEY_ONE) then
+      PlaySound(LSounds[0]);
+      LFlash := 1.0f;
+    end;
+    if IsKeyPressed(KEY_TWO) then
+      PlaySound(LSounds[1]);
+      LFlash := 1.0f;
+    end;
+    if IsKeyPressed(KEY_THREE) then
+      PlaySound(LSounds[2]);
+      LFlash := 1.0f;
+    end;
+    if IsKeyPressed(KEY_SPACE) then
+      if LPaused then
+        ResumeMusicStream(LMusic);
+      else
+        PauseMusicStream(LMusic);
+      end;
+      LPaused := not LPaused;
+    end;
+    if IsKeyPressed(KEY_N) then
+      // The music stops reading before its IO closes and the next one opens
+      UnloadMusicStreamIO(LMusic);
+      IOClose(LMusicIO);
+      LTrack := 1 - LTrack;
+      LMusicIO := CreateZipFileIO(CArchive, TrackEntry(LTrack), CPassword);
+      LMusic := LoadMusicStreamIO(LMusicIO, ".ogg");
+      PlayMusicStream(LMusic);
+      LPaused := false;
+    end;
+
+    // The image sways gently; a sound effect flashes the frame
+    LAngle := 6.0f * sinf(float32(GetTime()) * 1.5f);
+    LFlash := LFlash - GetFrameTime() * 3.0f;
+    if LFlash < 0.0f then
+      LFlash := 0.0f;
+    end;
+    LScale := 0.0f;
+    if LTexture.height > 0 then
+      LScale := 260.0f / float32(LTexture.height);
+    end;
+    LWidth := float32(LTexture.width) * LScale;
+    LHeight := float32(LTexture.height) * LScale;
+
+    if LPaused then
+      LStatus := "paused";
+    else
+      LStatus := "playing";
+    end;
+
+    BeginDrawing();
+    ClearBackground(Rgb(24, 24, 32));
+    DrawRectangleLinesEx(Rect(2.0f, 2.0f, float32(CScreenWidth) - 4.0f, float32(CScreenHeight) - 4.0f),
+      2.0f + (6.0f * LFlash), Rgb(80 + int32(150.0f * LFlash), 120, 200));
+    DrawTexturePro(LTexture, Rect(0.0f, 0.0f, float32(LTexture.width), float32(LTexture.height)),
+      Rect(400.0f, 190.0f, LWidth, LHeight), V2(LWidth / 2.0f, LHeight / 2.0f), LAngle, WHITE);
+    DrawTextEx(LFont, TextFormat("%s   %s   %.1f / %.1f s", TrackEntry(LTrack).c_str(), LStatus.c_str(),
+      GetMusicTimePlayed(LMusic), GetMusicTimeLength(LMusic)), V2(16.0f, 352.0f), 20.0f, 1.0f, Rgb(230, 230, 230));
+    DrawTextEx(LFont, "1 / 2 / 3 sound effect   Space pause / resume   N next track   Escape quit",
+      V2(16.0f, 390.0f), 16.0f, 1.0f, Rgb(160, 200, 160));
+    EndDrawing();
+  end;
+
+  UnloadMusicStreamIO(LMusic);
+  IOClose(LMusicIO);
+  for LIndex := 0 to 2 do
+    UnloadSound(LSounds[LIndex]);
+  end;
+  UnloadFont(LFont);
+  UnloadTexture(LTexture);
+  CloseAudioDevice();
+  CloseWindow();
+end;
+
+begin
+  Run();
+end.

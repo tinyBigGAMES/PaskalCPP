@@ -1,0 +1,1978 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  raylib_ext.pcpp - the raylib_ext unit: `import raylib_ext;` gives raylib's
+  file loaders an IO form.
+
+  Every raylib routine that loads data from a file name has a form taking a
+  CustomIO IO in its place, `<Name>IO(...)`: pass the IO CreateZipFileIO
+  gives and raylib loads from a zip, pass any IO and it loads from that.
+
+  The IO forms run through the HookIO hooks: each registers the IO with
+  HookIO for the call (RegisterIO), hands raylib's own file-name form the
+  path `io://<n>/file<type>`, and unregisters it when raylib returns. raylib
+  opens and reads that path with its own fopen / fread / fseek / ftell, which
+  the hooks give the IO, so the result is the file-name form's for a file of
+  the same bytes, read the way raylib reads files (text mode on Windows for
+  LoadFileText included), and is unloaded the same way (UnloadFileData,
+  UnloadFileText, UnloadImage, ...). The extension is what raylib picks a
+  decoder by. The IO is read from its start; it stays the caller's: these
+  routines never close it.
+
+  A music stream (LoadMusicStreamIO) is read while it plays, so its IO stays
+  registered until UnloadMusicStreamIO. The loaders that read files beside
+  the one named (LoadModelIO, LoadMaterialsIO, LoadModelAnimationsIO: a
+  glTF's .bin, an OBJ's .mtl, textures) take an IOSource and a path in it:
+  the source is registered for the call (RegisterIOSource) and raylib finds
+  every sibling in it by its path, through the same hooks.
+
+  An IO that cannot be registered (nil, out of memory) is handed to raylib
+  as a path no prefix answers (`io://0/file<type>`): raylib gives what it
+  gives for a missing file (nil, size 0, an empty image, ...) with its own
+  warning.
+===============================================================================*/
+
+module unit raylib_ext;
+
+import
+  raylib,
+  CustomIO,
+  HookIO,
+  HookABI,
+  pl_mpeg,
+  Math,
+  ResData;
+
+// Private: the file-type check, this unit's own translation unit. Helpers
+// are named apart from the exported names.
+cpp source;
+
+#include <algorithm>
+#include <chrono>
+#include <climits>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <deque>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+#include "rlgl.h"
+#if !defined(_WIN32)
+#include <dlfcn.h>
+#endif
+
+// HookIO.pcpp: unsets HookIO's path source only while it is still ASource
+namespace pcpp_hookio_internal {
+bool ResetPathSourceIf(const ::pcpp_m_CustomIO::IOSource ASource) noexcept;
+}
+
+namespace {
+
+// The IOSource SetRaylibIOSource last made HookIO's path source (nil: none).
+// SetRaylibIOSource is one setting for the program, not for several threads
+// at once (as raylib's callbacks), so it needs no lock.
+::pcpp_m_CustomIO::IOSource& RaylibExtDoPathSource()
+{
+  static ::pcpp_m_CustomIO::IOSource LSource = nullptr;
+  return LSource;
+}
+
+// Records ASource as the path source SetRaylibIOSource set
+void RaylibExtDoRememberPathSource(const ::pcpp_m_CustomIO::IOSource ASource)
+{
+  RaylibExtDoPathSource() = ASource;
+}
+
+// Unsets HookIO's path source when it is still the one SetRaylibIOSource
+// set; a path source the program set since (SetIOPathSource) stays
+void RaylibExtDoForgetPathSource()
+{
+  if (RaylibExtDoPathSource() != nullptr)
+    ::pcpp_hookio_internal::ResetPathSourceIf(RaylibExtDoPathSource());
+  RaylibExtDoPathSource() = nullptr;
+}
+
+// The prefix of the IOSource SetRaylibIOSource made raylib's file system
+// ("" when none), under its own lock. The lock is held only to read or swap
+// the text, never while a file is opened (the hooks may take their own).
+std::mutex& RaylibExtDoSourceLock()
+{
+  static std::mutex LLock;
+  return LLock;
+}
+
+std::string& RaylibExtDoSourcePrefix()
+{
+  static std::string LPrefix;
+  return LPrefix;
+}
+
+// The path raylib's AFileName names in the current source: an io:// path
+// as it is (an IO form's own; after any leading "./" or ".\", which raylib
+// writes before a folder with no root, as HookIO reads it), any other as
+// `<prefix>/<name>` with '\' turned to '/' and a leading "./" or '/'
+// dropped (a source's paths are relative). "" when out of memory.
+std::string RaylibExtDoSourcePath(const char* AFileName)
+{
+  try
+  {
+    std::string LName((AFileName != nullptr) ? AFileName : "");
+    std::string LPrefix;
+    std::size_t LSkip = 0;
+    {
+      std::lock_guard<std::mutex> LGuard(RaylibExtDoSourceLock());
+      LPrefix = RaylibExtDoSourcePrefix();
+    }
+    if (LPrefix.empty())
+      return LName;
+    // An IO form's own path, behind the current-folder steps raylib adds
+    while ((LName.size() >= LSkip + 2) && (LName[LSkip] == '.') &&
+      ((LName[LSkip + 1] == '/') || (LName[LSkip + 1] == '\\')))
+      LSkip += 2;
+    if (LName.compare(LSkip, 5, "io://") == 0)
+      return LName;
+    for (char& LChar : LName)
+    {
+      if (LChar == '\\')
+        LChar = '/';
+    }
+    for (;;)
+    {
+      if (LName.rfind("./", 0) == 0)
+        LName.erase(0, 2);
+      else if ((!LName.empty()) && (LName[0] == '/'))
+        LName.erase(0, 1);
+      else
+        break;
+    }
+    return LPrefix + "/" + LName;
+  }
+  catch (...)
+  {
+    return std::string();
+  }
+}
+
+// The whole file at APath, opened with AMode, in memory from raylib's
+// allocator (UnloadFileData / UnloadFileText free it) with AExtra zero
+// bytes after it. nullptr (ASize 0) when it cannot be opened or read, is
+// empty (raylib's loaders give nil for an empty file), or holds more than an
+// int counts.
+unsigned char* RaylibExtDoReadFile(const char* APath, const char* AMode, const int AExtra, int& ASize)
+{
+  std::FILE* LFile;
+  unsigned char* LData = nullptr;
+  std::size_t LCapacity = 0;
+  std::size_t LCount = 0;
+  bool LFailed = false;
+
+  ASize = 0;
+  LFile = std::fopen(APath, AMode);
+  if (LFile == nullptr)
+    return nullptr;
+  for (;;)
+  {
+    // Room for one more byte past the count and the extra zero bytes
+    if ((LCount + static_cast<std::size_t>(AExtra) + 1) > LCapacity)
+    {
+      const std::size_t LGrow = (LCapacity > 0) ? (LCapacity * 2) : 65536;
+      if (LGrow > static_cast<std::size_t>(INT_MAX))
+      {
+        LFailed = true;
+        break;
+      }
+      unsigned char* LGrown = static_cast<unsigned char*>(
+        MemRealloc(LData, static_cast<unsigned int>(LGrow)));
+      if (LGrown == nullptr)
+      {
+        LFailed = true;
+        break;
+      }
+      LData = LGrown;
+      LCapacity = LGrow;
+    }
+    const std::size_t LWant = LCapacity - LCount - static_cast<std::size_t>(AExtra);
+    const std::size_t LGot = std::fread(LData + LCount, 1, LWant, LFile);
+    LCount += LGot;
+    if (LGot < LWant)
+    {
+      LFailed = std::ferror(LFile) != 0;
+      break;
+    }
+  }
+  std::fclose(LFile);
+  if (LFailed || (LCount == 0))
+  {
+    MemFree(LData);
+    return nullptr;
+  }
+  std::memset(LData + LCount, 0, static_cast<std::size_t>(AExtra));
+  ASize = static_cast<int>(LCount);
+  return LData;
+}
+
+// raylib's file callbacks while a source is set: each opens the source's
+// path through the hooks, as raylib's own file functions would open it
+unsigned char* RaylibExtDoLoadData(const char* AFileName, int* ADataSize)
+{
+  int LSize = 0;
+  const std::string LPath = RaylibExtDoSourcePath(AFileName);
+  unsigned char* LData = RaylibExtDoReadFile(LPath.c_str(), "rb", 0, LSize);
+
+  if (LData == nullptr)
+    TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to load file from the IO source", AFileName);
+  if (ADataSize != nullptr)
+    *ADataSize = LSize;
+  return LData;
+}
+
+char* RaylibExtDoLoadText(const char* AFileName)
+{
+  int LSize = 0;
+  const std::string LPath = RaylibExtDoSourcePath(AFileName);
+  // Text mode, as raylib's LoadFileText opens a file
+  char* LText = reinterpret_cast<char*>(RaylibExtDoReadFile(LPath.c_str(), "rt", 1, LSize));
+
+  if (LText == nullptr)
+    TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to load text file from the IO source", AFileName);
+  return LText;
+}
+
+bool RaylibExtDoSaveData(const char* AFileName, const void* AData, int ADataSize)
+{
+  const std::string LPath = RaylibExtDoSourcePath(AFileName);
+  std::FILE* LFile = std::fopen(LPath.c_str(), "wb");
+  std::size_t LWritten = 0;
+
+  if (LFile == nullptr)
+  {
+    TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to save file to the IO source", AFileName);
+    return false;
+  }
+  if ((AData != nullptr) && (ADataSize > 0))
+    LWritten = std::fwrite(AData, 1, static_cast<std::size_t>(ADataSize), LFile);
+  const bool LClosed = std::fclose(LFile) == 0;
+  return LClosed && (LWritten == static_cast<std::size_t>((ADataSize > 0) ? ADataSize : 0));
+}
+
+bool RaylibExtDoSaveText(const char* AFileName, const char* AText)
+{
+  const std::string LPath = RaylibExtDoSourcePath(AFileName);
+  // Text mode, as raylib's SaveFileText opens a file
+  std::FILE* LFile = std::fopen(LPath.c_str(), "wt");
+  bool LOk;
+
+  if (LFile == nullptr)
+  {
+    TraceLog(LOG_WARNING, "FILEIO: [%s] Failed to save text file to the IO source", AFileName);
+    return false;
+  }
+  LOk = (AText == nullptr) || (std::fputs(AText, LFile) >= 0);
+  if (std::fclose(LFile) != 0)
+    LOk = false;
+  return LOk;
+}
+
+// Makes APrefix ("" for none) the current source and points raylib's four
+// file callbacks at it (none: raylib's own file functions); returns the
+// prefix it replaces, for the caller to unregister
+std::string RaylibExtDoInstallSource(std::string APrefix)
+{
+  const bool LSet = !APrefix.empty();
+
+  {
+    std::lock_guard<std::mutex> LGuard(RaylibExtDoSourceLock());
+    std::swap(APrefix, RaylibExtDoSourcePrefix());
+  }
+  SetLoadFileDataCallback(LSet ? RaylibExtDoLoadData : nullptr);
+  SetSaveFileDataCallback(LSet ? RaylibExtDoSaveData : nullptr);
+  SetLoadFileTextCallback(LSet ? RaylibExtDoLoadText : nullptr);
+  SetSaveFileTextCallback(LSet ? RaylibExtDoSaveText : nullptr);
+  return APrefix;
+}
+
+// The prefix each music stream from LoadMusicStreamIO keeps registered
+// until UnloadMusicStreamIO, by the stream's ctxData (unique while it
+// plays). Function-local statics, under one lock.
+std::mutex& RaylibExtDoMusicLock()
+{
+  static std::mutex LLock;
+  return LLock;
+}
+
+std::unordered_map<const void*, std::string>& RaylibExtDoMusicPrefixes()
+{
+  static std::unordered_map<const void*, std::string> LPrefixes;
+  return LPrefixes;
+}
+
+// Keeps APrefix for the stream AKey; false when out of memory
+bool RaylibExtDoKeepMusic(const void* AKey, const std::string& APrefix)
+{
+  try
+  {
+    std::lock_guard<std::mutex> LGuard(RaylibExtDoMusicLock());
+    RaylibExtDoMusicPrefixes()[AKey] = APrefix;
+    return true;
+  }
+  catch (...)
+  {
+    return false;
+  }
+}
+
+// Takes (removes) the prefix kept for the stream AKey; "" when none is
+std::string RaylibExtDoTakeMusic(const void* AKey)
+{
+  std::string LPrefix;
+
+  try
+  {
+    std::lock_guard<std::mutex> LGuard(RaylibExtDoMusicLock());
+    const auto LFound = RaylibExtDoMusicPrefixes().find(AKey);
+    if (LFound != RaylibExtDoMusicPrefixes().end())
+    {
+      LPrefix = LFound->second;
+      RaylibExtDoMusicPrefixes().erase(LFound);
+    }
+  }
+  catch (...)
+  {
+    LPrefix.clear();
+  }
+  return LPrefix;
+}
+
+// True when AFileType (".ttf", ".PNG", ...) is one of the ';'-separated
+// extensions in AList, letter case aside, as raylib's IsFileExtension
+// compares
+bool RaylibExtDoIsType(const char* AFileType, const char* AList)
+{
+  const char* LCursor = AList;
+
+  if (AFileType == nullptr)
+    return false;
+  const std::size_t LLength = std::strlen(AFileType);
+  while (*LCursor != '\0')
+  {
+    const char* LEnd = std::strchr(LCursor, ';');
+    const std::size_t LItem = (LEnd != nullptr) ? static_cast<std::size_t>(LEnd - LCursor) : std::strlen(LCursor);
+    if (LItem == LLength)
+    {
+      bool LSame = true;
+      for (std::size_t LI = 0; LI < LLength; ++LI)
+      {
+        char LA = AFileType[LI];
+        char LB = LCursor[LI];
+        if ((LA >= 'A') && (LA <= 'Z'))
+          LA = static_cast<char>(LA - 'A' + 'a');
+        if ((LB >= 'A') && (LB <= 'Z'))
+          LB = static_cast<char>(LB - 'A' + 'a');
+        if (LA != LB)
+        {
+          LSame = false;
+          break;
+        }
+      }
+      if (LSame)
+        return true;
+    }
+    if (LEnd == nullptr)
+      break;
+    LCursor = LEnd + 1;
+  }
+  return false;
+}
+
+// The video player (CONCEPT from sfml_ext's sfx::Video::Impl, in raylib's
+// procedural form): pl_mpeg decodes an MPEG-1 video with its MP2 audio from
+// a CustomIO IO; the audio goes through a raylib AudioStream fed from
+// UpdateVideo on the caller's thread; a frame is three plane textures drawn
+// through a YCbCr -> RGB shader (pl_mpeg_player_gl.c's Rec. 601 matrix), or,
+// where the shader does not load, one RGBA texture converted on the CPU
+// (the same picture). GPU resources are made at the first frame decoded
+// with a window open, so a video can be loaded before InitWindow.
+
+// The status codes (VideoStatus's ordinals, in order)
+constexpr int CRaylibExtDoVideoStopped = 0;
+constexpr int CRaylibExtDoVideoPlaying = 1;
+constexpr int CRaylibExtDoVideoPaused = 2;
+
+// The audio stream's chunk, in sample frames, and the most the queue holds
+// (seconds of sound); two channels always (a mono track decodes as two
+// equal channels)
+constexpr int CRaylibExtDoVideoChunkFrames = 4096;
+constexpr int CRaylibExtDoVideoQueueSeconds = 2;
+constexpr int CRaylibExtDoVideoChannels = 2;
+
+// pl_mpeg_player_gl.c's fragment shader in raylib's GLSL 330 form: the Y
+// plane is texture0, Cb / Cr half its size with the same padding (so the
+// same coordinates); Rec. 601 video range; colDiffuse / fragColor keep a
+// tint
+constexpr const char* CRaylibExtDoVideoShader = R"(#version 330
+in vec2 fragTexCoord;
+in vec4 fragColor;
+uniform sampler2D texture0;
+uniform sampler2D texture_cb;
+uniform sampler2D texture_cr;
+uniform vec4 colDiffuse;
+out vec4 finalColor;
+const mat4 rec601 = mat4(
+    1.16438,  0.00000,  1.59603, -0.87079,
+    1.16438, -0.39176, -0.81297,  0.52959,
+    1.16438,  2.01723,  0.00000, -1.08139,
+    0.0,      0.0,      0.0,      1.0);
+void main()
+{
+    float y = texture(texture0, fragTexCoord).r;
+    float cb = texture(texture_cb, fragTexCoord).r;
+    float cr = texture(texture_cr, fragTexCoord).r;
+    finalColor = vec4(y, cb, cr, 1.0) * rec601 * colDiffuse * fragColor;
+}
+)";
+
+struct RaylibExtDoVideo
+{
+  plm_t* Plm = nullptr;
+  // pl_mpeg keeps the stream's address: a member of this object, which
+  // never moves
+  plm_stream_t Stream{};
+  ::pcpp_m_CustomIO::IO Source = nullptr;
+  bool OwnsSource = false;
+  std::string Name;
+  int Width = 0;
+  int Height = 0;
+  int Status = CRaylibExtDoVideoStopped;
+  bool Loop = false;
+  float Volume = 1.0f;
+  void* Callback = nullptr;
+  // GPU state: decided at the first frame with a window (Decided)
+  bool Decided = false;
+  bool Gpu = false;
+  Shader YuvShader{};
+  int LocCb = -1;
+  int LocCr = -1;
+  Texture2D PlaneY{};
+  Texture2D PlaneCb{};
+  Texture2D PlaneCr{};
+  Texture2D Frame{};
+  std::vector<unsigned char> Pixels;
+  plm_frame_t* Pending = nullptr;
+  bool HasFrame = false;
+  // Audio: the video has a track (HasTrack); the stream plays it when the
+  // audio device was ready at the load (HasAudio)
+  bool HasTrack = false;
+  bool HasAudio = false;
+  int SampleRate = 0;
+  AudioStream Audio{};
+  bool AudioStarted = false;
+  std::deque<std::int16_t> Queue;
+  std::size_t QueueMax = 0;
+  std::vector<std::int16_t> Chunk;
+  std::chrono::steady_clock::time_point Last{};
+};
+
+std::size_t RaylibExtDoVideoRead(void* AUser, void* ADest, std::size_t ACount)
+{
+  const std::int64_t LGot = ::pcpp_m_CustomIO::IORead(static_cast<RaylibExtDoVideo*>(AUser)->Source,
+    ADest, static_cast<std::int64_t>(ACount));
+  return (LGot > 0) ? static_cast<std::size_t>(LGot) : 0;
+}
+
+int RaylibExtDoVideoSeek(void* AUser, std::size_t APosition)
+{
+  const std::int64_t LTarget = static_cast<std::int64_t>(APosition);
+  return (::pcpp_m_CustomIO::IOSeek(static_cast<RaylibExtDoVideo*>(AUser)->Source, LTarget,
+    ::pcpp_m_CustomIO::SeekOrigin::FromStart) == LTarget) ? 1 : 0;
+}
+
+void RaylibExtDoVideoOnFrame(plm_t* APlm, plm_frame_t* AFrame, void* AUser)
+{
+  (void)APlm;
+  static_cast<RaylibExtDoVideo*>(AUser)->Pending = AFrame;
+}
+
+void RaylibExtDoVideoOnSamples(plm_t* APlm, plm_samples_t* ASamples, void* AUser)
+{
+  RaylibExtDoVideo* LSelf = static_cast<RaylibExtDoVideo*>(AUser);
+  const std::size_t LCount = static_cast<std::size_t>(ASamples->count) * CRaylibExtDoVideoChannels;
+
+  (void)APlm;
+  if (!LSelf->HasAudio)
+    return;
+  for (std::size_t LI = 0; LI < LCount; ++LI)
+  {
+    const float LValue = std::clamp(ASamples->interleaved[LI], -1.0f, 1.0f);
+    LSelf->Queue.push_back(static_cast<std::int16_t>(std::lround(LValue * 32767.0f)));
+  }
+  // Whole sample frames dropped from the front: the queue holds pairs
+  if (LSelf->Queue.size() > LSelf->QueueMax)
+    LSelf->Queue.erase(LSelf->Queue.begin(),
+      LSelf->Queue.begin() + static_cast<std::ptrdiff_t>(LSelf->Queue.size() - LSelf->QueueMax));
+}
+
+// A grayscale texture of AWidth x AHeight (one byte a pixel), point
+// filtered: each Cb / Cr sample then covers its 2x2 luma block as in
+// plm_frame_to_rgba, so the shader draws the CPU path's picture (an RGBA
+// texture, raylib's default point filter) at every scale; bilinear chroma
+// blends across every color edge and gives a different picture
+Texture2D RaylibExtDoVideoPlane(const int AWidth, const int AHeight)
+{
+  Image LImage{};
+  Texture2D LTexture;
+
+  LImage.data = std::calloc(static_cast<std::size_t>(AWidth) * static_cast<std::size_t>(AHeight), 1);
+  if (LImage.data == nullptr)
+    return Texture2D{};
+  LImage.width = AWidth;
+  LImage.height = AHeight;
+  LImage.mipmaps = 1;
+  LImage.format = PIXELFORMAT_UNCOMPRESSED_GRAYSCALE;
+  LTexture = LoadTextureFromImage(LImage);
+  std::free(LImage.data);
+  if (LTexture.id != 0)
+    SetTextureFilter(LTexture, TEXTURE_FILTER_POINT);
+  return LTexture;
+}
+
+// One plane into its texture, made (or made again) at the plane's size
+bool RaylibExtDoVideoUpload(Texture2D& ATexture, const plm_plane_t& APlane)
+{
+  const int LWidth = static_cast<int>(APlane.width);
+  const int LHeight = static_cast<int>(APlane.height);
+
+  if ((ATexture.id == 0) || (ATexture.width != LWidth) || (ATexture.height != LHeight))
+  {
+    if (ATexture.id != 0)
+      UnloadTexture(ATexture);
+    ATexture = RaylibExtDoVideoPlane(LWidth, LHeight);
+    if (ATexture.id == 0)
+      return false;
+  }
+  UpdateTexture(ATexture, APlane.data);
+  return true;
+}
+
+// The GPU / CPU choice, once, with a window: the shader when it loads,
+// else the RGBA texture and its pixel buffer
+bool RaylibExtDoVideoDecide(RaylibExtDoVideo& AVideo)
+{
+  Image LImage{};
+
+  if (AVideo.Decided)
+    return true;
+  if (!IsWindowReady())
+    return false;
+  AVideo.YuvShader = LoadShaderFromMemory(nullptr, CRaylibExtDoVideoShader);
+  AVideo.Gpu = (AVideo.YuvShader.id != 0) && (AVideo.YuvShader.id != rlGetShaderIdDefault());
+  if (AVideo.Gpu)
+  {
+    AVideo.LocCb = GetShaderLocation(AVideo.YuvShader, "texture_cb");
+    AVideo.LocCr = GetShaderLocation(AVideo.YuvShader, "texture_cr");
+  }
+  else
+  {
+    AVideo.YuvShader = Shader{};
+    // plm_frame_to_rgba leaves the alpha bytes as they are: opaque
+    AVideo.Pixels.assign(static_cast<std::size_t>(AVideo.Width) *
+      static_cast<std::size_t>(AVideo.Height) * 4, 255);
+    LImage.data = AVideo.Pixels.data();
+    LImage.width = AVideo.Width;
+    LImage.height = AVideo.Height;
+    LImage.mipmaps = 1;
+    LImage.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
+    AVideo.Frame = LoadTextureFromImage(LImage);
+  }
+  AVideo.Decided = true;
+  return true;
+}
+
+// Back to the start: the audio stopped and emptied, no frame shown
+void RaylibExtDoVideoRewind(RaylibExtDoVideo& AVideo)
+{
+  if (AVideo.HasAudio)
+    StopAudioStream(AVideo.Audio);
+  AVideo.Queue.clear();
+  AVideo.AudioStarted = false;
+  if (AVideo.Plm != nullptr)
+    plm_rewind(AVideo.Plm);
+  AVideo.Pending = nullptr;
+  AVideo.HasFrame = false;
+}
+
+// A video over ASource (taken: closed on a failure when AOwns); nullptr when
+// it is no MPEG-1 video (no headers, no video stream, no size)
+RaylibExtDoVideo* RaylibExtDoVideoOpen(::pcpp_m_CustomIO::IO ASource, const bool AOwns,
+  const char* AName)
+{
+  RaylibExtDoVideo* LVideo;
+  std::int64_t LSize;
+  plm_t* LPlm;
+
+  if (ASource == nullptr)
+    return nullptr;
+  LSize = ::pcpp_m_CustomIO::IOSize(ASource);
+  if (LSize <= 0)
+  {
+    if (AOwns)
+      ::pcpp_m_CustomIO::IOClose(ASource);
+    return nullptr;
+  }
+  LVideo = new (std::nothrow) RaylibExtDoVideo();
+  if (LVideo == nullptr)
+  {
+    if (AOwns)
+      ::pcpp_m_CustomIO::IOClose(ASource);
+    return nullptr;
+  }
+  LVideo->Source = ASource;
+  LVideo->OwnsSource = AOwns;
+  ::pcpp_m_CustomIO::IOSeek(ASource, 0, ::pcpp_m_CustomIO::SeekOrigin::FromStart);
+  LVideo->Stream.read = &RaylibExtDoVideoRead;
+  LVideo->Stream.seek = &RaylibExtDoVideoSeek;
+  LVideo->Stream.length = static_cast<std::size_t>(LSize);
+  LVideo->Stream.user = LVideo;
+  LPlm = plm_create_with_stream(&LVideo->Stream);
+  if ((LPlm == nullptr) || (!plm_has_headers(LPlm)) || (plm_get_num_video_streams(LPlm) < 1) ||
+    (plm_get_width(LPlm) <= 0) || (plm_get_height(LPlm) <= 0))
+  {
+    if (LPlm != nullptr)
+      plm_destroy(LPlm);
+    if (AOwns)
+      ::pcpp_m_CustomIO::IOClose(ASource);
+    delete LVideo;
+    return nullptr;
+  }
+  LVideo->Plm = LPlm;
+  LVideo->Name = (AName != nullptr) ? AName : "";
+  LVideo->Width = plm_get_width(LPlm);
+  LVideo->Height = plm_get_height(LPlm);
+  LVideo->SampleRate = plm_get_samplerate(LPlm);
+  LVideo->HasTrack = (plm_get_num_audio_streams(LPlm) > 0) && (LVideo->SampleRate > 0);
+  if (LVideo->HasTrack && IsAudioDeviceReady())
+  {
+    SetAudioStreamBufferSizeDefault(CRaylibExtDoVideoChunkFrames);
+    LVideo->Audio = LoadAudioStream(static_cast<unsigned int>(LVideo->SampleRate), 16,
+      CRaylibExtDoVideoChannels);
+    SetAudioStreamBufferSizeDefault(0);
+    LVideo->HasAudio = IsAudioStreamValid(LVideo->Audio);
+  }
+  if (LVideo->HasAudio)
+  {
+    LVideo->QueueMax = static_cast<std::size_t>(LVideo->SampleRate) * CRaylibExtDoVideoChannels *
+      CRaylibExtDoVideoQueueSeconds;
+    SetAudioStreamVolume(LVideo->Audio, ::pcpp_m_Math::PerceivedVolume(LVideo->Volume, 1.0f));
+    plm_set_audio_enabled(LPlm, 1);
+    plm_set_audio_stream(LPlm, 0);
+    plm_set_audio_decode_callback(LPlm, &RaylibExtDoVideoOnSamples, LVideo);
+    // Two MP2 frames ahead of the video, as sfml_ext's player decodes them
+    plm_set_audio_lead_time(LPlm,
+      static_cast<double>(PLM_AUDIO_SAMPLES_PER_FRAME) * 2.0 / LVideo->SampleRate);
+  }
+  else
+    plm_set_audio_enabled(LPlm, 0);
+  plm_set_video_decode_callback(LPlm, &RaylibExtDoVideoOnFrame, LVideo);
+  plm_set_loop(LPlm, 0);
+  return LVideo;
+}
+
+void RaylibExtDoVideoClose(RaylibExtDoVideo* AVideo)
+{
+  if (AVideo == nullptr)
+    return;
+  RaylibExtDoVideoRewind(*AVideo);
+  if (AVideo->HasAudio)
+    UnloadAudioStream(AVideo->Audio);
+  if (AVideo->Plm != nullptr)
+    plm_destroy(AVideo->Plm);
+  if (AVideo->Gpu)
+    UnloadShader(AVideo->YuvShader);
+  if (AVideo->PlaneY.id != 0)
+    UnloadTexture(AVideo->PlaneY);
+  if (AVideo->PlaneCb.id != 0)
+    UnloadTexture(AVideo->PlaneCb);
+  if (AVideo->PlaneCr.id != 0)
+    UnloadTexture(AVideo->PlaneCr);
+  if (AVideo->Frame.id != 0)
+    UnloadTexture(AVideo->Frame);
+  if (AVideo->OwnsSource)
+    ::pcpp_m_CustomIO::IOClose(AVideo->Source);
+  delete AVideo;
+}
+
+// The status changes: each returns the new status when it changed, else -1
+int RaylibExtDoVideoPlay(RaylibExtDoVideo* AVideo)
+{
+  if ((AVideo == nullptr) || (AVideo->Status == CRaylibExtDoVideoPlaying))
+    return -1;
+  // The audio resumes where it paused; from the start, once a decode gave
+  // its first samples (no silence ahead of the picture)
+  if (AVideo->HasAudio && AVideo->AudioStarted)
+    ResumeAudioStream(AVideo->Audio);
+  AVideo->Status = CRaylibExtDoVideoPlaying;
+  AVideo->Last = std::chrono::steady_clock::now();
+  return AVideo->Status;
+}
+
+int RaylibExtDoVideoPause(RaylibExtDoVideo* AVideo)
+{
+  if ((AVideo == nullptr) || (AVideo->Status != CRaylibExtDoVideoPlaying))
+    return -1;
+  if (AVideo->HasAudio && AVideo->AudioStarted)
+    PauseAudioStream(AVideo->Audio);
+  AVideo->Status = CRaylibExtDoVideoPaused;
+  return AVideo->Status;
+}
+
+int RaylibExtDoVideoStop(RaylibExtDoVideo* AVideo)
+{
+  if ((AVideo == nullptr) || (AVideo->Status == CRaylibExtDoVideoStopped))
+    return -1;
+  RaylibExtDoVideoRewind(*AVideo);
+  AVideo->Status = CRaylibExtDoVideoStopped;
+  return AVideo->Status;
+}
+
+// The audio stream fed: every processed buffer gets the next chunk of the
+// queue, silence when it has none (an underrun keeps the stream going)
+void RaylibExtDoVideoFeed(RaylibExtDoVideo& AVideo)
+{
+  const std::size_t LWant = static_cast<std::size_t>(CRaylibExtDoVideoChunkFrames) *
+    CRaylibExtDoVideoChannels;
+  std::size_t LTake;
+
+  if ((!AVideo.HasAudio) || (!AVideo.AudioStarted))
+    return;
+  while (IsAudioStreamProcessed(AVideo.Audio))
+  {
+    LTake = std::min(AVideo.Queue.size(), LWant);
+    AVideo.Chunk.assign(LWant, 0);
+    std::copy(AVideo.Queue.begin(), AVideo.Queue.begin() + static_cast<std::ptrdiff_t>(LTake),
+      AVideo.Chunk.begin());
+    AVideo.Queue.erase(AVideo.Queue.begin(), AVideo.Queue.begin() + static_cast<std::ptrdiff_t>(LTake));
+    UpdateAudioStream(AVideo.Audio, AVideo.Chunk.data(), CRaylibExtDoVideoChunkFrames);
+  }
+}
+
+// One update of ASeconds (< 0: the real time since the last update): the
+// decode, the last frame's upload (a window open), the audio's start and
+// feed, and the end of a video that does not loop (back to its start,
+// stopped). Returns the new status when the end changed it, else -1.
+int RaylibExtDoVideoUpdate(RaylibExtDoVideo* AVideo, const double ASeconds)
+{
+  const std::chrono::steady_clock::time_point LNow = std::chrono::steady_clock::now();
+  double LStep = ASeconds;
+
+  if ((AVideo == nullptr) || (AVideo->Status != CRaylibExtDoVideoPlaying))
+    return -1;
+  if (LStep < 0.0)
+    LStep = std::chrono::duration<double>(LNow - AVideo->Last).count();
+  AVideo->Last = LNow;
+  AVideo->Pending = nullptr;
+  if (LStep > 0.0)
+    plm_decode(AVideo->Plm, LStep);
+  if ((AVideo->Pending != nullptr) && RaylibExtDoVideoDecide(*AVideo))
+  {
+    if (AVideo->Gpu)
+    {
+      if (RaylibExtDoVideoUpload(AVideo->PlaneY, AVideo->Pending->y) &&
+        RaylibExtDoVideoUpload(AVideo->PlaneCb, AVideo->Pending->cb) &&
+        RaylibExtDoVideoUpload(AVideo->PlaneCr, AVideo->Pending->cr))
+        AVideo->HasFrame = true;
+    }
+    else if (AVideo->Frame.id != 0)
+    {
+      plm_frame_to_rgba(AVideo->Pending, AVideo->Pixels.data(), AVideo->Width * 4);
+      UpdateTexture(AVideo->Frame, AVideo->Pixels.data());
+      AVideo->HasFrame = true;
+    }
+  }
+  AVideo->Pending = nullptr;
+  if (AVideo->HasAudio && (!AVideo->AudioStarted) && (!AVideo->Queue.empty()))
+  {
+    AVideo->AudioStarted = true;
+    RaylibExtDoVideoFeed(*AVideo);
+    PlayAudioStream(AVideo->Audio);
+  }
+  else
+    RaylibExtDoVideoFeed(*AVideo);
+  // pl_mpeg starts a looping video again itself; one that does not loop
+  // stops at its start
+  if (plm_has_ended(AVideo->Plm))
+  {
+    RaylibExtDoVideoRewind(*AVideo);
+    AVideo->Status = CRaylibExtDoVideoStopped;
+    return AVideo->Status;
+  }
+  return -1;
+}
+
+void RaylibExtDoVideoSetLooping(RaylibExtDoVideo* AVideo, const bool ALoop)
+{
+  if (AVideo == nullptr)
+    return;
+  AVideo->Loop = ALoop;
+  plm_set_loop(AVideo->Plm, ALoop ? 1 : 0);
+}
+
+void RaylibExtDoVideoSetVolume(RaylibExtDoVideo* AVideo, const float AVolume)
+{
+  if (AVideo == nullptr)
+    return;
+  // Kept as set (0 .. 1; NaN as 0); the stream gets the linear volume it
+  // stands for (Math's PerceivedVolume)
+  AVideo->Volume = (AVolume > 0.0f) ? std::min(AVolume, 1.0f) : 0.0f;
+  if (AVideo->HasAudio)
+    SetAudioStreamVolume(AVideo->Audio, ::pcpp_m_Math::PerceivedVolume(AVideo->Volume, 1.0f));
+}
+
+// The current frame at ADest (ASource in the frame's pixels), as
+// DrawTexturePro draws; nothing before the first frame
+void RaylibExtDoVideoDraw(RaylibExtDoVideo* AVideo, const Rectangle ASource, const Rectangle ADest,
+  const Vector2 AOrigin, const float ARotation, const Color ATint)
+{
+  if ((AVideo == nullptr) || (!AVideo->HasFrame))
+    return;
+  if (AVideo->Gpu)
+  {
+    BeginShaderMode(AVideo->YuvShader);
+    SetShaderValueTexture(AVideo->YuvShader, AVideo->LocCb, AVideo->PlaneCb);
+    SetShaderValueTexture(AVideo->YuvShader, AVideo->LocCr, AVideo->PlaneCr);
+    DrawTexturePro(AVideo->PlaneY, ASource, ADest, AOrigin, ARotation, ATint);
+    EndShaderMode();
+  }
+  else
+    DrawTexturePro(AVideo->Frame, ASource, ADest, AOrigin, ARotation, ATint);
+}
+
+double RaylibExtDoVideoDuration(RaylibExtDoVideo* AVideo)
+{
+  double LSeconds;
+  double LRate;
+
+  if (AVideo == nullptr)
+    return 0.0;
+  // pl_mpeg's duration spans the first frame's start to the last frame's
+  // start: the video plays one frame longer
+  LSeconds = plm_get_duration(AVideo->Plm);
+  LRate = plm_get_framerate(AVideo->Plm);
+  if (LRate > 0.0)
+    LSeconds += 1.0 / LRate;
+  return LSeconds;
+}
+
+// The player behind a Video's ctxData, for the routines below (a nil
+// ctxData is no player: each answers as for no video)
+RaylibExtDoVideo* RaylibExtDoV(void* AContext)
+{
+  return static_cast<RaylibExtDoVideo*>(AContext);
+}
+
+void* RaylibExtDoVOpen(::pcpp_m_CustomIO::IO ASource, const bool AOwns, const char* AName)
+{
+  return RaylibExtDoVideoOpen(ASource, AOwns, AName);
+}
+
+void RaylibExtDoVClose(void* AContext)
+{
+  RaylibExtDoVideoClose(RaylibExtDoV(AContext));
+}
+
+int RaylibExtDoVPlay(void* AContext)
+{
+  return RaylibExtDoVideoPlay(RaylibExtDoV(AContext));
+}
+
+int RaylibExtDoVPause(void* AContext)
+{
+  return RaylibExtDoVideoPause(RaylibExtDoV(AContext));
+}
+
+int RaylibExtDoVStop(void* AContext)
+{
+  return RaylibExtDoVideoStop(RaylibExtDoV(AContext));
+}
+
+int RaylibExtDoVUpdate(void* AContext, const double ASeconds)
+{
+  return RaylibExtDoVideoUpdate(RaylibExtDoV(AContext), ASeconds);
+}
+
+int RaylibExtDoVWidth(void* AContext)
+{
+  return (AContext != nullptr) ? RaylibExtDoV(AContext)->Width : 0;
+}
+
+int RaylibExtDoVHeight(void* AContext)
+{
+  return (AContext != nullptr) ? RaylibExtDoV(AContext)->Height : 0;
+}
+
+int RaylibExtDoVStatus(void* AContext)
+{
+  return (AContext != nullptr) ? RaylibExtDoV(AContext)->Status : CRaylibExtDoVideoStopped;
+}
+
+const char* RaylibExtDoVName(void* AContext)
+{
+  return (AContext != nullptr) ? RaylibExtDoV(AContext)->Name.c_str() : "";
+}
+
+void* RaylibExtDoVCallback(void* AContext)
+{
+  return (AContext != nullptr) ? RaylibExtDoV(AContext)->Callback : nullptr;
+}
+
+void RaylibExtDoVSetCallback(void* AContext, void* ACallback)
+{
+  if (AContext != nullptr)
+    RaylibExtDoV(AContext)->Callback = ACallback;
+}
+
+void RaylibExtDoVSetLooping(void* AContext, const bool ALoop)
+{
+  RaylibExtDoVideoSetLooping(RaylibExtDoV(AContext), ALoop);
+}
+
+bool RaylibExtDoVLooping(void* AContext)
+{
+  return (AContext != nullptr) && RaylibExtDoV(AContext)->Loop;
+}
+
+void RaylibExtDoVSetVolume(void* AContext, const float AVolume)
+{
+  RaylibExtDoVideoSetVolume(RaylibExtDoV(AContext), AVolume);
+}
+
+float RaylibExtDoVVolume(void* AContext)
+{
+  return (AContext != nullptr) ? RaylibExtDoV(AContext)->Volume : 0.0f;
+}
+
+double RaylibExtDoVFrameRate(void* AContext)
+{
+  return (AContext != nullptr) ? plm_get_framerate(RaylibExtDoV(AContext)->Plm) : 0.0;
+}
+
+double RaylibExtDoVDuration(void* AContext)
+{
+  return RaylibExtDoVideoDuration(RaylibExtDoV(AContext));
+}
+
+double RaylibExtDoVTime(void* AContext)
+{
+  return (AContext != nullptr) ? plm_get_time(RaylibExtDoV(AContext)->Plm) : 0.0;
+}
+
+bool RaylibExtDoVHasTrack(void* AContext)
+{
+  return (AContext != nullptr) && RaylibExtDoV(AContext)->HasTrack;
+}
+
+int RaylibExtDoVSampleRate(void* AContext)
+{
+  return RaylibExtDoVHasTrack(AContext) ? RaylibExtDoV(AContext)->SampleRate : 0;
+}
+
+bool RaylibExtDoVGpu(void* AContext)
+{
+  return (AContext != nullptr) && RaylibExtDoV(AContext)->Gpu;
+}
+
+void RaylibExtDoVDraw(void* AContext, const Rectangle ASource, const Rectangle ADest,
+  const Vector2 AOrigin, const float ARotation, const Color ATint)
+{
+  RaylibExtDoVideoDraw(RaylibExtDoV(AContext), ASource, ADest, AOrigin, ARotation, ATint);
+}
+
+// The whole frame at its own size, its top left at (APosX, APosY)
+void RaylibExtDoVDrawAt(void* AContext, const int APosX, const int APosY, const Color ATint)
+{
+  const float LWidth = static_cast<float>(RaylibExtDoVWidth(AContext));
+  const float LHeight = static_cast<float>(RaylibExtDoVHeight(AContext));
+
+  RaylibExtDoVideoDraw(RaylibExtDoV(AContext), Rectangle{0.0f, 0.0f, LWidth, LHeight},
+    Rectangle{static_cast<float>(APosX), static_cast<float>(APosY), LWidth, LHeight},
+    Vector2{0.0f, 0.0f}, 0.0f, ATint);
+}
+
+#if !defined(_WIN32)
+// The data entry @exeicon builds into a Linux exe (PaskalCPP's reserved
+// key, sfml_ext's layout): width and height as uint32 little endian, then
+// width x height RGBA pixels, rows top down
+constexpr const char* CRaylibExtDoExeIconKey = "pcpp/exeicon";
+constexpr std::int64_t CRaylibExtDoExeIconHeader = 8;
+
+std::uint32_t RaylibExtDoIconWord(const std::uint8_t* AData)
+{
+  return static_cast<std::uint32_t>(AData[0]) | (static_cast<std::uint32_t>(AData[1]) << 8) |
+    (static_cast<std::uint32_t>(AData[2]) << 16) | (static_cast<std::uint32_t>(AData[3]) << 24);
+}
+
+// libX11's names the icon needs, as GLFW loads them (dlsym on its own
+// libX11 handle); Xlib.h is not included (its Font is raylib's too)
+using RaylibExtDoXInternAtom = unsigned long (*)(void*, const char*, int);
+using RaylibExtDoXChangeProperty = int (*)(void*, unsigned long, unsigned long, unsigned long, int,
+  int, const unsigned char*, int);
+using RaylibExtDoXFlush = int (*)(void*);
+using RaylibExtDoXCreateWindow = unsigned long (*)(void*, unsigned long, int, int, unsigned int,
+  unsigned int, unsigned int, int, unsigned int, void*, unsigned long, void*);
+
+struct RaylibExtDoX11
+{
+  void* Library = nullptr;
+  RaylibExtDoXCreateWindow CreateWindow = nullptr;
+};
+
+RaylibExtDoX11& RaylibExtDoX11State()
+{
+  static RaylibExtDoX11* LState = new RaylibExtDoX11();
+  return *LState;
+}
+
+// _NET_WM_ICON of AWindow from the pcpp/exeicon entry (none built in, or an
+// entry too short for its own size: nothing): width, height, then one ARGB
+// value per pixel, format 32 = a long each (GLFW's glfwSetWindowIcon, which
+// raylib's SetWindowIcon calls, writes the same property: a program's own
+// later wins)
+void RaylibExtDoSetX11Icon(void* ADisplay, const unsigned long AWindow)
+{
+  // The real dlsym (this unit defines the program's dlsym, below)
+  using TDlsym = void* (*)(void*, const char*);
+  static const TDlsym LDlsym = reinterpret_cast<TDlsym>(dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.2.5"));
+  const ::pcpp_m_ResData::ResDataEntry LEntry = ::pcpp_m_ResData::FindResData(CRaylibExtDoExeIconKey);
+  RaylibExtDoX11& LState = RaylibExtDoX11State();
+  std::uint32_t LWidth;
+  std::uint32_t LHeight;
+  std::uint64_t LPixels;
+  std::vector<unsigned long> LData;
+
+  if ((LEntry.Data == nullptr) || (LEntry.Size < CRaylibExtDoExeIconHeader) || (LDlsym == nullptr))
+    return;
+  LWidth = RaylibExtDoIconWord(LEntry.Data);
+  LHeight = RaylibExtDoIconWord(LEntry.Data + 4);
+  if ((LWidth == 0) || (LHeight == 0))
+    return;
+  // The pixels the entry holds, counted without overflow
+  LPixels = static_cast<std::uint64_t>(LEntry.Size - CRaylibExtDoExeIconHeader) / 4;
+  if (LWidth > (LPixels / LHeight))
+    return;
+  const auto LIntern = reinterpret_cast<RaylibExtDoXInternAtom>(LDlsym(LState.Library, "XInternAtom"));
+  const auto LChange = reinterpret_cast<RaylibExtDoXChangeProperty>(
+    LDlsym(LState.Library, "XChangeProperty"));
+  const auto LFlush = reinterpret_cast<RaylibExtDoXFlush>(LDlsym(LState.Library, "XFlush"));
+  if ((LIntern == nullptr) || (LChange == nullptr) || (LFlush == nullptr))
+    return;
+  try
+  {
+    const std::size_t LCount = static_cast<std::size_t>(LWidth) * LHeight;
+    const std::uint8_t* LRgba = LEntry.Data + CRaylibExtDoExeIconHeader;
+    LData.assign(2 + LCount, 0);
+    LData[0] = LWidth;
+    LData[1] = LHeight;
+    for (std::size_t LI = 0; LI < LCount; ++LI)
+    {
+      const std::uint8_t* LPixel = LRgba + LI * 4;
+      LData[2 + LI] = (static_cast<unsigned long>(LPixel[3]) << 24) |
+        (static_cast<unsigned long>(LPixel[0]) << 16) | (static_cast<unsigned long>(LPixel[1]) << 8) |
+        static_cast<unsigned long>(LPixel[2]);
+    }
+  }
+  catch (...)
+  {
+    return;
+  }
+  // CARDINAL is a predefined atom; 0 = PropModeReplace
+  LChange(ADisplay, AWindow, LIntern(ADisplay, "_NET_WM_ICON", 0), LIntern(ADisplay, "CARDINAL", 0),
+    32, 0, reinterpret_cast<const unsigned char*>(LData.data()), static_cast<int>(LData.size()));
+  LFlush(ADisplay);
+}
+
+// XCreateWindow as GLFW gets it from this unit's dlsym: the real one, then
+// the program's icon on every window it makes (GLFW's helper window too,
+// which nothing shows)
+unsigned long RaylibExtDoXCreateWindowHook(void* ADisplay, unsigned long AParent, int AX, int AY,
+  unsigned int AWidth, unsigned int AHeight, unsigned int ABorder, int ADepth, unsigned int AClass,
+  void* AVisual, unsigned long AMask, void* AAttributes)
+{
+  const RaylibExtDoXCreateWindow LReal = RaylibExtDoX11State().CreateWindow;
+  unsigned long LWindow;
+
+  if (LReal == nullptr)
+    return 0;
+  LWindow = LReal(ADisplay, AParent, AX, AY, AWidth, AHeight, ABorder, ADepth, AClass, AVisual,
+    AMask, AAttributes);
+  if (LWindow != 0)
+    RaylibExtDoSetX11Icon(ADisplay, LWindow);
+  return LWindow;
+}
+#endif
+
+} // namespace
+
+// The program icon on raylib's window, with no call of the program's own
+// (sfml_ext's setProgramIcon CONCEPT): the icon @exeicon gives, set when
+// raylib's GLFW makes its window; a program's own SetWindowIcon later
+// wins; none stamped / built in: the platform's default.
+#if defined(_WIN32)
+// GLFW makes its window with user32's CreateWindowExW: the real one, then
+// a top-level window gets the icon @exeicon stamps (resource MAINICON, big
+// and small). windows.h is not included (its names are raylib's too): the
+// few user32 / kernel32 names are declared here.
+extern "C" __declspec(dllimport) void* LoadIconW(void* AInstance, const wchar_t* AName);
+extern "C" __declspec(dllimport) void* GetModuleHandleW(const wchar_t* AName);
+extern "C" __declspec(dllimport) std::intptr_t SendMessageW(void* AWindow, unsigned int AMessage,
+  std::uintptr_t AWParam, std::intptr_t ALParam);
+
+namespace {
+void* GRaylibExtDoRealCreateWindowExW = nullptr;
+}
+
+extern "C" void* CreateWindowExW(unsigned long AExStyle, const wchar_t* AClass, const wchar_t* AName,
+  unsigned long AStyle, int AX, int AY, int AWidth, int AHeight, void* AParent, void* AMenu,
+  void* AInstance, void* AParam)
+{
+  // user32's WS_CHILD, WM_SETICON, ICON_SMALL / ICON_BIG
+  constexpr unsigned long CWsChild = 0x40000000UL;
+  constexpr unsigned int CWmSetIcon = 0x0080;
+  using TReal = void* (*)(unsigned long, const wchar_t*, const wchar_t*, unsigned long, int, int, int,
+    int, void*, void*, void*, void*);
+  const TReal LReal = reinterpret_cast<TReal>(::pcpp_m_HookABI::HookReal(
+    GRaylibExtDoRealCreateWindowExW, "user32.dll", "CreateWindowExW"));
+  void* LWindow;
+  void* LIcon;
+
+  if (LReal == nullptr)
+    return nullptr;
+  LWindow = LReal(AExStyle, AClass, AName, AStyle, AX, AY, AWidth, AHeight, AParent, AMenu,
+    AInstance, AParam);
+  if ((LWindow != nullptr) && (AParent == nullptr) && ((AStyle & CWsChild) == 0))
+  {
+    LIcon = LoadIconW(GetModuleHandleW(nullptr), L"MAINICON");
+    if (LIcon != nullptr)
+    {
+      SendMessageW(LWindow, CWmSetIcon, 1, reinterpret_cast<std::intptr_t>(LIcon));
+      SendMessageW(LWindow, CWmSetIcon, 0, reinterpret_cast<std::intptr_t>(LIcon));
+    }
+  }
+  return LWindow;
+}
+HOOKABI_IMPORT_SLOT(CreateWindowExW);
+#else
+// GLFW loads libX11 at run time (dlopen) and takes its names with dlsym:
+// the program's dlsym (this definition) hands back the icon-setting
+// XCreateWindow for that one name and the real answer for every other;
+// the real dlsym is glibc's own, found by version (dlvsym is not this
+// name, so nothing comes back here)
+extern "C" void* dlsym(void* AHandle, const char* AName)
+{
+  using TDlsym = void* (*)(void*, const char*);
+  static const TDlsym LReal = reinterpret_cast<TDlsym>(dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.2.5"));
+  void* LFound;
+
+  if (LReal == nullptr)
+    return nullptr;
+  LFound = LReal(AHandle, AName);
+  // AName is nonnull by glibc's own dlsym declaration (which this
+  // definition takes on): a null test would be folded away, so none
+  if ((LFound != nullptr) && (std::strcmp(AName, "XCreateWindow") == 0) &&
+    (AHandle != RTLD_NEXT) && (AHandle != RTLD_DEFAULT))
+  {
+    RaylibExtDoX11& LState = RaylibExtDoX11State();
+    LState.Library = AHandle;
+    LState.CreateWindow = reinterpret_cast<RaylibExtDoXCreateWindow>(LFound);
+    return reinterpret_cast<void*>(&RaylibExtDoXCreateWindowHook);
+  }
+  return LFound;
+}
+#endif
+
+// The prefix no registration ever gives: its paths open as missing files
+const
+  CRaylibExtDoNoPrefix: string = "io://0";
+
+// AIO registered with HookIO for one call: its prefix, or the prefix no
+// registration gives when AIO cannot be registered
+routine RaylibExtDoRegister(const AIO: IO): string;
+var
+  LPrefix: string;
+begin
+  LPrefix := RegisterIO(AIO);
+  if LPrefix = "" then
+    return CRaylibExtDoNoPrefix;
+  end;
+  return LPrefix;
+end;
+
+// Ends RaylibExtDoRegister's registration
+routine RaylibExtDoUnregister(const APrefix: string);
+begin
+  if APrefix <> CRaylibExtDoNoPrefix then
+    UnregisterIO(APrefix);
+  end;
+end;
+
+// The path raylib is handed: `<prefix>/file<type>` (no type: `<prefix>/file`)
+routine RaylibExtDoPath(const APrefix: string; const AFileType: ptr to const char): string;
+begin
+  if AFileType = nil then
+    return APrefix + "/file";
+  end;
+  return APrefix + "/file" + std::string(AFileType);
+end;
+
+/// Loads an IO's bytes as LoadFileData loads a file's (raylib's own
+/// LoadFileData reads it through the hooks), in memory that UnloadFileData
+/// frees. The IO stays the caller's.
+/// @param AIO the stream (CreateZipFileIO's, CreateFileIO's, any IO)
+/// @param ADataSize the byte count; 0 on a failure
+/// @returns the bytes, or nil (with raylib's warning) when the IO is nil,
+///   empty, or cannot be read
+/// @example `LData := LoadFileDataIO(CreateZipFileIO("$P:assets.zip", "level1.bin"), LSize);`
+/// @see LoadFileTextIO
+/// @since 0.2
+exported routine LoadFileDataIO(const AIO: IO; var ADataSize: int32): ptr to uint8;
+var
+  LPrefix: string;
+  LData: ptr to uint8;
+begin
+  LPrefix := RaylibExtDoRegister(AIO);
+  LData := LoadFileData(RaylibExtDoPath(LPrefix, nil).c_str(), address of ADataSize);
+  RaylibExtDoUnregister(LPrefix);
+  return LData;
+end;
+
+/// Loads an IO's bytes as text, as LoadFileText loads a file (raylib's own
+/// LoadFileText reads it through the hooks, in text mode on Windows),
+/// '\0'-terminated, in memory that UnloadFileText frees. The IO stays the
+/// caller's.
+/// @param AIO the stream
+/// @returns the text, or nil (with raylib's warning) when the IO is nil or
+///   cannot be read
+/// @example `LText := LoadFileTextIO(CreateZipFileIO("$P:assets.zip", "intro.txt"));`
+/// @see LoadFileDataIO
+/// @since 0.2
+exported routine LoadFileTextIO(const AIO: IO): ptr to char;
+var
+  LPrefix: string;
+  LText: ptr to char;
+begin
+  LPrefix := RaylibExtDoRegister(AIO);
+  LText := LoadFileText(RaylibExtDoPath(LPrefix, nil).c_str());
+  RaylibExtDoUnregister(LPrefix);
+  return LText;
+end;
+
+/// Loads an image from an IO as LoadImage loads one from a file (raylib's
+/// own LoadImage reads it through the hooks); unload with UnloadImage.
+/// @param AIO the stream
+/// @param AFileType the file type, its extension: ".png", ".jpg", ...
+/// @returns the image; an empty one (data nil) when the IO cannot be read
+///   or its bytes do not decode
+/// @example `LImage := LoadImageIO(CreateZipFileIO("$P:assets.zip", "hero.png"), ".png");`
+/// @see LoadTextureIO
+/// @since 0.2
+exported routine LoadImageIO(const AIO: IO; const AFileType: ptr to const char): Image;
+var
+  LPrefix: string;
+  LImage: Image;
+begin
+  LPrefix := RaylibExtDoRegister(AIO);
+  LImage := LoadImage(RaylibExtDoPath(LPrefix, AFileType).c_str());
+  RaylibExtDoUnregister(LPrefix);
+  return LImage;
+end;
+
+/// Loads raw pixel data from an IO as LoadImageRaw loads it from a file
+/// (raylib's own LoadImageRaw reads it through the hooks): the pixels after
+/// AHeaderSize bytes; unload with UnloadImage.
+/// @param AIO the stream
+/// @param AWidth the image width in pixels
+/// @param AHeight the image height in pixels
+/// @param AFormat a PixelFormat value
+/// @param AHeaderSize bytes to skip before the pixels
+/// @returns the image; an empty one when LoadImageRaw gives one for a file
+///   of the same bytes, or the IO cannot be read
+/// @example `LImage := LoadImageRawIO(LIO, 64, 64, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 16);`
+/// @see LoadImageIO
+/// @since 0.2
+exported routine LoadImageRawIO(const AIO: IO; const AWidth: int32; const AHeight: int32; const AFormat: int32; const AHeaderSize: int32): Image;
+var
+  LPrefix: string;
+  LImage: Image;
+begin
+  LPrefix := RaylibExtDoRegister(AIO);
+  LImage := LoadImageRaw(RaylibExtDoPath(LPrefix, ".raw").c_str(), AWidth, AHeight, AFormat, AHeaderSize);
+  RaylibExtDoUnregister(LPrefix);
+  return LImage;
+end;
+
+/// Loads an image sequence from an IO as LoadImageAnim loads one from a
+/// file (raylib's own LoadImageAnim reads it through the hooks; frames
+/// appended to the image data); unload with UnloadImage.
+/// @param AIO the stream
+/// @param AFileType the file type: ".gif" (any other image type loads one
+///   frame)
+/// @param AFrames the frame count; 0 on a failure
+/// @returns the image; an empty one on a failure
+/// @example `LAnim := LoadImageAnimIO(LIO, ".gif", LFrames);`
+/// @see LoadImageIO
+/// @since 0.2
+exported routine LoadImageAnimIO(const AIO: IO; const AFileType: ptr to const char; var AFrames: int32): Image;
+var
+  LPrefix: string;
+  LImage: Image;
+begin
+  LPrefix := RaylibExtDoRegister(AIO);
+  LImage := LoadImageAnim(RaylibExtDoPath(LPrefix, AFileType).c_str(), address of AFrames);
+  RaylibExtDoUnregister(LPrefix);
+  return LImage;
+end;
+
+/// Loads a texture from an IO as LoadTexture loads one from a file
+/// (raylib's own LoadTexture reads it through the hooks); unload with
+/// UnloadTexture. Needs a window, as LoadTexture does.
+/// @param AIO the stream
+/// @param AFileType the file type: ".png", ...
+/// @returns the texture; an empty one (id 0) on a failure
+/// @example `LTexture := LoadTextureIO(CreateZipFileIO("$P:assets.zip", "hero.png"), ".png");`
+/// @see LoadImageIO
+/// @since 0.2
+exported routine LoadTextureIO(const AIO: IO; const AFileType: ptr to const char): Texture2D;
+var
+  LPrefix: string;
+  LTexture: Texture2D;
+begin
+  LPrefix := RaylibExtDoRegister(AIO);
+  LTexture := LoadTexture(RaylibExtDoPath(LPrefix, AFileType).c_str());
+  RaylibExtDoUnregister(LPrefix);
+  return LTexture;
+end;
+
+/// Loads a font from an IO as LoadFont loads one from a file (raylib's own
+/// LoadFont reads it through the hooks): a TTF / OTF at raylib's default
+/// size and characters, any image type as an image font. A .fnt reads its
+/// page images by name beside it, which one IO cannot hold, so it is
+/// refused here (an empty font and a warning): route it through an
+/// IOSource. Unload with UnloadFont; needs a window, as LoadFont does.
+/// @param AIO the stream
+/// @param AFileType the file type: ".ttf", ".otf", ".png", ...
+/// @returns the font; on a failure what LoadFont gives for such a file
+/// @example `LFont := LoadFontIO(CreateZipFileIO("$P:assets.zip", "ui.ttf"), ".ttf");`
+/// @see LoadFontExIO
+/// @since 0.2
+exported routine LoadFontIO(const AIO: IO; const AFileType: ptr to const char): Font;
+var
+  LPrefix: string;
+  LFont: Font;
+begin
+  if RaylibExtDoIsType(AFileType, ".fnt") then
+    TraceLog(LOG_WARNING, "FONT: A .fnt reads its pages by name: load it through an IOSource");
+    return LFont;
+  end;
+  LPrefix := RaylibExtDoRegister(AIO);
+  LFont := LoadFont(RaylibExtDoPath(LPrefix, AFileType).c_str());
+  RaylibExtDoUnregister(LPrefix);
+  return LFont;
+end;
+
+/// Loads a font from an IO as LoadFontEx loads one from a file (raylib's
+/// own LoadFontEx reads it through the hooks), at AFontSize with the given
+/// codepoints (nil and 0 for raylib's default set); unload with UnloadFont.
+/// Needs a window.
+/// @param AIO the stream
+/// @param AFileType the file type: ".ttf", ".otf"
+/// @param AFontSize the size the glyphs are made at
+/// @param ACodepoints the codepoints, or nil
+/// @param ACodepointCount how many, or 0
+/// @returns the font; on a failure what LoadFontEx gives for such a file
+/// @example `LFont := LoadFontExIO(LIO, ".ttf", 48, nil, 0);`
+/// @see LoadFontIO
+/// @since 0.2
+exported routine LoadFontExIO(const AIO: IO; const AFileType: ptr to const char; const AFontSize: int32; const ACodepoints: ptr to const int32; const ACodepointCount: int32): Font;
+var
+  LPrefix: string;
+  LFont: Font;
+begin
+  LPrefix := RaylibExtDoRegister(AIO);
+  LFont := LoadFontEx(RaylibExtDoPath(LPrefix, AFileType).c_str(), AFontSize, ACodepoints, ACodepointCount);
+  RaylibExtDoUnregister(LPrefix);
+  return LFont;
+end;
+
+/// Loads wave data from an IO as LoadWave loads it from a file (raylib's
+/// own LoadWave reads it through the hooks); unload with UnloadWave.
+/// @param AIO the stream
+/// @param AFileType the file type raylib decodes by: ".wav", ".ogg",
+///   ".mp3", ".qoa", ".flac"
+/// @returns the wave; an empty one (data nil) on a failure
+/// @example `LWave := LoadWaveIO(CreateZipFileIO("$P:assets.zip", "hit.wav"), ".wav");`
+/// @see LoadSoundIO
+/// @since 0.2
+exported routine LoadWaveIO(const AIO: IO; const AFileType: ptr to const char): Wave;
+var
+  LPrefix: string;
+  LWave: Wave;
+begin
+  LPrefix := RaylibExtDoRegister(AIO);
+  LWave := LoadWave(RaylibExtDoPath(LPrefix, AFileType).c_str());
+  RaylibExtDoUnregister(LPrefix);
+  return LWave;
+end;
+
+/// Loads a sound (a sound effect, fully in memory) from an IO as LoadSound
+/// loads one from a file (raylib's own LoadSound reads it through the
+/// hooks); unload with UnloadSound. Needs the audio device, as LoadSound
+/// does.
+/// @param AIO the stream
+/// @param AFileType the file type: ".wav", ".ogg", ".mp3", ".qoa", ".flac"
+/// @returns the sound; an empty one on a failure
+/// @example `LHit := LoadSoundIO(CreateZipFileIO("$P:assets.zip", "hit.wav"), ".wav");`
+/// @see LoadWaveIO
+/// @since 0.2
+exported routine LoadSoundIO(const AIO: IO; const AFileType: ptr to const char): Sound;
+var
+  LPrefix: string;
+  LSound: Sound;
+begin
+  LPrefix := RaylibExtDoRegister(AIO);
+  LSound := LoadSound(RaylibExtDoPath(LPrefix, AFileType).c_str());
+  RaylibExtDoUnregister(LPrefix);
+  return LSound;
+end;
+
+/// Loads a music stream from an IO as LoadMusicStream loads one from a
+/// file: raylib's own LoadMusicStream opens it through the hooks, and every
+/// read and seek while it plays goes to the IO (nothing is read ahead into
+/// memory but what raylib itself reads). The IO stays registered until
+/// UnloadMusicStreamIO, so it must stay open while the music plays. Unload
+/// with UnloadMusicStreamIO, never UnloadMusicStream. Needs the audio
+/// device.
+/// @param AIO the stream
+/// @param AFileType the file type: ".ogg", ".mp3", ".wav", ".qoa", ".flac",
+///   ".xm", ".mod"
+/// @returns the music; an empty one (ctxData nil) on a failure
+/// @example `LSong := LoadMusicStreamIO(CreateZipFileIO("$P:assets.zip", "song.ogg"), ".ogg");`
+/// @see UnloadMusicStreamIO
+/// @since 0.2
+exported routine LoadMusicStreamIO(const AIO: IO; const AFileType: ptr to const char): Music;
+var
+  LPrefix: string;
+  LMusic: Music;
+  LEmpty: Music;
+begin
+  LPrefix := RaylibExtDoRegister(AIO);
+  LMusic := LoadMusicStream(RaylibExtDoPath(LPrefix, AFileType).c_str());
+  if LMusic.ctxData = nil then
+    RaylibExtDoUnregister(LPrefix);
+    return LMusic;
+  end;
+  if LPrefix = CRaylibExtDoNoPrefix then
+    return LMusic;
+  end;
+  if not RaylibExtDoKeepMusic(LMusic.ctxData, LPrefix) then
+    // Out of memory: the registration could never be ended, so the music
+    // is not kept either
+    UnloadMusicStream(LMusic);
+    RaylibExtDoUnregister(LPrefix);
+    TraceLog(LOG_WARNING, "STREAM: Out of memory keeping the music stream's IO");
+    return LEmpty;
+  end;
+  return LMusic;
+end;
+
+/// Unloads a music stream LoadMusicStreamIO gave (UnloadMusicStream), then
+/// ends its IO's registration. The IO stays the caller's, to close after.
+/// @param AMusic the music
+/// @example `UnloadMusicStreamIO(LSong); IOClose(LSongIO);`
+/// @see LoadMusicStreamIO
+/// @since 0.2
+exported routine UnloadMusicStreamIO(const AMusic: Music);
+var
+  LPrefix: string;
+begin
+  LPrefix := RaylibExtDoTakeMusic(AMusic.ctxData);
+  UnloadMusicStream(AMusic);
+  if LPrefix <> "" then
+    UnregisterIO(LPrefix);
+  end;
+end;
+
+/// Loads a shader from two IOs as LoadShader loads one from two files
+/// (raylib's own LoadShader reads them through the hooks); unload with
+/// UnloadShader. Needs a window.
+/// @param AVertex the vertex shader's source, or nil for raylib's default
+///   vertex shader (as LoadShader with NULL)
+/// @param AFragment the fragment shader's source, or nil for the default
+/// @returns the shader; raylib's default shader on a failure, as LoadShader
+///   gives
+/// @example `LShader := LoadShaderIO(nil, CreateZipFileIO("$P:assets.zip", "glow.fs"));`
+/// @since 0.2
+exported routine LoadShaderIO(const AVertex: IO; const AFragment: IO): Shader;
+var
+  LVertexPrefix: string;
+  LFragmentPrefix: string;
+  LVertexPath: string;
+  LFragmentPath: string;
+  LVertexName: ptr to const char;
+  LFragmentName: ptr to const char;
+  LShader: Shader;
+begin
+  LVertexName := nil;
+  LFragmentName := nil;
+  LVertexPrefix := CRaylibExtDoNoPrefix;
+  LFragmentPrefix := CRaylibExtDoNoPrefix;
+  if AVertex <> nil then
+    LVertexPrefix := RaylibExtDoRegister(AVertex);
+    LVertexPath := RaylibExtDoPath(LVertexPrefix, ".vs");
+    LVertexName := LVertexPath.c_str();
+  end;
+  if AFragment <> nil then
+    LFragmentPrefix := RaylibExtDoRegister(AFragment);
+    LFragmentPath := RaylibExtDoPath(LFragmentPrefix, ".fs");
+    LFragmentName := LFragmentPath.c_str();
+  end;
+  LShader := LoadShader(LVertexName, LFragmentName);
+  RaylibExtDoUnregister(LVertexPrefix);
+  RaylibExtDoUnregister(LFragmentPrefix);
+  return LShader;
+end;
+
+/// Loads an automation event list from an IO as LoadAutomationEventList
+/// loads one from a file (raylib's own loader reads it through the hooks);
+/// unload with UnloadAutomationEventList.
+/// @param AIO the stream (raylib's .rae events); nil gives an empty list
+///   with raylib's capacity, as LoadAutomationEventList(NULL)
+/// @returns the list
+/// @example `LEvents := LoadAutomationEventListIO(CreateZipFileIO("$P:demo.zip", "run.rae"));`
+/// @since 0.2
+exported routine LoadAutomationEventListIO(const AIO: IO): AutomationEventList;
+var
+  LPrefix: string;
+  LList: AutomationEventList;
+begin
+  if AIO = nil then
+    return LoadAutomationEventList(nil);
+  end;
+  LPrefix := RaylibExtDoRegister(AIO);
+  LList := LoadAutomationEventList(RaylibExtDoPath(LPrefix, ".rae").c_str());
+  RaylibExtDoUnregister(LPrefix);
+  return LList;
+end;
+
+// ASource registered with HookIO for one call: its prefix, or the prefix
+// no registration gives when it cannot be registered
+routine RaylibExtDoRegisterSource(const ASource: IOSource): string;
+var
+  LPrefix: string;
+begin
+  LPrefix := RegisterIOSource(ASource);
+  if LPrefix = "" then
+    return CRaylibExtDoNoPrefix;
+  end;
+  return LPrefix;
+end;
+
+/// Loads a model from an IOSource as LoadModel loads one from a file:
+/// raylib's own LoadModel opens APath in the source through the hooks, and
+/// every file it reads beside it (a glTF's .bin, an OBJ's .mtl, textures)
+/// is read from the source by its path too. Unload with UnloadModel; needs
+/// a window.
+/// @param ASource the files (CreateZipIOSource's, a folder's, any source)
+/// @param APath the model's path in the source: "models/hero.gltf"
+/// @returns the model; what LoadModel gives for a missing file on a failure
+/// @example `LHero := LoadModelIO(CreateZipIOSource("$P:assets.zip"), "models/hero.gltf");`
+/// @see LoadMaterialsIO
+/// @since 0.2
+exported routine LoadModelIO(const ASource: IOSource; const APath: string): Model;
+var
+  LPrefix: string;
+  LModel: Model;
+begin
+  LPrefix := RaylibExtDoRegisterSource(ASource);
+  LModel := LoadModel((LPrefix + "/" + APath).c_str());
+  RaylibExtDoUnregister(LPrefix);
+  return LModel;
+end;
+
+/// Loads the materials of a model file in an IOSource as LoadMaterials
+/// does from a file (through the hooks, siblings from the source too).
+/// @param ASource the files
+/// @param APath the material file's path in the source: "models/hero.mtl"
+/// @param AMaterialCount the count; 0 on a failure
+/// @returns the materials, or what LoadMaterials gives for a missing file
+/// @example `LMats := LoadMaterialsIO(LSource, "models/hero.mtl", LCount);`
+/// @see LoadModelIO
+/// @since 0.2
+exported routine LoadMaterialsIO(const ASource: IOSource; const APath: string; var AMaterialCount: int32): ptr to Material;
+var
+  LPrefix: string;
+  LMaterials: ptr to Material;
+begin
+  LPrefix := RaylibExtDoRegisterSource(ASource);
+  LMaterials := LoadMaterials((LPrefix + "/" + APath).c_str(), address of AMaterialCount);
+  RaylibExtDoUnregister(LPrefix);
+  return LMaterials;
+end;
+
+/// Loads the animations of a model file in an IOSource as
+/// LoadModelAnimations does from a file (through the hooks, siblings from
+/// the source too); unload with UnloadModelAnimations.
+/// @param ASource the files
+/// @param APath the model's path in the source: "models/hero.glb"
+/// @param AAnimCount the count; 0 on a failure
+/// @returns the animations, or what LoadModelAnimations gives for a missing
+///   file
+/// @example `LAnims := LoadModelAnimationsIO(LSource, "models/hero.glb", LCount);`
+/// @see LoadModelIO
+/// @since 0.2
+exported routine LoadModelAnimationsIO(const ASource: IOSource; const APath: string; var AAnimCount: int32): ptr to ModelAnimation;
+var
+  LPrefix: string;
+  LAnimations: ptr to ModelAnimation;
+begin
+  LPrefix := RaylibExtDoRegisterSource(ASource);
+  LAnimations := LoadModelAnimations((LPrefix + "/" + APath).c_str(), address of AAnimCount);
+  RaylibExtDoUnregister(LPrefix);
+  return LAnimations;
+end;
+
+/// Makes an IOSource raylib's file system: raylib's file callbacks
+/// (SetLoadFileDataCallback, SetLoadFileTextCallback and the Save pair)
+/// then open every file name raylib loads or saves in the source, by that
+/// name as a path in it ('\' as '/', a leading "./" or '/' dropped), through
+/// the hooks; text loads and saves in text mode, as raylib's own. Paths the
+/// IO forms hand raylib (`io://...`) still reach their IO. nil restores
+/// raylib's own file functions (the callbacks set to NULL). raylib keeps
+/// one set of callbacks for the process with no user data, so this is one
+/// setting for the whole program, and not for several threads at once, as
+/// raylib's callbacks are not. The source stays the caller's: unset it
+/// (nil) before closing it. Setting it replaces callbacks set by
+/// SetLoadFileDataCallback and the others, and nil leaves none set. It also
+/// makes the source HookIO's path source (SetIOPathSource), so the files
+/// raylib's decoders open by plain path themselves (music streams) come
+/// from it too; nil unsets that path source when it is still the one set
+/// here (one the program set since with SetIOPathSource stays).
+/// @param ASource the files, or nil
+/// @returns false when the source could not be registered (out of memory):
+///   nothing changed
+/// @example `SetRaylibIOSource(CreateZipIOSource("$P:assets.zip")); LHero := LoadModel("models/hero.gltf");`
+/// @see LoadModelIO
+/// @since 0.2
+exported routine SetRaylibIOSource(const ASource: IOSource): bool;
+var
+  LPrefix: string;
+  LReplaced: string;
+begin
+  LPrefix := "";
+  if ASource <> nil then
+    LPrefix := RegisterIOSource(ASource);
+    if LPrefix = "" then
+      return false;
+    end;
+  end;
+  // The plain paths raylib's own decoders open (music streams) bypass the
+  // callbacks: the path source routes them to the same source. nil unsets
+  // only the path source set here, never one the program set itself.
+  if ASource <> nil then
+    if not SetIOPathSource(ASource) then
+      UnregisterIO(LPrefix);
+      return false;
+    end;
+    RaylibExtDoRememberPathSource(ASource);
+  else
+    RaylibExtDoForgetPathSource();
+  end;
+  LReplaced := RaylibExtDoInstallSource(LPrefix);
+  if LReplaced <> "" then
+    UnregisterIO(LReplaced);
+  end;
+  return true;
+end;
+
+exported type
+  /// Where a video stands: stopped (at its start), playing, or paused
+  /// @since 0.2
+  /// @see GetVideoStatus
+  VideoStatus = choices(VideoStopped, VideoPlaying, VideoPaused);
+
+  /// Called on every change of a video's status (the end of one that does
+  /// not loop included: VideoStopped), with the name it was loaded from
+  /// @since 0.2
+  /// @see SetVideoStatusCallback
+  VideoStatusCallback = routine(const AStatus: VideoStatus; const AName: ptr to const char);
+
+  /// An MPEG-1 video (pl_mpeg) with its MP2 audio, as raylib's Music: load
+  /// with LoadVideo / LoadVideoIO / LoadVideoZip, unload with UnloadVideo.
+  /// ctxData is the player (nil: no video); width / height its size.
+  /// @since 0.2
+  /// @see LoadVideo
+  Video = record
+    ctxData: ptr;
+    width: int32;
+    height: int32;
+  end;
+
+// The video's record from a player (nil: the empty record)
+routine RaylibExtDoVideoRecord(const AContext: ptr): Video;
+var
+  LVideo: Video;
+begin
+  LVideo.ctxData := AContext;
+  LVideo.width := RaylibExtDoVWidth(AContext);
+  LVideo.height := RaylibExtDoVHeight(AContext);
+  return LVideo;
+end;
+
+// A status change the player reported (>= 0) told to the video's callback
+routine RaylibExtDoVideoNotify(const AVideo: Video; const AStatus: int32);
+var
+  LCallback: VideoStatusCallback;
+begin
+  if (AStatus < 0) or (RaylibExtDoVCallback(AVideo.ctxData) = nil) then
+    return;
+  end;
+  LCallback := reinterpret_cast<VideoStatusCallback>(RaylibExtDoVCallback(AVideo.ctxData));
+  LCallback(static_cast<VideoStatus>(AStatus), RaylibExtDoVName(AVideo.ctxData));
+end;
+
+/// Loads a video from an IO: an MPEG-1 video (with or without MP2 audio)
+/// read through the IO while it plays, so the IO must stay open until
+/// UnloadVideo (which leaves it open: it stays the caller's). The audio
+/// plays through raylib's audio device when it is ready (InitAudioDevice
+/// first); without it the video plays silently. A window is not needed to
+/// load: frames are uploaded once one is open.
+/// @param AIO the video's bytes (CreateZipFileIO's, CreateFileIO's, any IO)
+/// @param AName the name the status callback is given
+/// @returns the video; ctxData nil when the IO holds no MPEG-1 video
+/// @example `LIntro := LoadVideoIO(CreateZipFileIO("$P:assets.zip", "intro.mpg"), "intro.mpg");`
+/// @see UnloadVideo
+/// @since 0.2
+exported routine LoadVideoIO(const AIO: IO; const AName: string): Video;
+begin
+  return RaylibExtDoVideoRecord(RaylibExtDoVOpen(AIO, false, AName.c_str()));
+end;
+
+/// Loads a video from a file (UTF-8 path; $P: / $D: prefixes resolved):
+/// LoadVideoIO's rules over a file IO the video owns.
+/// @param AFileName the .mpg file
+/// @returns the video; ctxData nil when the file is missing or no MPEG-1
+///   video
+/// @example `LIntro := LoadVideo("$P:../res/assets/videos/intro.mpg");`
+/// @see LoadVideoIO
+/// @since 0.2
+exported routine LoadVideo(const AFileName: string): Video;
+begin
+  return RaylibExtDoVideoRecord(RaylibExtDoVOpen(CreateFileIO(AFileName, FileMode.Read), true,
+    AFileName.c_str()));
+end;
+
+/// Loads a video from a zip entry (a password for an encrypted archive):
+/// LoadVideoIO's rules over the entry's IO, which the video owns.
+/// @param AArchive the zip file
+/// @param AEntry the entry's path in it
+/// @param APassword the archive's password, "" for none
+/// @returns the video; ctxData nil when the archive or entry is missing or
+///   holds no MPEG-1 video
+/// @example `LIntro := LoadVideoZip("$P:assets.zip", "res/assets/videos/intro.mpg", "");`
+/// @see LoadVideoIO
+/// @since 0.2
+exported routine LoadVideoZip(const AArchive: string; const AEntry: string; const APassword: string): Video;
+begin
+  return RaylibExtDoVideoRecord(RaylibExtDoVOpen(CreateZipFileIO(AArchive, AEntry, APassword),
+    true, AEntry.c_str()));
+end;
+
+/// Unloads a video: stopped, its textures, shader and audio stream freed,
+/// its own IO closed (LoadVideo / LoadVideoZip; LoadVideoIO's stays the
+/// caller's). The status callback is not called.
+/// @param AVideo the video
+/// @since 0.2
+exported routine UnloadVideo(const AVideo: Video);
+begin
+  RaylibExtDoVClose(AVideo.ctxData);
+end;
+
+/// True when the video loaded (ctxData set)
+/// @since 0.2
+exported routine IsVideoValid(const AVideo: Video): bool;
+begin
+  return AVideo.ctxData <> nil;
+end;
+
+/// Plays the video (from where it paused, or from its start)
+/// @since 0.2
+exported routine PlayVideo(const AVideo: Video);
+begin
+  RaylibExtDoVideoNotify(AVideo, RaylibExtDoVPlay(AVideo.ctxData));
+end;
+
+/// Pauses a playing video where it is
+/// @since 0.2
+exported routine PauseVideo(const AVideo: Video);
+begin
+  RaylibExtDoVideoNotify(AVideo, RaylibExtDoVPause(AVideo.ctxData));
+end;
+
+/// Stops the video back at its start (no frame shown until it plays)
+/// @since 0.2
+exported routine StopVideo(const AVideo: Video);
+begin
+  RaylibExtDoVideoNotify(AVideo, RaylibExtDoVStop(AVideo.ctxData));
+end;
+
+/// Advances a playing video by the real time since its last update (call
+/// once a frame): decodes, uploads the newest frame, feeds the audio; the
+/// end of a video that does not loop stops it at its start.
+/// @since 0.2
+/// @see DrawVideo
+exported routine UpdateVideo(const AVideo: Video);
+begin
+  RaylibExtDoVideoNotify(AVideo, RaylibExtDoVUpdate(AVideo.ctxData, -1.0));
+end;
+
+/// UpdateVideo by a given step instead of the real time
+/// @param ASeconds the time to advance (0 or less: nothing decoded)
+/// @since 0.2
+exported routine UpdateVideo(const AVideo: Video; const ASeconds: float64);
+var
+  LStep: float64;
+begin
+  LStep := ASeconds;
+  if LStep < 0.0 then
+    LStep := 0.0;
+  end;
+  RaylibExtDoVideoNotify(AVideo, RaylibExtDoVUpdate(AVideo.ctxData, LStep));
+end;
+
+/// The video's status
+/// @since 0.2
+exported routine GetVideoStatus(const AVideo: Video): VideoStatus;
+begin
+  return static_cast<VideoStatus>(RaylibExtDoVStatus(AVideo.ctxData));
+end;
+
+/// True while the video plays
+/// @since 0.2
+exported routine IsVideoPlaying(const AVideo: Video): bool;
+begin
+  return GetVideoStatus(AVideo) = VideoStatus.VideoPlaying;
+end;
+
+/// Sets whether the video starts again at its end
+/// @since 0.2
+exported routine SetVideoLooping(const AVideo: Video; const ALoop: bool);
+begin
+  RaylibExtDoVSetLooping(AVideo.ctxData, ALoop);
+end;
+
+/// True when the video starts again at its end
+/// @since 0.2
+exported routine IsVideoLooping(const AVideo: Video): bool;
+begin
+  return RaylibExtDoVLooping(AVideo.ctxData);
+end;
+
+/// Sets the video's volume, 0 .. 1 (clamped), heard through Math's
+/// PerceivedVolume so equal steps sound equal
+/// @since 0.2
+exported routine SetVideoVolume(const AVideo: Video; const AVolume: float32);
+begin
+  RaylibExtDoVSetVolume(AVideo.ctxData, AVolume);
+end;
+
+/// The video's volume as set (0 .. 1)
+/// @since 0.2
+exported routine GetVideoVolume(const AVideo: Video): float32;
+begin
+  return RaylibExtDoVVolume(AVideo.ctxData);
+end;
+
+/// Sets the routine called on every status change (nil: none)
+/// @since 0.2
+exported routine SetVideoStatusCallback(const AVideo: Video; const ACallback: VideoStatusCallback);
+begin
+  RaylibExtDoVSetCallback(AVideo.ctxData, reinterpret_cast<ptr>(ACallback));
+end;
+
+/// The video's frame rate (frames a second); 0 with no video
+/// @since 0.2
+exported routine GetVideoFrameRate(const AVideo: Video): float64;
+begin
+  return RaylibExtDoVFrameRate(AVideo.ctxData);
+end;
+
+/// The video's length in seconds (the last frame's start plus one frame)
+/// @since 0.2
+exported routine GetVideoDuration(const AVideo: Video): float64;
+begin
+  return RaylibExtDoVDuration(AVideo.ctxData);
+end;
+
+/// Where the video is, in seconds from its start
+/// @since 0.2
+exported routine GetVideoTime(const AVideo: Video): float64;
+begin
+  return RaylibExtDoVTime(AVideo.ctxData);
+end;
+
+/// True when the video has an audio track
+/// @since 0.2
+exported routine HasVideoAudio(const AVideo: Video): bool;
+begin
+  return RaylibExtDoVHasTrack(AVideo.ctxData);
+end;
+
+/// The audio track's sample rate (0 with none)
+/// @since 0.2
+exported routine GetVideoSampleRate(const AVideo: Video): int32;
+begin
+  return RaylibExtDoVSampleRate(AVideo.ctxData);
+end;
+
+/// True when the video is drawn through its YCbCr shader (else converted
+/// on the CPU); decided at the first frame with a window open
+/// @since 0.2
+exported routine IsVideoShaderUsed(const AVideo: Video): bool;
+begin
+  return RaylibExtDoVGpu(AVideo.ctxData);
+end;
+
+/// Draws the current frame at its own size with its top left at
+/// (APosX, APosY), as DrawTexture draws (nothing before the first frame)
+/// @since 0.2
+exported routine DrawVideo(const AVideo: Video; const APosX: int32; const APosY: int32; const ATint: Color);
+begin
+  RaylibExtDoVDrawAt(AVideo.ctxData, APosX, APosY, ATint);
+end;
+
+/// Draws part of the current frame (ASource in the frame's pixels) placed,
+/// scaled and rotated as DrawTexturePro draws
+/// @since 0.2
+exported routine DrawVideoPro(const AVideo: Video; const ASource: Rectangle; const ADest: Rectangle; const AOrigin: ::Vector2; const ARotation: float32; const ATint: Color);
+begin
+  RaylibExtDoVDraw(AVideo.ctxData, ASource, ADest, AOrigin, ARotation, ATint);
+end;
+
+end.

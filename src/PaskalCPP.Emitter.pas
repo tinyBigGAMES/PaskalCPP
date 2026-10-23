@@ -273,7 +273,8 @@ type
     procedure DoWriteArrayType(const AFile: TPCOutFile; const AType: TPCArrayType);
     procedure DoWriteSetType(const AFile: TPCOutFile; const AType: TPCSetType);
     procedure DoWriteRoutineType(const AFile: TPCOutFile; const AType: TPCRoutineType);
-    procedure DoWriteParam(const AFile: TPCOutFile; const AParam: TPCParam; const AWithName: Boolean);
+    procedure DoWriteParam(const AFile: TPCOutFile; const AParam: TPCParam; const ALinkage: TPCLinkage;
+      const AWithName: Boolean);
     procedure DoWriteParams(const AFile: TPCOutFile; const AParams: TList<TPCParam>; const AIsVariadic: Boolean;
       const ALinkage: TPCLinkage; const AWithNames: Boolean);
     procedure DoWriteSignature(const AFile: TPCOutFile; const ARoutine: TPCRoutine; const AStatic: Boolean;
@@ -482,7 +483,7 @@ type
     class function DoDeclName(const ADecl: TPCDecl): string; static;
     // The linkage rule, once: a signature is extern "C" by ResolvedLinkage
     // when it is not static and has no owner; a module-level definition is
-    // static unless exported. DoSymbolIsC = the definition this module emits
+    // static unless exported or C linkage. DoSymbolIsC = the definition this module emits
     // for ARoutine has C linkage, so its toolchain symbol is the bare
     // DeclName, outside the module's namespace (the debugger matches PDB
     // functions by it)
@@ -756,8 +757,12 @@ end;
 
 class function TPCEmitter.DoIsStaticDefinition(const ARoutine: TPCRoutine): Boolean;
 begin
-  // A module-level definition is private to its TU unless exported
-  Result := not ARoutine.IsExported;
+  // A module-level definition is private to its TU unless exported or C
+  // linkage. BNF sec 3: clink IS extern "C" (an unmangled external symbol),
+  // whatever its visibility; `exported` decides only who may name it in
+  // PaskalCPP and the dll export. ResolvedLinkage, so a demoted overload
+  // (C++ linkage) stays private
+  Result := (not ARoutine.IsExported) and (ARoutine.ResolvedLinkage <> lnC);
 end;
 
 class function TPCEmitter.DoSymbolIsC(const ARoutine: TPCRoutine): Boolean;
@@ -1418,13 +1423,15 @@ begin
   DoText(AFile, ')>');
 end;
 
-procedure TPCEmitter.DoWriteParam(const AFile: TPCOutFile; const AParam: TPCParam; const AWithName: Boolean);
+procedure TPCEmitter.DoWriteParam(const AFile: TPCOutFile; const AParam: TPCParam; const ALinkage: TPCLinkage;
+  const AWithName: Boolean);
 var
   LMark: TPCWriterMark;
 begin
-  // E10: var T&; const: a scalar / pointer by value, anything else by const
-  // reference. const follows the type (east const): a pointer parameter is
-  // char* const, never const char*
+  // E10, the rule in TPCParam.IsPassedByReference: var T&; const by value
+  // (T const) or by const reference (T const&), C linkage always by value.
+  // const follows the type (east const): a pointer parameter is char* const,
+  // never const char*
   DoAt(AFile, AParam.Range.StartLine);
   LMark := FWriters[AFile].Mark();
   if AParam.TypeExpr = nil then
@@ -1435,10 +1442,10 @@ begin
       DoText(AFile, '&');
     pmConst:
       begin
-        if AParam.TypeExpr.IsScalarOrPointer() then
-          DoText(AFile, ' const')
+        if AParam.IsPassedByReference(ALinkage) then
+          DoText(AFile, ' const&')
         else
-          DoText(AFile, ' const&');
+          DoText(AFile, ' const');
       end;
   end;
   if AWithName then
@@ -1457,7 +1464,7 @@ begin
   begin
     if LIndex > 0 then
       DoText(AFile, ', ');
-    DoWriteParam(AFile, AParams[LIndex], AWithNames);
+    DoWriteParam(AFile, AParams[LIndex], ALinkage, AWithNames);
   end;
   if not AIsVariadic then
     Exit;
@@ -1554,15 +1561,16 @@ procedure TPCEmitter.DoEmitRoutine(const AFile: TPCOutFile; const ARoutine: TPCR
 var
   LMark: TPCWriterMark;
 begin
-  // A6, module level. A forward is a static prototype in the source (an
-  // exported routine's header prototype already precedes every use); an
+  // A6, module level. A forward is a prototype in the source (an exported
+  // routine's header prototype already precedes every use), static exactly
+  // when its definition is (DoIsStaticDefinition, the one rule); an
   // external one binds its symbol by name; an exported one has its
-  // prototype in the header; a definition is static unless exported
+  // prototype in the header
   if ARoutine.ExternalClause.IsExternal or ARoutine.IsForward or (AFile = ofHeader) then
   begin
     DoBeginItem(AFile, ARoutine.Range.StartLine);
     LMark := FWriters[AFile].Mark();
-    DoWriteSignature(AFile, ARoutine, ARoutine.IsForward, '');
+    DoWriteSignature(AFile, ARoutine, ARoutine.IsForward and DoIsStaticDefinition(ARoutine), '');
     if ARoutine.ExternalClause.IsExternal then
       DoText(AFile, ' __asm__("' + ARoutine.DeclName + '");')
     else
@@ -4678,7 +4686,7 @@ begin
       DoWriteType(AFile, LProperty.TypeExpr);
       DoText(AFile, ' ' + PC_EMT_PROP_GET + LProperty.PropName + '(');
       if LProperty.IndexParam <> nil then
-        DoWriteParam(AFile, LProperty.IndexParam, True);
+        DoWriteParam(AFile, LProperty.IndexParam, lnCpp, True);
       DoText(AFile, ') const override { return ' + LParent + '::' + PC_EMT_PROP_GET + LProperty.PropName + '(' +
         LIndexName + '); }');
       LWriter := LProperty;
@@ -4693,7 +4701,7 @@ begin
         DoText(AFile, ' void ' + PC_EMT_PROP_SET + LProperty.PropName + '(');
         if LProperty.IndexParam <> nil then
         begin
-          DoWriteParam(AFile, LProperty.IndexParam, True);
+          DoWriteParam(AFile, LProperty.IndexParam, lnCpp, True);
           DoText(AFile, ', ');
           LIndexName := LIndexName + ', ';
         end;
@@ -5260,7 +5268,7 @@ begin
     begin
       FWriters[AFile].BeginBorrowed();
       try
-        DoWriteParam(AFile, AProperty.IndexParam, True);
+        DoWriteParam(AFile, AProperty.IndexParam, lnCpp, True);
       finally
         FWriters[AFile].EndBorrowed();
       end;
@@ -5286,7 +5294,7 @@ begin
       DoText(AFile, AOwner + '::');
     DoText(AFile, PC_EMT_PROP_GET + AProperty.PropName + '(');
     if AProperty.IndexParam <> nil then
-      DoWriteParam(AFile, AProperty.IndexParam, True);
+      DoWriteParam(AFile, AProperty.IndexParam, lnCpp, True);
     DoText(AFile, ') const');
   end;
   if AOwner <> '' then

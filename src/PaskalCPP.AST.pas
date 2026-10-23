@@ -1002,6 +1002,14 @@ type
     IsTypeBorrowed: Boolean;
     constructor Create(); override;
     procedure EnumChildren(const AVisit: TPCNodeVisitor); override;
+    // How the parameter is passed, the one rule (the emitter writes it, SEM
+    // and the debugger read it): var = T& on every linkage; const of a
+    // scalar / pointer = T const by value; const of anything else = T const&
+    // under C++ linkage (E10) but T const BY VALUE under C linkage (lnC):
+    // C has no references, a clink routine or routine clink type keeps the
+    // C ABI; no mode = T by value. ALinkage is the routine's meant linkage
+    // (ResolvedLinkage after overload demotion / MeantLinkage())
+    function IsPassedByReference(const ALinkage: TPCLinkage): Boolean;
   end;
 
   { TPCSignature }
@@ -4415,6 +4423,19 @@ begin
   // PLAN-OBJECT O9: a write's parameter type is its property's node
   if not IsTypeBorrowed then
     VisitNode(TypeExpr, AVisit);
+end;
+
+function TPCParam.IsPassedByReference(const ALinkage: TPCLinkage): Boolean;
+begin
+  if ParamMode = pmVar then
+    Exit(True);
+  // No mode: by value; C linkage: every const by value (the C ABI)
+  if (ParamMode <> pmConst) or (ALinkage = lnC) then
+    Exit(False);
+  // A parameter whose type the parser dropped has no reference to form
+  if TypeExpr = nil then
+    Exit(False);
+  Result := not TypeExpr.IsScalarOrPointer();
 end;
 
 { TPCVarDecl }

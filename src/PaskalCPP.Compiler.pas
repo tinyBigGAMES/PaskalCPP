@@ -2146,6 +2146,14 @@ procedure TPCCompiler.DoRemoveStaleRuntimeLib();
 var
   LPath: string;
 begin
+  // TODO: Stale-runtime removal is turned off for now and will be reworked
+  // with TPCZigBuild.DoRemoveStaleInstalled, in the same future update. The
+  // runtime library's name is shared by every lib in an output folder, so
+  // this cannot tell whose it is: a lib that never used the runtime deleted
+  // the one another lib (lib_runtime) had published beside it for its
+  // consumers.
+  Exit;
+
   // A lib that does not use the runtime: the pcpp_runtime an earlier build of
   // it published beside it (that exact file, named by the layout rule) goes,
   // so no consumer finds a stale runtime beside a lib that needs none. The

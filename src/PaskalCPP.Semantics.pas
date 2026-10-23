@@ -498,12 +498,15 @@ type
 
   { TPCCallTarget }
   // One signature a call can bind: a routine (Decl) or a routine type's
-  // value (Decl nil); Params and ReturnType are the declaration's own nodes
+  // value (Decl nil); Params and ReturnType are the declaration's own nodes;
+  // Linkage is the meant linkage (how its parameters are passed:
+  // TPCParam.IsPassedByReference)
   TPCCallTarget = record
     Decl: TPCRoutine;
     Params: TList<TPCParam>;
     IsVariadic: Boolean;
     ReturnType: TPCTypeExpr;
+    Linkage: TPCLinkage;
   end;
 
   { TPCFlowKind }
@@ -12930,6 +12933,7 @@ begin
   Result.Params := ARoutine.Params;
   Result.IsVariadic := ARoutine.IsVariadic;
   Result.ReturnType := ARoutine.ReturnType;
+  Result.Linkage := ARoutine.MeantLinkage();
 end;
 
 function TPCSemantics.DoTypeTarget(const AType: TPCRoutineType): TPCCallTarget;
@@ -12939,6 +12943,7 @@ begin
   Result.Params := AType.Params;
   Result.IsVariadic := AType.IsVariadic;
   Result.ReturnType := AType.ReturnType;
+  Result.Linkage := AType.MeantLinkage();
 end;
 
 procedure TPCSemantics.DoCallCandidates(const ACall: TPCCall; const ATargets: TList<TPCCallTarget>);
@@ -13924,8 +13929,9 @@ begin
         Exit;
       end;
     end;
-    // const T& for anything but a scalar / pointer (the emitter's E10 rule)
-    if (LParam.ParamMode = pmConst) and not LParam.TypeExpr.IsScalarOrPointer() then
+    // A const parameter the C++ binds by reference (E10, never under C
+    // linkage: TPCParam.IsPassedByReference); by value is a copy already
+    if (LParam.ParamMode = pmConst) and LParam.IsPassedByReference(LTarget.Linkage) then
       LCopy := True;
   end;
   if LMisaligned and LCopy then

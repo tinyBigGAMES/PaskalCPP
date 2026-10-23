@@ -1,0 +1,1266 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  HookABI.pcpp - the HookABI unit: `import HookABI;` hooks C ABI functions.
+
+  Link-time hooks. A hook is a plain routine with C linkage and the hooked
+  function's name and C signature, written anywhere in the program:
+
+    routine clink fopen(const APath: ptr to const char;
+      const AMode: ptr to const char): ptr to FILE;
+
+  Its definition is in the final link, so it binds every reference to that
+  name in the link: the program's own calls and the calls inside C / C++
+  libraries linked into it (static archives included). Inside the hook,
+  HookReal finds the real function (the definition the hook stands in for,
+  see "Finding the real function" below) once, into a slot the hook keeps,
+  and the hook calls it through its own routine type (see HookReal's
+  example). Code outside the final link (a DLL / .so loaded at run time) is
+  the run-time level's job, not this one.
+
+  A header that declares the function noexcept (glibc's __THROW: stat,
+  access, ...) needs nothing more: clang takes the exception specification
+  from the system header's declaration, the definition compiles clean.
+
+  Windows (COFF) needs two more lines per hooked import. A DLL function is
+  reached through an import slot named __imp_<fn>; code compiled against a
+  dllimport declaration references that slot, not <fn>. If the link finds
+  no __imp_<fn> of the program's own, it pulls the import library member,
+  which defines <fn> as well: a duplicate of the hook. So every hooked DLL
+  function gets its own slot, right after the hook:
+
+    HOOKABI_IMPORT_SLOT(fopen_s);
+
+  (on Linux the macro expands to nothing that defines a symbol, so it can be
+  written on both targets). The mingw headers declare many CRT names
+  dllimport (fopen_s, _access, ...); defining one of them makes clang warn
+  "redeclared without 'dllimport'". That is expected for exactly these
+  definitions, so the hooks of such names sit between a scoped pragma pair:
+
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Winconsistent-dllimport"
+    ... the hooks and their HOOKABI_IMPORT_SLOT lines ...
+    #pragma clang diagnostic pop
+
+  A name the headers map onto a static mingw wrapper is not an import and
+  gets no slot: `stat` is declared with the asm name stat64i32, defined in
+  libmingwex, so the hook is `routine clink stat64i32` and its real function
+  is the CRT export it wraps, _stat64i32.
+
+  Finding the real function. HookReal(ASlot, AName) looks up the C runtime's
+  definition: on Linux the next definition after the program
+  (dlsym(RTLD_NEXT); libdl is linked by this unit), on Windows the export
+  AName of ucrtbase.dll, the CRT zig's windows-gnu target links against
+  (looked up there only: another loaded DLL such as msvcrt.dll can export a
+  fopen with a different FILE). That on Linux RTLD_NEXT also finds names
+  outside libc is incidental, not part of the contract. For a function of
+  any other library, HookReal(ASlot, ALibrary, AName) looks AName up in that
+  library, on both targets, if it is already loaded (it never loads one).
+
+  A name that a static C runtime object defines inside the program has no
+  export of that name to find: the hook's real function is what that object
+  calls. HookABI.bindlist.h marks such names with an empty Real field. On
+  Linux, zig's glibc link stub defines stat, fstat, lstat, stat64, fstat64
+  and lstat64 in libc_nonshared, each as a call of __xstat, __fxstat,
+  __lxstat, __xstat64, __fxstat64 or __lxstat64 with glibc's stat version
+  as the first argument. Only glibc 2.33 and later exports stat itself;
+  every glibc exports __xstat and its family. So a Linux stat hook resolves
+  HookReal(ASlot, "__xstat") and calls it with HookStatVersion first:
+  LReal(HookStatVersion, APath, ABuf). Windows stat follows the same rule
+  through the mingw mapping above (stat64i32 -> _stat64i32).
+
+  A header may give a name another symbol by asm label, and a definition
+  then takes the label: glibc's headers name fscanf __isoc99_fscanf, and
+  once __USE_FILE_OFFSET64 is defined they name stat stat64 (measured: the
+  vendored minizip ioapi.h, which CustomIO imports, defines glibc's
+  __USE_FILE_OFFSET64 itself, so in a unit importing CustomIO a
+  <sys/stat.h> read after it makes `routine clink stat` define stat64
+  while C code calls the plain stat). Such a hook is written in the unit's
+  C++ under `__asm__("<name>")` for each symbol it must define (HookIO.pcpp
+  defines stat and stat64 this way); `nm` of the linked program shows which
+  symbols a hook defines.
+
+  The run-time level: HookInstall writes a replacement into the import slot
+  of a name in every loaded module (Linux the GOT entries of its JUMP_SLOT /
+  GLOB_DAT relocations, read-only RELRO pages made writable for the store;
+  Windows the import address table entries, under VirtualProtect), records
+  each slot and what it held, and HookUninstall writes exactly that back
+  into every recorded slot whose module is still loaded. Modules loaded
+  later are patched as they load: Linux through the program's own dlopen
+  (a hidden wrapper, never exported, so a shared library's own dlopen stays
+  glibc's), Windows through the loader's DLL notification, which sees every
+  load; unloads drop their slots. With nothing installed the wrappers are
+  one atomic check. Calls that do not go through an import slot (inside the
+  defining module, or a link-time hook's own symbol) are the link-time
+  level's.
+==============================================================================*/
+
+module unit HookABI;
+
+@ifdef TARGET_X86_64_LINUX_GNU
+@linklibrary "dl";
+@endif
+
+// Public: the import slot of a hooked DLL function (see the unit header),
+// written by the importer after its hook as `HOOKABI_IMPORT_SLOT(<fn>);`.
+// Windows: a C-linkage pointer named __imp_<fn> holding the hook, declared
+// first with extern "C" so the definition keeps C linkage. Elsewhere there
+// is no import table, so it is a declaration that defines nothing; the
+// caller's `;` ends it on both targets.
+cpp header;
+
+#if defined(_WIN32)
+#define HOOKABI_IMPORT_SLOT(AName) \
+  extern "C" decltype(&AName) __imp_##AName; \
+  decltype(&AName) __imp_##AName = &AName
+#else
+#define HOOKABI_IMPORT_SLOT(AName) \
+  static_assert(true, "HOOKABI_IMPORT_SLOT: no import slot on this target")
+#endif
+
+// Private: the lookup and the slot's atomic access, this unit's own
+// translation unit. Helpers are named apart from the exported names (a body
+// in the unit's namespace would find those first).
+cpp source;
+
+#include <atomic>
+#include <cerrno>
+#include <cstdint>
+#include <cstring>
+#include <mutex>
+#include <new>
+#include <string>
+#include <vector>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <psapi.h>
+#else
+#include <dlfcn.h>
+#include <link.h>
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
+
+// The longest library name HookDoInLibrary converts, in UTF-16 units with
+// the terminator. A module name is a file name; a longer one is refused
+// (nullptr) instead of allocating.
+static constexpr int CHookLibraryNameMax = 512;
+
+#if defined(_WIN32)
+
+// AName's export in AModule, nullptr when the module or the export is
+// missing. GetProcAddress gives a FARPROC; the slot stores it as void*.
+static void* HookDoExport(HMODULE AModule, const char* AName)
+{
+  if ((AModule == nullptr) || (AName == nullptr))
+    return nullptr;
+  return reinterpret_cast<void*>(GetProcAddress(AModule, AName));
+}
+
+// The C runtime's definition: ucrtbase.dll, which the program imports
+// (through the api-ms-win-crt-* sets) and so is loaded before any code
+// runs. GetModuleHandleW never loads a module.
+static void* HookDoNext(const char* AName)
+{
+  return HookDoExport(GetModuleHandleW(L"ucrtbase.dll"), AName);
+}
+
+// AName in an already loaded library, its name given as UTF-8. The name is
+// converted into a stack buffer (no allocation); a name that does not
+// convert (invalid UTF-8, too long) gives nullptr.
+static void* HookDoInLibrary(const char* ALibrary, const char* AName)
+{
+  wchar_t LWide[CHookLibraryNameMax];
+  int LCount;
+
+  if (ALibrary == nullptr)
+    return nullptr;
+  LCount = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, ALibrary, -1,
+    LWide, CHookLibraryNameMax);
+  if (LCount == 0)
+    return nullptr;
+  return HookDoExport(GetModuleHandleW(LWide), AName);
+}
+
+#else
+
+// The next definition of AName after the object that holds this code: the
+// program itself in a link-time hook, so the result is the library's own
+// function. nullptr when no later definition exists.
+static void* HookDoNext(const char* AName)
+{
+  if (AName == nullptr)
+    return nullptr;
+  return dlsym(RTLD_NEXT, AName);
+}
+
+// AName in an already loaded library. RTLD_NOLOAD opens it only when it is
+// loaded (and never runs its initializers again); the reference that open
+// adds is dropped at once, the library stays loaded by whoever loaded it,
+// so the address dlsym gave stays valid.
+static void* HookDoInLibrary(const char* ALibrary, const char* AName)
+{
+  void* LHandle;
+  void* LReal;
+
+  if ((ALibrary == nullptr) || (AName == nullptr))
+    return nullptr;
+  LHandle = dlopen(ALibrary, RTLD_LAZY | RTLD_NOLOAD);
+  if (LHandle == nullptr)
+    return nullptr;
+  LReal = dlsym(LHandle, AName);
+  dlclose(LHandle);
+  return LReal;
+}
+
+#endif
+
+// Resolve once into the caller's slot. The slot is read with acquire and
+// written with release through std::atomic_ref, so hooks entered at the same
+// time on several threads all see either nullptr (and resolve: the lookup
+// gives every one the same pointer) or the finished pointer. No lock: a hook
+// may run inside the CRT itself. AInLibrary false = the C runtime's
+// definition (HookDoNext, ALibrary unused), true = AName in ALibrary
+// (HookDoInLibrary; a nil ALibrary then gives nullptr, never the CRT).
+static void* HookDoReal(void*& ASlot, const char* ALibrary, const char* AName,
+  bool AInLibrary)
+{
+  std::atomic_ref<void*> LSlot(ASlot);
+  void* LReal = LSlot.load(std::memory_order_acquire);
+  if (LReal == nullptr)
+  {
+    if (AInLibrary)
+      LReal = HookDoInLibrary(ALibrary, AName);
+    else
+      LReal = HookDoNext(AName);
+    if (LReal != nullptr)
+      LSlot.store(LReal, std::memory_order_release);
+  }
+  return LReal;
+}
+
+// The run-time level (HookInstall / HookUninstall). An install = one name and
+// its replacement, with every import slot it wrote: the slot, what it held,
+// the module it belongs to (load address + name, so a module that went away
+// is never written again). Two locks: HookDoRunLock makes installs,
+// uninstalls and (Linux) the load hooks' passes run one at a time, and may
+// be held while the loader's lock is taken; HookDoTableLock guards the
+// install list and every install's slots, and is never held while the
+// loader's lock is taken (the Windows DLL notification takes it inside the
+// loader's lock). Order: run lock, loader, table lock.
+
+// One import slot an install wrote. ReadOnly: the slot's page is read-only
+// between writes (Linux RELRO, Windows a read-only import table page).
+struct HookDoSlot
+{
+  void** Address = nullptr;
+  void* Old = nullptr;
+  std::uintptr_t Base = 0;
+  std::string Module;
+  bool ReadOnly = false;
+};
+
+// Removing: the uninstall is putting the slots back; a module loaded now is
+// not patched with it
+struct HookDoInstall
+{
+  std::string Name;
+  void* Replacement = nullptr;
+  std::vector<HookDoSlot> Slots;
+  bool Removing = false;
+};
+
+static std::mutex& HookDoRunLock()
+{
+  static std::mutex LLock;
+  return LLock;
+}
+
+static std::mutex& HookDoTableLock()
+{
+  static std::mutex LLock;
+  return LLock;
+}
+
+static std::vector<HookDoInstall*>& HookDoInstalls()
+{
+  static std::vector<HookDoInstall*> LInstalls;
+  return LInstalls;
+}
+
+// How many installs exist, read by the load hooks without the lock
+static std::atomic<int> HookDoInstallCount{0};
+
+// True when the install already recorded AAddress
+static bool HookDoKnownSlot(const HookDoInstall& AInstall, void** AAddress)
+{
+  for (const HookDoSlot& LSlot : AInstall.Slots)
+  {
+    if (LSlot.Address == AAddress)
+      return true;
+  }
+  return false;
+}
+
+// The install record of AState among the installs, nullptr when it is not one
+static HookDoInstall* HookDoFindInstall(const void* AState)
+{
+  for (HookDoInstall* LInstall : HookDoInstalls())
+  {
+    if (LInstall == AState)
+      return LInstall;
+  }
+  return nullptr;
+}
+
+#if !defined(_WIN32)
+
+// The system page size, for mprotect
+static std::uintptr_t HookDoPageSize()
+{
+  static const std::uintptr_t LSize = static_cast<std::uintptr_t>(sysconf(_SC_PAGESIZE));
+  return LSize;
+}
+
+// Stores AValue in the slot. A slot in a read-only page is made writable for
+// the store and read-only again after it. False when the page cannot be made
+// writable (nothing is written then).
+static bool HookDoWriteSlot(void** AAddress, void* AValue, const bool AReadOnly)
+{
+  const std::uintptr_t LPage = HookDoPageSize();
+  void* LStart = reinterpret_cast<void*>(reinterpret_cast<std::uintptr_t>(AAddress) & ~(LPage - 1));
+
+  if (AReadOnly && (mprotect(LStart, LPage, PROT_READ | PROT_WRITE) != 0))
+    return false;
+  std::atomic_ref<void*>(*AAddress).store(AValue, std::memory_order_release);
+  if (AReadOnly)
+    mprotect(LStart, LPage, PROT_READ);
+  return true;
+}
+
+// The tables a loaded object's import slots are found by. ReadOnlyStart /
+// ReadOnlyEnd: the pages the loader made read-only (PT_GNU_RELRO, both ends
+// rounded down to a page, as glibc protects it).
+struct HookDoTables
+{
+  const ElfW(Sym)* Symbols = nullptr;
+  const char* Strings = nullptr;
+  const ElfW(Rela)* Plt = nullptr;
+  std::size_t PltSize = 0;
+  const ElfW(Rela)* Rela = nullptr;
+  std::size_t RelaSize = 0;
+  std::uintptr_t ReadOnlyStart = 0;
+  std::uintptr_t ReadOnlyEnd = 0;
+};
+
+// An address from a dynamic section: glibc rewrites them to absolute
+// addresses in every object it loaded, but not in the vDSO, where a value
+// below the load address is still an offset from it
+static std::uintptr_t HookDoDynamicAddress(const std::uintptr_t ABase, const ElfW(Addr) AValue)
+{
+  if (AValue < ABase)
+    return ABase + AValue;
+  return AValue;
+}
+
+// AInfo's tables; false when the object has no dynamic symbols
+static bool HookDoReadTables(const struct dl_phdr_info* AInfo, HookDoTables& ATables)
+{
+  const ElfW(Dyn)* LDynamic = nullptr;
+  const std::uintptr_t LPage = HookDoPageSize();
+  const std::uintptr_t LBase = AInfo->dlpi_addr;
+
+  for (ElfW(Half) LI = 0; LI < AInfo->dlpi_phnum; ++LI)
+  {
+    const ElfW(Phdr)& LHeader = AInfo->dlpi_phdr[LI];
+    if (LHeader.p_type == PT_DYNAMIC)
+      LDynamic = reinterpret_cast<const ElfW(Dyn)*>(LBase + LHeader.p_vaddr);
+    else if (LHeader.p_type == PT_GNU_RELRO)
+    {
+      ATables.ReadOnlyStart = (LBase + LHeader.p_vaddr) & ~(LPage - 1);
+      ATables.ReadOnlyEnd = (LBase + LHeader.p_vaddr + LHeader.p_memsz) & ~(LPage - 1);
+    }
+  }
+  if (LDynamic == nullptr)
+    return false;
+  for (const ElfW(Dyn)* LEntry = LDynamic; LEntry->d_tag != DT_NULL; ++LEntry)
+  {
+    if (LEntry->d_tag == DT_SYMTAB)
+      ATables.Symbols = reinterpret_cast<const ElfW(Sym)*>(HookDoDynamicAddress(LBase, LEntry->d_un.d_ptr));
+    else if (LEntry->d_tag == DT_STRTAB)
+      ATables.Strings = reinterpret_cast<const char*>(HookDoDynamicAddress(LBase, LEntry->d_un.d_ptr));
+    else if (LEntry->d_tag == DT_JMPREL)
+      ATables.Plt = reinterpret_cast<const ElfW(Rela)*>(HookDoDynamicAddress(LBase, LEntry->d_un.d_ptr));
+    else if (LEntry->d_tag == DT_PLTRELSZ)
+      ATables.PltSize = LEntry->d_un.d_val;
+    else if (LEntry->d_tag == DT_RELA)
+      ATables.Rela = reinterpret_cast<const ElfW(Rela)*>(HookDoDynamicAddress(LBase, LEntry->d_un.d_ptr));
+    else if (LEntry->d_tag == DT_RELASZ)
+      ATables.RelaSize = LEntry->d_un.d_val;
+  }
+  return (ATables.Symbols != nullptr) && (ATables.Strings != nullptr);
+}
+
+// Every import slot of AInstall's name in one object (a JUMP_SLOT: a call
+// through the PLT; a GLOB_DAT: the function's address taken or a no-PLT
+// call) that the install has not written yet: recorded, then written with
+// the replacement. False when a write failed (that slot is not recorded;
+// the ones written before it are, so they restore).
+static bool HookDoPatchTables(HookDoInstall& AInstall, const struct dl_phdr_info* AInfo,
+  const HookDoTables& ATables)
+{
+  const ElfW(Rela)* const LLists[2] = { ATables.Plt, ATables.Rela };
+  const std::size_t LCounts[2] = { ATables.PltSize / sizeof(ElfW(Rela)),
+    ATables.RelaSize / sizeof(ElfW(Rela)) };
+  const std::uintptr_t LPage = HookDoPageSize();
+
+  for (int LList = 0; LList < 2; ++LList)
+  {
+    if (LLists[LList] == nullptr)
+      continue;
+    for (std::size_t LI = 0; LI < LCounts[LList]; ++LI)
+    {
+      const ElfW(Rela)& LEntry = LLists[LList][LI];
+      const auto LType = ELF64_R_TYPE(LEntry.r_info);
+      const auto LSymbol = ELF64_R_SYM(LEntry.r_info);
+      if (((LType != R_X86_64_JUMP_SLOT) && (LType != R_X86_64_GLOB_DAT)) || (LSymbol == 0))
+        continue;
+      if (std::strcmp(ATables.Strings + ATables.Symbols[LSymbol].st_name, AInstall.Name.c_str()) != 0)
+        continue;
+      void** const LAddress = reinterpret_cast<void**>(AInfo->dlpi_addr + LEntry.r_offset);
+      if (HookDoKnownSlot(AInstall, LAddress))
+        continue;
+      const std::uintptr_t LSlotPage = reinterpret_cast<std::uintptr_t>(LAddress) & ~(LPage - 1);
+      HookDoSlot LSlot;
+      LSlot.Address = LAddress;
+      LSlot.Old = std::atomic_ref<void*>(*LAddress).load(std::memory_order_acquire);
+      LSlot.Base = AInfo->dlpi_addr;
+      LSlot.Module = (AInfo->dlpi_name != nullptr) ? AInfo->dlpi_name : "";
+      LSlot.ReadOnly = (LSlotPage >= ATables.ReadOnlyStart) && (LSlotPage < ATables.ReadOnlyEnd);
+      AInstall.Slots.push_back(LSlot);
+      if (!HookDoWriteSlot(LAddress, AInstall.Replacement, LSlot.ReadOnly))
+      {
+        AInstall.Slots.pop_back();
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+// dl_iterate_phdr runs these with the loader's lock held, so no object goes
+// away while its slots are read or written
+struct HookDoPatchScan
+{
+  HookDoInstall* Install = nullptr;
+  bool Ok = true;
+};
+
+static int HookDoPatchObject(struct dl_phdr_info* AInfo, std::size_t, void* AData)
+{
+  HookDoPatchScan& LScan = *static_cast<HookDoPatchScan*>(AData);
+  HookDoTables LTables;
+
+  try
+  {
+    if (!HookDoReadTables(AInfo, LTables))
+      return 0;
+    std::lock_guard<std::mutex> LGuard(HookDoTableLock());
+    if (LScan.Install->Removing)
+      return 1;
+    if (!HookDoPatchTables(*LScan.Install, AInfo, LTables))
+    {
+      LScan.Ok = false;
+      return 1;
+    }
+  }
+  catch (...)
+  {
+    LScan.Ok = false;
+    return 1;
+  }
+  return 0;
+}
+
+// Present / Restored: per slot of Install, whether its module is still
+// loaded, and (ARestore) whether the old value went back
+struct HookDoSlotScan
+{
+  HookDoInstall* Install = nullptr;
+  bool Restore = false;
+  std::vector<char> Present;
+  std::vector<char> Restored;
+};
+
+static int HookDoVisitObject(struct dl_phdr_info* AInfo, std::size_t, void* AData)
+{
+  HookDoSlotScan& LScan = *static_cast<HookDoSlotScan*>(AData);
+  const char* LName = (AInfo->dlpi_name != nullptr) ? AInfo->dlpi_name : "";
+
+  try
+  {
+    std::lock_guard<std::mutex> LGuard(HookDoTableLock());
+    for (std::size_t LI = 0; LI < LScan.Install->Slots.size(); ++LI)
+    {
+      const HookDoSlot& LSlot = LScan.Install->Slots[LI];
+      if ((LSlot.Base != AInfo->dlpi_addr) || (LSlot.Module != LName))
+        continue;
+      LScan.Present[LI] = 1;
+      if (LScan.Restore && (LScan.Restored[LI] == 0))
+        LScan.Restored[LI] = HookDoWriteSlot(LSlot.Address, LSlot.Old, LSlot.ReadOnly) ? 1 : 0;
+    }
+  }
+  catch (...)
+  {
+    // The lock could not be taken: this module's slots stay as they are
+  }
+  return 0;
+}
+
+// Drops every slot whose module is gone; with ARestore, writes the others
+// back first. True when no slot is left (with ARestore: all went back). The
+// caller holds the run lock, not the table lock.
+static bool HookDoVisitSlots(HookDoInstall& AInstall, const bool ARestore)
+{
+  HookDoSlotScan LScan;
+  std::vector<HookDoSlot> LKept;
+
+  LScan.Install = &AInstall;
+  LScan.Restore = ARestore;
+  {
+    std::lock_guard<std::mutex> LGuard(HookDoTableLock());
+    LScan.Present.assign(AInstall.Slots.size(), 0);
+    LScan.Restored.assign(AInstall.Slots.size(), 0);
+  }
+  dl_iterate_phdr(HookDoVisitObject, &LScan);
+  std::lock_guard<std::mutex> LGuard(HookDoTableLock());
+  for (std::size_t LI = 0; LI < AInstall.Slots.size(); ++LI)
+  {
+    // Kept: still loaded, and (restoring) not yet written back
+    if ((LScan.Present[LI] != 0) && ((!ARestore) || (LScan.Restored[LI] == 0)))
+      LKept.push_back(AInstall.Slots[LI]);
+  }
+  AInstall.Slots.swap(LKept);
+  return (!ARestore) || AInstall.Slots.empty();
+}
+
+// Writes AInstall into every loaded object; false when a slot could not be
+// written (the ones that were stay recorded)
+static bool HookDoApply(HookDoInstall& AInstall)
+{
+  HookDoPatchScan LScan;
+
+  LScan.Install = &AInstall;
+  dl_iterate_phdr(HookDoPatchObject, &LScan);
+  return LScan.Ok;
+}
+
+// The function a name's slots resolve to when nothing is hooked
+static void* HookDoOriginal(const char* AName)
+{
+  return dlsym(RTLD_DEFAULT, AName);
+}
+
+#else
+
+// Stores AValue in an import address table entry: the page made writable for
+// the store, its protection put back after it. False when the protection
+// cannot be changed (nothing written then).
+static bool HookDoWriteSlot(void** AAddress, void* AValue, const bool)
+{
+  DWORD LOld = 0;
+  DWORD LUnused = 0;
+
+  if (!VirtualProtect(AAddress, sizeof(void*), PAGE_READWRITE, &LOld))
+    return false;
+  std::atomic_ref<void*>(*AAddress).store(AValue, std::memory_order_release);
+  VirtualProtect(AAddress, sizeof(void*), LOld, &LUnused);
+  return true;
+}
+
+// Every loaded module, in load order; empty when they cannot be listed
+static std::vector<HMODULE> HookDoModules()
+{
+  std::vector<HMODULE> LModules(256);
+  DWORD LNeeded = 0;
+
+  for (int LTry = 0; LTry < 4; ++LTry)
+  {
+    if (!K32EnumProcessModules(GetCurrentProcess(), LModules.data(),
+      static_cast<DWORD>(LModules.size() * sizeof(HMODULE)), &LNeeded))
+      return std::vector<HMODULE>();
+    if (LNeeded <= (LModules.size() * sizeof(HMODULE)))
+    {
+      LModules.resize(LNeeded / sizeof(HMODULE));
+      return LModules;
+    }
+    LModules.resize((LNeeded / sizeof(HMODULE)) + 16);
+  }
+  return std::vector<HMODULE>();
+}
+
+// The module containing AAddress, its load count raised so it cannot unload
+// until HookDoUnpin; nullptr when no loaded module contains it
+static HMODULE HookDoPin(const void* AAddress)
+{
+  HMODULE LModule = nullptr;
+
+  if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+    static_cast<LPCWSTR>(AAddress), &LModule))
+    return nullptr;
+  return LModule;
+}
+
+static void HookDoUnpin(const HMODULE AModule)
+{
+  if (AModule != nullptr)
+    FreeLibrary(AModule);
+}
+
+// Calls AVisit(slot address) for every import address table entry of AName
+// in AModule (imported by name, from any DLL). The module must stay loaded
+// meanwhile (pinned, or inside the loader's notification). AVisit returns
+// false to stop; the result is false then.
+template <typename TVisit>
+static bool HookDoEachImport(const HMODULE AModule, const char* AName, TVisit&& AVisit)
+{
+  const unsigned char* LBase = reinterpret_cast<const unsigned char*>(AModule);
+  const auto* LDos = reinterpret_cast<const IMAGE_DOS_HEADER*>(LBase);
+
+  if ((LBase == nullptr) || (LDos->e_magic != IMAGE_DOS_SIGNATURE))
+    return true;
+  const auto* LNt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(LBase + LDos->e_lfanew);
+  if ((LNt->Signature != IMAGE_NT_SIGNATURE) ||
+    (LNt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC))
+    return true;
+  const IMAGE_DATA_DIRECTORY& LDirectory =
+    LNt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+  if ((LDirectory.VirtualAddress == 0) || (LDirectory.Size == 0))
+    return true;
+  for (const auto* LImport = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(LBase +
+    LDirectory.VirtualAddress); LImport->Name != 0; ++LImport)
+  {
+    // Without its name table a descriptor's entries cannot be told apart
+    if (LImport->OriginalFirstThunk == 0)
+      continue;
+    const auto* LNames = reinterpret_cast<const IMAGE_THUNK_DATA64*>(LBase + LImport->OriginalFirstThunk);
+    auto* LSlots = reinterpret_cast<IMAGE_THUNK_DATA64*>(const_cast<unsigned char*>(LBase) +
+      LImport->FirstThunk);
+    for (; LNames->u1.AddressOfData != 0; ++LNames, ++LSlots)
+    {
+      if (IMAGE_SNAP_BY_ORDINAL64(LNames->u1.Ordinal))
+        continue;
+      const auto* LByName = reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(LBase +
+        LNames->u1.AddressOfData);
+      if (std::strcmp(reinterpret_cast<const char*>(LByName->Name), AName) != 0)
+        continue;
+      if (!AVisit(reinterpret_cast<void**>(&LSlots->u1.Function)))
+        return false;
+    }
+  }
+  return true;
+}
+
+// Every not yet recorded import slot of AInstall's name in AModule: recorded,
+// then written with the replacement. The caller holds the table lock and
+// keeps AModule loaded. False when a write failed (that slot unrecorded).
+static bool HookDoPatchModule(HookDoInstall& AInstall, const HMODULE AModule)
+{
+  if (AInstall.Removing)
+    return true;
+  return HookDoEachImport(AModule, AInstall.Name.c_str(), [&](void** AAddress)
+  {
+    if (HookDoKnownSlot(AInstall, AAddress))
+      return true;
+    HookDoSlot LSlot;
+    LSlot.Address = AAddress;
+    LSlot.Old = std::atomic_ref<void*>(*AAddress).load(std::memory_order_acquire);
+    LSlot.Base = reinterpret_cast<std::uintptr_t>(AModule);
+    AInstall.Slots.push_back(LSlot);
+    if (!HookDoWriteSlot(AAddress, AInstall.Replacement, false))
+    {
+      AInstall.Slots.pop_back();
+      return false;
+    }
+    return true;
+  });
+}
+
+// Writes AInstall into every loaded module, each pinned meanwhile; false when
+// a slot could not be written (the ones that were stay recorded)
+static bool HookDoApply(HookDoInstall& AInstall)
+{
+  bool LOk = true;
+
+  for (const HMODULE LListed : HookDoModules())
+  {
+    const HMODULE LModule = HookDoPin(LListed);
+    if (LModule == nullptr)
+      continue;
+    {
+      std::lock_guard<std::mutex> LGuard(HookDoTableLock());
+      if (!HookDoPatchModule(AInstall, LModule))
+        LOk = false;
+    }
+    HookDoUnpin(LModule);
+    if (!LOk)
+      break;
+  }
+  return LOk;
+}
+
+// Drops every slot whose module is gone; with ARestore, writes the others
+// back first, each with its module pinned (and, once pinned, still recorded:
+// a module that unloaded meanwhile had its slots dropped by the
+// notification). True when no slot is left (with ARestore: all went back).
+// The caller holds the run lock, not the table lock.
+static bool HookDoVisitSlots(HookDoInstall& AInstall, const bool ARestore)
+{
+  std::vector<void**> LAddresses;
+
+  {
+    std::lock_guard<std::mutex> LGuard(HookDoTableLock());
+    for (const HookDoSlot& LSlot : AInstall.Slots)
+      LAddresses.push_back(LSlot.Address);
+  }
+  for (void** LAddress : LAddresses)
+  {
+    const HMODULE LModule = HookDoPin(LAddress);
+    std::lock_guard<std::mutex> LGuard(HookDoTableLock());
+    for (auto LCursor = AInstall.Slots.begin(); LCursor != AInstall.Slots.end(); ++LCursor)
+    {
+      if (LCursor->Address != LAddress)
+        continue;
+      if ((LModule == nullptr) || (reinterpret_cast<std::uintptr_t>(LModule) != LCursor->Base))
+        AInstall.Slots.erase(LCursor);
+      else if (ARestore && HookDoWriteSlot(LCursor->Address, LCursor->Old, false))
+        AInstall.Slots.erase(LCursor);
+      break;
+    }
+    HookDoUnpin(LModule);
+  }
+  std::lock_guard<std::mutex> LGuard(HookDoTableLock());
+  return (!ARestore) || AInstall.Slots.empty();
+}
+
+// The function AName's slots reach: the current value of the first import
+// slot of it in load order; when no module imports it yet, the first module
+// that exports it
+static void* HookDoOriginal(const char* AName)
+{
+  const std::vector<HMODULE> LModules = HookDoModules();
+  void* LFound = nullptr;
+
+  for (const HMODULE LListed : LModules)
+  {
+    const HMODULE LModule = HookDoPin(LListed);
+    if (LModule == nullptr)
+      continue;
+    HookDoEachImport(LModule, AName, [&](void** AAddress)
+    {
+      LFound = std::atomic_ref<void*>(*AAddress).load(std::memory_order_acquire);
+      return false;
+    });
+    HookDoUnpin(LModule);
+    if (LFound != nullptr)
+      return LFound;
+  }
+  for (const HMODULE LListed : LModules)
+  {
+    LFound = HookDoExport(LListed, AName);
+    if (LFound != nullptr)
+      return LFound;
+  }
+  return nullptr;
+}
+
+#endif
+
+// Registers the Windows load notification (nothing to do on Linux: the
+// dlopen / dlclose wrappers are always in place). Declared here, defined
+// with the per-target run-time code below.
+#if defined(_WIN32)
+static bool HookDoEnsureNotification();
+#else
+static bool HookDoEnsureNotification()
+{
+  return true;
+}
+#endif
+
+// HookInstall: AName's slots in every loaded module take AReplacement.
+// AOriginal / AState are the caller's Hook record. False with errno: EINVAL
+// (nil or empty name, nil replacement), EEXIST (this record or another one
+// already has AName installed), ENOENT (no loaded module defines AName),
+// EACCES (a slot could not be written: every slot written is put back),
+// ENOMEM.
+static bool HookDoInstallName(const char* AName, void* AReplacement, void*& AOriginal,
+  void*& AState)
+{
+  HookDoInstall* LInstall = nullptr;
+  bool LJoined = false;
+  void* LOriginal;
+
+  if ((AName == nullptr) || (AName[0] == '\0') || (AReplacement == nullptr))
+  {
+    errno = EINVAL;
+    return false;
+  }
+  if (AState != nullptr)
+  {
+    errno = EEXIST;
+    return false;
+  }
+  try
+  {
+    std::lock_guard<std::mutex> LGuard(HookDoRunLock());
+    {
+      std::lock_guard<std::mutex> LTable(HookDoTableLock());
+      for (const HookDoInstall* LOther : HookDoInstalls())
+      {
+        if (LOther->Name == AName)
+        {
+          errno = EEXIST;
+          return false;
+        }
+      }
+    }
+    LOriginal = HookDoOriginal(AName);
+    if (LOriginal == nullptr)
+    {
+      errno = ENOENT;
+      return false;
+    }
+    // The Windows load notification must be in place before this install can
+    // join: a DLL loaded after it joins is only patched by the notification
+    HookDoEnsureNotification();
+    LInstall = new HookDoInstall();
+    LInstall->Name = AName;
+    LInstall->Replacement = AReplacement;
+    {
+      // Joined and counted before the apply, so a module loaded during it is
+      // patched by the load hook with this install, never missed
+      std::lock_guard<std::mutex> LTable(HookDoTableLock());
+      HookDoInstalls().push_back(LInstall);
+      HookDoInstallCount.fetch_add(1);
+      LJoined = true;
+    }
+    if (!HookDoApply(*LInstall))
+    {
+      LInstall->Removing = true;
+      HookDoVisitSlots(*LInstall, true);
+      std::lock_guard<std::mutex> LTable(HookDoTableLock());
+      for (auto LCursor = HookDoInstalls().begin(); LCursor != HookDoInstalls().end(); ++LCursor)
+      {
+        if (*LCursor == LInstall)
+        {
+          HookDoInstalls().erase(LCursor);
+          break;
+        }
+      }
+      HookDoInstallCount.fetch_sub(1);
+      delete LInstall;
+      errno = EACCES;
+      return false;
+    }
+  }
+  catch (...)
+  {
+    // Out of memory before the record joined the list: nothing was written
+    if ((LInstall != nullptr) && (!LJoined))
+      delete LInstall;
+    errno = ENOMEM;
+    return false;
+  }
+  AOriginal = LOriginal;
+  AState = LInstall;
+  return true;
+}
+
+// HookUninstall: every slot whose module is still loaded gets back what it
+// held; AState becomes nil, AOriginal stays (a replacement still running on
+// another thread may call it). False with errno: EINVAL (not installed),
+// EACCES (a slot could not be written back: still installed, the slots that
+// did go back are done), ENOMEM.
+static bool HookDoUninstallState(void*& AState)
+{
+  HookDoInstall* LInstall;
+
+  if (AState == nullptr)
+  {
+    errno = EINVAL;
+    return false;
+  }
+  try
+  {
+    std::lock_guard<std::mutex> LGuard(HookDoRunLock());
+    {
+      std::lock_guard<std::mutex> LTable(HookDoTableLock());
+      LInstall = HookDoFindInstall(AState);
+      // Removing: a load hook running now does not patch it back in while the
+      // restore pass is putting slots back
+      if (LInstall != nullptr)
+        LInstall->Removing = true;
+    }
+    if (LInstall == nullptr)
+    {
+      errno = EINVAL;
+      return false;
+    }
+    if (!HookDoVisitSlots(*LInstall, true))
+    {
+      // Still installed: a later uninstall (or this one retried) finishes it
+      std::lock_guard<std::mutex> LTable(HookDoTableLock());
+      LInstall->Removing = false;
+      errno = EACCES;
+      return false;
+    }
+    std::lock_guard<std::mutex> LTable(HookDoTableLock());
+    for (auto LCursor = HookDoInstalls().begin(); LCursor != HookDoInstalls().end(); ++LCursor)
+    {
+      if (*LCursor == LInstall)
+      {
+        HookDoInstalls().erase(LCursor);
+        break;
+      }
+    }
+    delete LInstall;
+    HookDoInstallCount.fetch_sub(1);
+  }
+  catch (...)
+  {
+    errno = ENOMEM;
+    return false;
+  }
+  AState = nullptr;
+  return true;
+}
+
+#if !defined(_WIN32)
+
+// Linux, after the program's own outermost dlopen returns (the loader lock
+// is released then, so the run lock is safe to take): every install into the
+// modules that came with the load. A slot that cannot be written there is
+// left as the loader set it (no caller to tell: the load itself succeeded).
+// The install list changes only under the run lock, held here.
+static void HookDoReapply()
+{
+  if (HookDoInstallCount.load() == 0)
+    return;
+  try
+  {
+    std::lock_guard<std::mutex> LGuard(HookDoRunLock());
+    for (HookDoInstall* LInstall : HookDoInstalls())
+      HookDoApply(*LInstall);
+  }
+  catch (...)
+  {
+  }
+}
+
+// Linux, after the outermost dlclose: slots of modules that went away are
+// forgotten
+static void HookDoPrune()
+{
+  if (HookDoInstallCount.load() == 0)
+    return;
+  try
+  {
+    std::lock_guard<std::mutex> LGuard(HookDoRunLock());
+    for (HookDoInstall* LInstall : HookDoInstalls())
+      HookDoVisitSlots(*LInstall, false);
+  }
+  catch (...)
+  {
+  }
+}
+
+#endif
+
+#if defined(_WIN32)
+
+// Windows: LdrRegisterDllNotification tells us of every DLL load and unload
+// (ntdll, resolved once). The callback runs inside the loader lock, so it
+// takes the table lock only (never the run lock) and never loads or frees a
+// module. A load of the named DLL re-applies the installs into it; an unload
+// prunes the slots of modules that went away.
+
+#define LDR_DLL_NOTIFICATION_REASON_LOADED 1
+#define LDR_DLL_NOTIFICATION_REASON_UNLOADED 2
+
+// LDR_DLL_LOADED_NOTIFICATION_DATA (the unloaded form has the same layout).
+// The two names are PCUNICODE_STRINGs, never read here: kept as pointers of
+// the same size so DllBase sits where the loader writes it.
+struct HookDoNotificationData
+{
+  ULONG Flags;
+  const void* FullDllName;
+  const void* BaseDllName;
+  PVOID DllBase;
+  ULONG SizeOfImage;
+};
+
+using HookDoNotificationFn = VOID (CALLBACK*)(ULONG, const HookDoNotificationData*, PVOID);
+// The result is an NTSTATUS (a LONG, 0 = success; its header is not included)
+using HookDoRegisterFn = LONG (NTAPI*)(ULONG, HookDoNotificationFn, PVOID, PVOID*);
+
+static PVOID GHookDoNotificationCookie = nullptr;
+
+// Only the module the notification names is touched: one being loaded is
+// patched (it cannot unload while the loader holds its lock), one unloading
+// has its slots dropped. No module is listed, pinned or freed here.
+static VOID CALLBACK HookDoNotification(ULONG AReason, const HookDoNotificationData* AData, PVOID)
+{
+  if ((HookDoInstallCount.load() == 0) || (AData == nullptr) || (AData->DllBase == nullptr))
+    return;
+  try
+  {
+    const HMODULE LModule = static_cast<HMODULE>(AData->DllBase);
+    const std::uintptr_t LBase = reinterpret_cast<std::uintptr_t>(AData->DllBase);
+    std::lock_guard<std::mutex> LGuard(HookDoTableLock());
+    for (HookDoInstall* LInstall : HookDoInstalls())
+    {
+      if (AReason == LDR_DLL_NOTIFICATION_REASON_LOADED)
+        HookDoPatchModule(*LInstall, LModule);
+      else if (AReason == LDR_DLL_NOTIFICATION_REASON_UNLOADED)
+      {
+        std::vector<HookDoSlot>& LSlots = LInstall->Slots;
+        for (auto LCursor = LSlots.begin(); LCursor != LSlots.end(); )
+        {
+          if (LCursor->Base == LBase)
+            LCursor = LSlots.erase(LCursor);
+          else
+            ++LCursor;
+        }
+      }
+    }
+  }
+  catch (...)
+  {
+    // Out of memory recording a slot: that module keeps the loader's value
+  }
+}
+
+// Registers the notification once (the first install). True when it is in
+// place; false leaves the install to patch only the modules loaded now
+// (later loads are not caught). The caller holds the run lock.
+static bool HookDoEnsureNotification()
+{
+  static std::atomic<bool> LRegistered{false};
+  HMODULE LNtdll;
+  HookDoRegisterFn LRegister;
+
+  if (LRegistered.load(std::memory_order_acquire))
+    return true;
+  LNtdll = GetModuleHandleW(L"ntdll.dll");
+  if (LNtdll == nullptr)
+    return false;
+  LRegister = reinterpret_cast<HookDoRegisterFn>(
+    reinterpret_cast<void*>(GetProcAddress(LNtdll, "LdrRegisterDllNotification")));
+  if (LRegister == nullptr)
+    return false;
+  if (LRegister(0, HookDoNotification, nullptr, &GHookDoNotificationCookie) != 0)
+    return false;
+  LRegistered.store(true, std::memory_order_release);
+  return true;
+}
+
+#else
+
+// The program's own dlopen / dlclose (link-time hooks, hidden: never
+// exported, so a shared library's own dlopen calls stay glibc's, which finds
+// the caller's RUNPATH / $ORIGIN by the caller's address). The installs are
+// re-applied or pruned when the outermost call of the thread returns: a
+// library constructor's nested dlopen runs inside the loader's lock, and
+// taking HookDoRunLock there could deadlock against a HookInstall waiting on
+// the loader.
+static thread_local int GHookDoLoadDepth = 0;
+static void* GHookDoRealDlopen = nullptr;
+static void* GHookDoRealDlclose = nullptr;
+
+extern "C" __attribute__((visibility("hidden"))) void* HookDoDlopen(const char* AFile, int AMode)
+  __asm__("dlopen");
+
+extern "C" __attribute__((visibility("hidden"))) void* HookDoDlopen(const char* AFile, int AMode)
+{
+  using TReal = void* (*)(const char*, int);
+  TReal LReal;
+  void* LHandle;
+
+  LReal = reinterpret_cast<TReal>(HookDoReal(GHookDoRealDlopen, nullptr, "dlopen", false));
+  if (LReal == nullptr)
+    return nullptr;
+  ++GHookDoLoadDepth;
+  LHandle = LReal(AFile, AMode);
+  --GHookDoLoadDepth;
+  if ((LHandle != nullptr) && (GHookDoLoadDepth == 0))
+    HookDoReapply();
+  return LHandle;
+}
+
+extern "C" __attribute__((visibility("hidden"))) int HookDoDlclose(void* AHandle)
+  __asm__("dlclose");
+
+extern "C" __attribute__((visibility("hidden"))) int HookDoDlclose(void* AHandle)
+{
+  using TReal = int (*)(void*);
+  TReal LReal;
+  int LResult;
+
+  LReal = reinterpret_cast<TReal>(HookDoReal(GHookDoRealDlclose, nullptr, "dlclose", false));
+  if (LReal == nullptr)
+    return -1;
+  ++GHookDoLoadDepth;
+  LResult = LReal(AHandle);
+  --GHookDoLoadDepth;
+  if (GHookDoLoadDepth == 0)
+    HookDoPrune();
+  return LResult;
+}
+
+#endif
+
+@ifdef TARGET_X86_64_LINUX_GNU
+exported const
+  /// glibc's stat version on x86_64 (_STAT_VER, which the glibc headers zig
+  /// ships do not define): the first argument of __xstat, __fxstat, __lxstat,
+  /// __xstat64, __fxstat64 and __lxstat64, the real functions of a Linux
+  /// stat-family hook (see "Finding the real function" in the unit header).
+  /// Linux only.
+  /// @example `return LReal(HookStatVersion, APath, ABuf);`
+  /// @since 0.2
+  HookStatVersion: int32 = 1;
+@endif
+
+/// Finds the real function a link-time hook of a C runtime name stands in
+/// for: on Linux the next definition of AName after the program
+/// (dlsym(RTLD_NEXT)), on Windows the export AName of ucrtbase.dll. The first
+/// call resolves it into ASlot; later calls read ASlot (one atomic load), so a
+/// hook may call this on every entry. Safe on several threads at once, and it
+/// never allocates, so it is safe inside the CRT and before the program
+/// starts.
+/// @param ASlot the hook's own pointer, nil until the first call; keep one per
+///   hooked name, at module level
+/// @param AName the real function's C name: the hooked name, or, for a name
+///   a static C runtime object defines (an empty Real in HookABI.bindlist.h),
+///   the function that object calls (Linux: hook stat, real "__xstat", called
+///   with HookStatVersion first; Windows: hook stat64i32, real "_stat64i32")
+/// @returns the real function, to be cast to the hook's routine type with
+///   reinterpret_cast; nil when the C runtime has no AName (the slot stays nil
+///   and the next call looks again): the hook must not call it then
+/// @example `LReal := reinterpret_cast<FopenFn>(HookReal(GRealFopen, "fopen"));`
+/// @see HookReal(ASlot, ALibrary, AName) for a function of another library
+/// @since 0.2
+exported routine HookReal(var ASlot: ptr; const AName: ptr to const char): ptr;
+begin
+  return HookDoReal(ASlot, nil, AName, false);
+end;
+
+/// Finds the real function of a hooked name in one named library, for a
+/// function outside the C runtime (a Win32 API in kernel32.dll, a function
+/// of a shared library). The library must already be loaded: this never
+/// loads one (Windows GetModuleHandleW, Linux dlopen with RTLD_NOLOAD). The
+/// first call resolves into ASlot, later calls read it, as the two-argument
+/// form; safe on several threads at once. On Linux the first call goes
+/// through the dynamic loader (dlopen / dlclose), so a hook that the loader
+/// itself may enter (malloc and its family) resolves with the two-argument
+/// form instead.
+/// @param ASlot the hook's own pointer, nil until the first call; keep one per
+///   hooked name, at module level
+/// @param ALibrary the library's file name, UTF-8 (Windows: "kernel32.dll";
+///   Linux: the soname, "libc.so.6")
+/// @param AName the real function's C name
+/// @returns the real function, to be cast to the hook's routine type with
+///   reinterpret_cast; nil when the library is not loaded or has no AName (the
+///   slot stays nil and the next call looks again): the hook must not call it
+///   then
+/// @example `LReal := reinterpret_cast<GetAttrFn>(HookReal(GRealGetAttr, "kernel32.dll", "GetFileAttributesA"));`
+/// @see HookReal(ASlot, AName) for a C runtime name
+/// @since 0.2
+exported routine HookReal(var ASlot: ptr; const ALibrary: ptr to const char; const AName: ptr to const char): ptr;
+begin
+  return HookDoReal(ASlot, ALibrary, AName, true);
+end;
+
+/// A run-time hook, filled by HookInstall: while installed, every call of
+/// the hooked name through a module's import slot (Linux a GOT entry, Windows
+/// an import address table entry) reaches the replacement instead. A Hook
+/// variable starts zeroed (not installed); keep it while installed.
+/// @see HookInstall
+/// @see HookUninstall
+/// @since 0.2
+exported type
+  Hook = record
+    /// The function the hooked name's slots reached before the install (the
+    /// replacement calls it for the real work; calling the name itself from
+    /// the replacement would reach the replacement again). Stays valid after
+    /// HookUninstall: a replacement still running on another thread may call
+    /// it.
+    Original: ptr;
+    /// HookABI's record of the install; nil when not installed
+    State: ptr;
+  end;
+
+/// Installs a run-time hook: AName's import slot in every module loaded now
+/// takes AReplacement, and so does every module the program loads later
+/// (Linux: through the program's own dlopen; Windows: by the loader's DLL
+/// notification). Code that calls AName directly, not through an import slot
+/// (the module that defines it, a link-time hook), is not reached: that is
+/// the link-time level's job. One install per name at a time. Thread-safe;
+/// installs and uninstalls run one at a time.
+/// @param AHook the record to fill: zeroed, or uninstalled
+/// @param AName the function's C name, as the modules import it
+/// @param AReplacement a function of the same C signature and calling
+///   convention (a `routine clink`, cast to ptr)
+/// @returns true when installed (AHook.Original and AHook.State set; a name
+///   no module imports yet is installed for the modules loaded later); false
+///   with errno: EINVAL (nil or empty AName, nil AReplacement), EEXIST (AHook
+///   is installed, or AName already is), ENOENT (no loaded module defines
+///   AName), EACCES (a slot could not be written: every slot written is put
+///   back), ENOMEM
+/// @example `if HookInstall(GGetenv, "getenv", cpp("reinterpret_cast<void*>(&MyGetenv)")) then ... end;`
+/// @see HookUninstall
+/// @since 0.2
+exported routine HookInstall(var AHook: Hook; const AName: ptr to const char; const AReplacement: ptr): bool;
+begin
+  return HookDoInstallName(AName, AReplacement, AHook.Original, AHook.State);
+end;
+
+/// Uninstalls a run-time hook: every slot it wrote whose module is still
+/// loaded gets back exactly what it held before; nothing else is written.
+/// AHook.State becomes nil; AHook.Original stays.
+/// @param AHook a record HookInstall filled
+/// @returns true when uninstalled; false with errno: EINVAL (AHook is not
+///   installed), EACCES (a slot could not be written back: the hook stays
+///   installed, the slots that went back stay back), ENOMEM
+/// @example `HookUninstall(GGetenv);`
+/// @see HookInstall
+/// @since 0.2
+exported routine HookUninstall(var AHook: Hook): bool;
+begin
+  return HookDoUninstallState(AHook.State);
+end;
+
+end.

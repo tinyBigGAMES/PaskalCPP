@@ -21,9 +21,17 @@
   over its own growing buffer, an IO a program defines itself with
   CreateIO, the nil handle, and a file IO in each FileMode (its file in
   repo\bin\output, its name not ASCII; a missing file and a folder give
-  nil). An IOSource opens IOs by path: a folder source over repo\bin
-  (entries under output written, read, appended through it; a folder, a
-  missing entry and every refused spelling give nil / false / -1), one over
+  nil). IOTruncate shortens and lengthens owned memory, caller memory
+  (within its block) and a file IO (its read-ahead and pending writes
+  settled first, zeros where it grows); read-only IOs, an IO without the
+  callback, a negative size and nil refuse. A file IO renamed while open
+  is resized through its open handle: on Linux the file put under the old
+  name is kept (in the system temp folder: WSL's /mnt/c resizes by path);
+  Windows refuses that rename. The rows differ by target, so each target
+  has its own EXPECT block. An IOSource opens IOs by path:
+  a folder source over repo\bin (entries under output written, read,
+  appended through it; a folder, a missing entry and every refused
+  spelling give nil / false / -1), one over
   repo\bin\output where a `..` above the root is refused, and a source the
   program defines (its callbacks see only the canonical path). A zip source
   reads an archive's directory through an IO (by path, over a file IO the
@@ -46,7 +54,7 @@
   How to check, from repo\bin:
     pcpp res\tests\std_customio.pcpp -r
     pcpp res\tests\std_customio.pcpp -r -t x86_64-linux-gnu   (runs in WSL)
-  EXPECT:
+  EXPECT windows:
     ok mem create
     ok mem size
     ok mem read 3
@@ -201,6 +209,70 @@
     ok file folder write
     ok file removed
     ok file gone
+    ok trunc mem write 10
+    ok trunc mem shrink
+    ok trunc mem shrink size
+    ok trunc mem shrink tell
+    ok trunc mem grow
+    ok trunc mem grow size
+    ok trunc mem grow tell
+    ok trunc mem grow read
+    ok trunc mem grow zeros
+    ok trunc mem seek start
+    ok trunc mem kept bytes
+    ok trunc mem negative
+    ok trunc mem negative error
+    ok trunc mem negative keeps size
+    ok trunc mem empty
+    ok trunc mem close
+    ok trunc caller shrink
+    ok trunc caller grow
+    ok trunc caller grow zeros
+    ok trunc caller past block
+    ok trunc caller past block error
+    ok trunc caller past block keeps size
+    ok trunc caller close
+    ok trunc ro
+    ok trunc ro readonly
+    ok trunc ro keeps size
+    ok trunc ro close
+    ok trunc no callback
+    ok trunc no callback error
+    ok trunc no callback close
+    ok trunc nil
+    ok trunc file write 8
+    ok trunc file write close
+    ok trunc file read 2
+    ok trunc file shrink
+    ok trunc file shrink tell
+    ok trunc file shrink size
+    ok trunc file read after shrink
+    ok trunc file read after shrink bytes
+    ok trunc file seek end
+    ok trunc file write 2
+    ok trunc file pending
+    ok trunc file pending size
+    ok trunc file tell past end
+    ok trunc file grow
+    ok trunc file grow size
+    ok trunc file seek start
+    ok trunc file read all
+    ok trunc file bytes
+    ok trunc file negative
+    ok trunc file negative error
+    ok trunc file close
+    ok trunc file ro
+    ok trunc file ro readonly
+    ok trunc file ro keeps size
+    ok trunc file ro close
+    ok trunc file removed
+    ok trunc renamed write 8
+    ok trunc renamed open refused
+    ok trunc renamed shrink
+    ok trunc renamed io size
+    ok trunc renamed close
+    ok trunc renamed file size
+    ok trunc renamed removed
     ok folder create
     ok folder write open
     ok folder write 5
@@ -239,6 +311,23 @@
     ok folder refuse trailing space
     ok folder refuse device
     ok folder refuse device ext
+    ok folder can remove
+    ok folder remove made
+    ok folder remove
+    ok folder remove gone
+    ok folder remove file gone
+    ok folder remove again
+    ok folder remove subfolder
+    ok folder remove refused path
+    ok folder remove empty path
+    ok folder remove open made
+    ok folder remove open read
+    ok folder remove open refused
+    ok folder remove open kept
+    ok folder remove open reads on
+    ok folder remove open close
+    ok folder remove after close
+    ok folder remove open file gone
     ok folder close
     ok folder output create
     ok folder inner dotdot
@@ -258,14 +347,25 @@
     ok source user negative size
     ok source user size called
     ok source user no open
+    ok source user no remove
+    ok source user no remove not called
     ok source user close result
     ok source user close called
+    ok source user can remove
+    ok source user remove
+    ok source user remove canonical
+    ok source user remove false
+    ok source user remove refused
+    ok source user remove refused not called
+    ok source user remove close
     ok source nil exists
     ok source nil size
+    ok source nil remove
     ok source nil close
     ok source none open
     ok source none exists
     ok source none size
+    ok source none remove
     ok source none close
     ok zip stored create
     ok zip stored exists
@@ -289,6 +389,8 @@
     ok zip stored dot segments
     ok zip stored missing exists
     ok zip stored missing size
+    ok zip stored no remove
+    ok zip stored remove kept
     ok zip stored refused path
     ok zip stored close
     ok zip io file open
@@ -537,7 +639,597 @@
     ok file io no password
     ok file io nil archive
     done 0
-    [Heap] Allocs: 141, Frees: 141, Leaked: 0
+    [Heap] Allocs: 157, Frees: 157, Leaked: 0
+  EXPECT linux:
+    ok mem create
+    ok mem size
+    ok mem read 3
+    ok mem read bytes
+    ok mem tell 3
+    ok mem status ready
+    ok mem seek current
+    ok mem short read
+    ok mem short read bytes
+    ok mem short read eof
+    ok mem read at end
+    ok mem read at end eof
+    ok mem seek end
+    ok mem seek clears eof
+    ok mem seek start
+    ok mem write 2
+    ok mem write bytes
+    ok mem write tell
+    ok mem seek before start
+    ok mem seek before start error
+    ok mem failed seek keeps position
+    ok mem seek past end
+    ok mem seek back past start
+    ok mem seek to end
+    ok mem write at end
+    ok mem write at end error
+    ok mem write never grows
+    ok mem seek 7
+    ok mem partial write
+    ok mem partial write error
+    ok mem partial write byte
+    ok mem zero read
+    ok mem flush
+    ok mem close
+    ok ro create
+    ok ro read
+    ok ro read bytes
+    ok ro write
+    ok ro write readonly
+    ok ro memory unchanged
+    ok ro close
+    ok grow create
+    ok grow empty size
+    ok grow empty read
+    ok grow empty eof
+    ok grow write 1000
+    ok grow size 1000
+    ok grow tell 1000
+    ok grow seek start
+    ok grow read 1000
+    ok grow read bytes
+    ok grow seek 500
+    ok grow overwrite
+    ok grow overwrite keeps size
+    ok grow seek 499
+    ok grow read across
+    ok grow read across bytes
+    ok grow seek end
+    ok grow append
+    ok grow append size
+    ok grow seek past end
+    ok grow close
+    ok user create
+    ok user read 4
+    ok user read bytes
+    ok user write
+    ok user write readonly
+    ok user flush none
+    ok user seek end
+    ok user short read
+    ok user short read bytes
+    ok user short read eof
+    ok user tell
+    ok user size
+    ok user close
+    ok user close called
+    ok bare read
+    ok bare seek
+    ok bare seek error
+    ok bare tell
+    ok bare size
+    ok bare close
+    ok bare close no callback
+    ok nil read
+    ok nil write
+    ok nil seek
+    ok nil tell
+    ok nil size
+    ok nil flush
+    ok nil close
+    ok nil status
+    ok invalid nil data
+    ok invalid negative size
+    ok empty caller memory
+    ok empty read
+    ok empty read eof
+    ok empty close
+    ok file write create
+    ok file write 8
+    ok file write tell
+    ok file write size
+    ok file write read
+    ok file write read writeonly
+    ok file write seek past end
+    ok file write after gap
+    ok file write gap size
+    ok file write flush
+    ok file write close
+    ok file read create
+    ok file read size
+    ok file read all
+    ok file read bytes
+    ok file read eof
+    ok file read seek end
+    ok file read seek clears eof
+    ok file read seek current
+    ok file read after seek
+    ok file read after seek byte
+    ok file read seek before start
+    ok file read seek before start error
+    ok file read failed seek keeps position
+    ok file read write
+    ok file read write readonly
+    ok file read close
+    ok file rw create
+    ok file rw keeps size
+    ok file rw read 2
+    ok file rw write after read
+    ok file rw tell
+    ok file rw write 2
+    ok file rw read after write
+    ok file rw read after write byte
+    ok file rw seek start
+    ok file rw read 6
+    ok file rw bytes
+    ok file rw size
+    ok file rw close
+    ok file append create
+    ok file append seek start
+    ok file append write
+    ok file append tell
+    ok file append size
+    ok file append read
+    ok file append read writeonly
+    ok file append close
+    ok file append reread
+    ok file append at end
+    ok file append reread close
+    ok file missing read
+    ok file missing readwrite
+    ok file folder
+    ok file folder write
+    ok file removed
+    ok file gone
+    ok trunc mem write 10
+    ok trunc mem shrink
+    ok trunc mem shrink size
+    ok trunc mem shrink tell
+    ok trunc mem grow
+    ok trunc mem grow size
+    ok trunc mem grow tell
+    ok trunc mem grow read
+    ok trunc mem grow zeros
+    ok trunc mem seek start
+    ok trunc mem kept bytes
+    ok trunc mem negative
+    ok trunc mem negative error
+    ok trunc mem negative keeps size
+    ok trunc mem empty
+    ok trunc mem close
+    ok trunc caller shrink
+    ok trunc caller grow
+    ok trunc caller grow zeros
+    ok trunc caller past block
+    ok trunc caller past block error
+    ok trunc caller past block keeps size
+    ok trunc caller close
+    ok trunc ro
+    ok trunc ro readonly
+    ok trunc ro keeps size
+    ok trunc ro close
+    ok trunc no callback
+    ok trunc no callback error
+    ok trunc no callback close
+    ok trunc nil
+    ok trunc file write 8
+    ok trunc file write close
+    ok trunc file read 2
+    ok trunc file shrink
+    ok trunc file shrink tell
+    ok trunc file shrink size
+    ok trunc file read after shrink
+    ok trunc file read after shrink bytes
+    ok trunc file seek end
+    ok trunc file write 2
+    ok trunc file pending
+    ok trunc file pending size
+    ok trunc file tell past end
+    ok trunc file grow
+    ok trunc file grow size
+    ok trunc file seek start
+    ok trunc file read all
+    ok trunc file bytes
+    ok trunc file negative
+    ok trunc file negative error
+    ok trunc file close
+    ok trunc file ro
+    ok trunc file ro readonly
+    ok trunc file ro keeps size
+    ok trunc file ro close
+    ok trunc file removed
+    ok trunc renamed write 8
+    ok trunc renamed open
+    ok trunc renamed other write 2
+    ok trunc renamed other write 2 more
+    ok trunc renamed other close
+    ok trunc renamed shrink
+    ok trunc renamed io size
+    ok trunc renamed close
+    ok trunc renamed moved size
+    ok trunc renamed other kept
+    ok trunc renamed moved removed
+    ok trunc renamed other removed
+    ok folder create
+    ok folder write open
+    ok folder write 5
+    ok folder write close
+    ok folder exists
+    ok folder size
+    ok folder read open
+    ok folder read 5
+    ok folder read bytes
+    ok folder read only
+    ok folder read only state
+    ok folder read close
+    ok folder dot segments open
+    ok folder dot segments size
+    ok folder dot segments close
+    ok folder append open
+    ok folder append write
+    ok folder append close
+    ok folder append size
+    ok folder subfolder not entry
+    ok folder subfolder no size
+    ok folder subfolder no open
+    ok folder missing exists
+    ok folder missing size
+    ok folder missing open
+    ok folder missing folder write
+    ok folder refuse empty
+    ok folder refuse root
+    ok folder refuse absolute
+    ok folder refuse double slash
+    ok folder refuse trailing slash
+    ok folder refuse backslash
+    ok folder refuse colon
+    ok folder refuse wildcard
+    ok folder refuse trailing dot
+    ok folder refuse trailing space
+    ok folder refuse device
+    ok folder refuse device ext
+    ok folder can remove
+    ok folder remove made
+    ok folder remove
+    ok folder remove gone
+    ok folder remove file gone
+    ok folder remove again
+    ok folder remove subfolder
+    ok folder remove refused path
+    ok folder remove empty path
+    ok folder remove open made
+    ok folder remove open read
+    ok folder remove open removed
+    ok folder remove open gone
+    ok folder remove open reads on
+    ok folder remove open close
+    ok folder remove open file gone
+    ok folder close
+    ok folder output create
+    ok folder inner dotdot
+    ok folder escape open
+    ok folder escape exists
+    ok folder escape size
+    ok folder output close
+    ok folder missing root
+    ok folder file root
+    ok folder entry removed
+    ok folder entry gone
+    ok source user create
+    ok source user exists
+    ok source user canonical
+    ok source user refused
+    ok source user refused not called
+    ok source user negative size
+    ok source user size called
+    ok source user no open
+    ok source user no remove
+    ok source user no remove not called
+    ok source user close result
+    ok source user close called
+    ok source user can remove
+    ok source user remove
+    ok source user remove canonical
+    ok source user remove false
+    ok source user remove refused
+    ok source user remove refused not called
+    ok source user remove close
+    ok source nil exists
+    ok source nil size
+    ok source nil remove
+    ok source nil close
+    ok source none open
+    ok source none exists
+    ok source none size
+    ok source none remove
+    ok source none close
+    ok zip stored create
+    ok zip stored exists
+    ok zip stored size
+    ok zip stored nested size
+    ok zip stored empty exists
+    ok zip stored empty size
+    ok zip stored folder not entry
+    ok zip stored folder no size
+    ok zip stored utf8 name
+    ok zip stored cp437 name
+    ok zip stored unicode path name
+    ok zip stored unicode path not raw
+    ok zip stored stale unicode path
+    ok zip stored stale name unused
+    ok zip stored dotdot unreachable
+    ok zip stored absolute unreachable
+    ok zip stored backslash unreachable
+    ok zip stored later duplicate
+    ok zip stored case exact
+    ok zip stored dot segments
+    ok zip stored missing exists
+    ok zip stored missing size
+    ok zip stored no remove
+    ok zip stored remove kept
+    ok zip stored refused path
+    ok zip stored close
+    ok zip io file open
+    ok zip io create
+    ok zip io deflated text size
+    ok zip io deflated random size
+    ok zip io close
+    ok zip io archive kept
+    ok zip io archive close
+    ok zip memory copied
+    ok zip memory file close
+    ok zip memory create
+    ok zip memory deep entry
+    ok zip memory entry
+    ok zip memory top entry
+    ok zip memory folder not entry
+    ok zip memory close
+    ok zip memory archive close
+    ok zip zip64 create
+    ok zip zip64 stored size
+    ok zip zip64 deflated size
+    ok zip zip64 close
+    ok zip prefixed create
+    ok zip prefixed deep entry
+    ok zip prefixed top entry
+    ok zip prefixed close
+    ok zip password create
+    ok zip password stored size
+    ok zip password deflated size
+    ok zip password plain size
+    ok zip password read stored open
+    ok zip password read stored size
+    ok zip password read stored read all
+    ok zip password read stored seeks
+    ok zip password read stored ends
+    ok zip password read stored read only
+    ok zip password read stored close
+    ok zip password read deflated open
+    ok zip password read deflated size
+    ok zip password read deflated read all
+    ok zip password read deflated seeks
+    ok zip password read deflated ends
+    ok zip password read deflated read only
+    ok zip password read deflated close
+    ok zip password read plain open
+    ok zip password read plain size
+    ok zip password read plain read all
+    ok zip password read plain seeks
+    ok zip password read plain ends
+    ok zip password read plain read only
+    ok zip password read plain close
+    ok zip password close
+    ok zip password wrong create
+    ok zip password wrong stored
+    ok zip password wrong deflated
+    ok zip password wrong plain
+    ok zip password wrong plain close
+    ok zip password wrong close
+    ok zip password directory without it
+    ok zip password none stored
+    ok zip password none deflated
+    ok zip password no password close
+    ok zip refuse truncated
+    ok zip refuse bad signature
+    ok zip refuse not zip
+    ok zip refuse missing file
+    ok zip refuse nil io
+    ok zip refuse nil io password
+    ok zip refuse empty io
+    ok zip refuse empty io kept
+    ok entry stored hello open
+    ok entry stored hello size
+    ok entry stored hello read all
+    ok entry stored hello seeks
+    ok entry stored hello ends
+    ok entry stored hello read only
+    ok entry stored hello close
+    ok entry stored bytes open
+    ok entry stored bytes size
+    ok entry stored bytes read all
+    ok entry stored bytes seeks
+    ok entry stored bytes ends
+    ok entry stored bytes read only
+    ok entry stored bytes close
+    ok entry stored empty open
+    ok entry stored empty size
+    ok entry stored empty read all
+    ok entry stored empty seeks
+    ok entry stored empty ends
+    ok entry stored empty read only
+    ok entry stored empty close
+    ok entry stored utf8 open
+    ok entry stored utf8 size
+    ok entry stored utf8 read all
+    ok entry stored utf8 seeks
+    ok entry stored utf8 ends
+    ok entry stored utf8 read only
+    ok entry stored utf8 close
+    ok entry stored folder no open
+    ok entry stored missing no open
+    ok entry stored write refused
+    ok entry stored close
+    ok entry deflated text open
+    ok entry deflated text size
+    ok entry deflated text read all
+    ok entry deflated text seeks
+    ok entry deflated text ends
+    ok entry deflated text read only
+    ok entry deflated text close
+    ok entry deflated random open
+    ok entry deflated random size
+    ok entry deflated random read all
+    ok entry deflated random seeks
+    ok entry deflated random ends
+    ok entry deflated random read only
+    ok entry deflated random close
+    ok entry deflated close
+    ok entry deflated archive close
+    ok entry zip64 stored open
+    ok entry zip64 stored size
+    ok entry zip64 stored read all
+    ok entry zip64 stored seeks
+    ok entry zip64 stored ends
+    ok entry zip64 stored read only
+    ok entry zip64 stored close
+    ok entry zip64 deflated open
+    ok entry zip64 deflated size
+    ok entry zip64 deflated read all
+    ok entry zip64 deflated seeks
+    ok entry zip64 deflated ends
+    ok entry zip64 deflated read only
+    ok entry zip64 deflated close
+    ok entry zip64 close
+    ok entry prefixed open
+    ok entry prefixed size
+    ok entry prefixed read all
+    ok entry prefixed seeks
+    ok entry prefixed ends
+    ok entry prefixed read only
+    ok entry prefixed close
+    ok entry prefixed close
+    ok entry large create
+    ok entry large stored open
+    ok entry large stored size
+    ok entry large stored read all
+    ok entry large stored seeks
+    ok entry large stored ends
+    ok entry large stored read only
+    ok entry large stored close
+    ok entry large secret stored open
+    ok entry large secret stored size
+    ok entry large secret stored read all
+    ok entry large secret stored seeks
+    ok entry large secret stored ends
+    ok entry large secret stored read only
+    ok entry large secret stored close
+    ok entry large deflated open
+    ok entry large deflated size
+    ok entry large deflated read all
+    ok entry large deflated seeks
+    ok entry large deflated ends
+    ok entry large deflated read only
+    ok entry large deflated close
+    ok entry large secret deflated open
+    ok entry large secret deflated size
+    ok entry large secret deflated read all
+    ok entry large secret deflated seeks
+    ok entry large secret deflated ends
+    ok entry large secret deflated read only
+    ok entry large secret deflated close
+    ok entry large write refused
+    ok entry turns open
+    ok entry turns
+    ok entry turns close
+    ok entry large close
+    ok entry outlives source open
+    ok entry outlives source size
+    ok entry outlives source read all
+    ok entry outlives source seeks
+    ok entry outlives source ends
+    ok entry outlives source read only
+    ok entry outlives source close
+    ok entry large wrong stored
+    ok entry large wrong deflated
+    ok entry large wrong plain
+    ok entry large wrong plain close
+    ok entry large wrong close
+    ok entry bad crc small
+    ok entry bad crc good
+    ok entry bad crc good close
+    ok entry bad crc large open
+    ok entry bad crc large read
+    ok entry bad crc large stays failed
+    ok entry bad crc large close
+    ok entry bad crc close
+    ok entry memory copied
+    ok entry memory file close
+    ok entry memory create
+    ok entry memory large stored open
+    ok entry memory large stored size
+    ok entry memory large stored read all
+    ok entry memory large stored seeks
+    ok entry memory large stored ends
+    ok entry memory large stored read only
+    ok entry memory large stored close
+    ok entry memory large secret deflated open
+    ok entry memory large secret deflated size
+    ok entry memory large secret deflated read all
+    ok entry memory large secret deflated seeks
+    ok entry memory large secret deflated ends
+    ok entry memory large secret deflated read only
+    ok entry memory large secret deflated close
+    ok entry memory close
+    ok entry memory archive close
+    ok entry empty archive create
+    ok entry empty archive no entry
+    ok entry empty archive no open
+    ok entry empty archive close
+    ok file io hello
+    ok file io hello close
+    ok file io bytes
+    ok file io bytes close
+    ok file io secret
+    ok file io secret close
+    ok file io secret deflated
+    ok file io secret deflated close
+    ok file io by io open
+    ok file io by io size
+    ok file io by io read all
+    ok file io by io seeks
+    ok file io by io ends
+    ok file io by io read only
+    ok file io by io close
+    ok file io by io archive kept
+    ok file io by io archive close
+    ok file io large open
+    ok file io large size
+    ok file io large read all
+    ok file io large seeks
+    ok file io large ends
+    ok file io large read only
+    ok file io large close
+    ok file io missing entry
+    ok file io not zip
+    ok file io wrong password
+    ok file io no password
+    ok file io nil archive
+    done 0
+    [Heap] Allocs: 158, Frees: 158, Leaked: 0
   EXITCODE: 0
 *******************************************************************************/
 
@@ -549,6 +1241,7 @@ import
 
 cpp source;
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <system_error>
@@ -564,6 +1257,47 @@ bool TestDoRemove(const std::string& APath)
   const std::filesystem::path LPath(std::u8string(APath.begin(), APath.end()));
   const bool LRemoved = std::filesystem::remove(LPath, LError);
   return LRemoved && !LError;
+}
+
+// Renames AFrom to ATo (both resolved, UTF-8 as above); true when it moved
+bool TestDoRename(const std::string& AFrom, const std::string& ATo)
+{
+  std::error_code LError;
+  if (AFrom.empty() || ATo.empty())
+    return false;
+  const std::filesystem::path LFrom(std::u8string(AFrom.begin(), AFrom.end()));
+  const std::filesystem::path LTo(std::u8string(ATo.begin(), ATo.end()));
+  std::filesystem::rename(LFrom, LTo, LError);
+  return !LError;
+}
+
+// The size of the file at APath (resolved, UTF-8 as above) as the file
+// system reports it; -1 when there is none
+std::int64_t TestDoFileSize(const std::string& APath)
+{
+  std::error_code LError;
+  if (APath.empty())
+    return -1;
+  const std::filesystem::path LPath(std::u8string(APath.begin(), APath.end()));
+  const std::uintmax_t LSize = std::filesystem::file_size(LPath, LError);
+  if (LError)
+    return -1;
+  return static_cast<std::int64_t>(LSize);
+}
+
+// AName in the system's temp folder, as UTF-8; "" when there is none. Only
+// the Linux rename row uses it (user 2026-10-22): repo\bin\output is /mnt/c
+// under WSL, whose DrvFs resizes an open file by its path (measured,
+// tests\probe\customio\rename_trunc.c), so only a Linux file system can
+// witness a resize through the open handle
+std::string TestDoTempPath(const std::string& AName)
+{
+  std::error_code LError;
+  const std::filesystem::path LFolder = std::filesystem::temp_directory_path(LError);
+  if (LError)
+    return std::string();
+  const std::u8string LText = (LFolder / std::filesystem::path(std::u8string(AName.begin(), AName.end()))).u8string();
+  return std::string(LText.begin(), LText.end());
 }
 
 type
@@ -938,6 +1672,153 @@ begin
   Check("file gone", not FileExists(LPath));
 end;
 
+// A Write callback that takes everything: an IO that writes but has no
+// Truncate callback
+routine SinkWrite(const AUserData: ptr; const ABuffer: ptr; const ASize: int64; var AState: IOState): int64;
+begin
+  return ASize;
+end;
+
+// IOTruncate: memory (owned, caller, read-only), an IO without the
+// callback, nil, and a file IO (read-ahead and pending writes settled
+// first, the position kept past a shorter end, zeros when it grows)
+routine TestTruncate();
+var
+  LBuf: array[0..7] of uint8;
+  LIn: array[0..9] of uint8;
+  LNew: array[0..1] of uint8;
+  LOut: array[0..15] of uint8;
+  LCallbacks: IOInterface;
+  LIO: IO;
+  LOther: IO;
+  LPath: string;
+  LMoved: string;
+  LI: int32;
+begin
+  for LI := 0 to 9 do
+    LIn[LI] := uint8(40 + LI);
+  end;
+  LNew[0] := 90;
+  LNew[1] := 91;
+
+  // Owned memory: shorter moves the position back, longer reads as zeros
+  LIO := CreateMemoryIO();
+  Check("trunc mem write 10", IOWrite(LIO, address of LIn[0], 10) = 10);
+  Check("trunc mem shrink", IOTruncate(LIO, 4));
+  Check("trunc mem shrink size", IOSize(LIO) = 4);
+  Check("trunc mem shrink tell", IOTell(LIO) = 4);
+  Check("trunc mem grow", IOTruncate(LIO, 300));
+  Check("trunc mem grow size", IOSize(LIO) = 300);
+  Check("trunc mem grow tell", IOTell(LIO) = 4);
+  Check("trunc mem grow read", IORead(LIO, address of LOut[0], 4) = 4);
+  Check("trunc mem grow zeros", (LOut[0] = 0) and (LOut[3] = 0));
+  Check("trunc mem seek start", IOSeek(LIO, 0, SeekOrigin.FromStart) = 0);
+  Check("trunc mem kept bytes", (IORead(LIO, address of LOut[0], 5) = 5) and (LOut[0] = 40) and (LOut[3] = 43) and (LOut[4] = 0));
+  Check("trunc mem negative", not IOTruncate(LIO, -1));
+  Check("trunc mem negative error", IOStatus(LIO) = IOState.Error);
+  Check("trunc mem negative keeps size", IOSize(LIO) = 300);
+  Check("trunc mem empty", IOTruncate(LIO, 0) and (IOSize(LIO) = 0) and (IOTell(LIO) = 0));
+  Check("trunc mem close", IOClose(LIO));
+
+  // Caller memory: the size moves only within the caller's 8 bytes
+  for LI := 0 to 7 do
+    LBuf[LI] := uint8(10 + LI);
+  end;
+  LIO := CreateMemoryIO(address of LBuf[0], 8);
+  Check("trunc caller shrink", IOTruncate(LIO, 3) and (IOSize(LIO) = 3));
+  Check("trunc caller grow", IOTruncate(LIO, 8) and (IOSize(LIO) = 8));
+  Check("trunc caller grow zeros", (LBuf[2] = 12) and (LBuf[3] = 0) and (LBuf[7] = 0));
+  Check("trunc caller past block", not IOTruncate(LIO, 9));
+  Check("trunc caller past block error", IOStatus(LIO) = IOState.Error);
+  Check("trunc caller past block keeps size", IOSize(LIO) = 8);
+  Check("trunc caller close", IOClose(LIO));
+
+  // Read-only memory cannot change its size
+  LIO := CreateMemoryIO(address of LBuf[0], 8, true);
+  Check("trunc ro", not IOTruncate(LIO, 2));
+  Check("trunc ro readonly", IOStatus(LIO) = IOState.ReadOnly);
+  Check("trunc ro keeps size", IOSize(LIO) = 8);
+  Check("trunc ro close", IOClose(LIO));
+
+  // An IO that writes but has no Truncate callback
+  LCallbacks.Write := SinkWrite;
+  LIO := CreateIO(LCallbacks, nil);
+  Check("trunc no callback", not IOTruncate(LIO, 0));
+  Check("trunc no callback error", IOStatus(LIO) = IOState.Error);
+  Check("trunc no callback close", IOClose(LIO));
+  Check("trunc nil", not IOTruncate(nil, 0));
+
+  // A file IO, its name not ASCII, in repo\bin\output
+  LPath := "$P:../std_customio_trunc_ü€.dat";
+  LIO := CreateFileIO(LPath, FileMode.Write);
+  Check("trunc file write 8", IOWrite(LIO, address of LIn[0], 8) = 8);
+  Check("trunc file write close", IOClose(LIO));
+  LIO := CreateFileIO(LPath, FileMode.ReadWrite);
+  Check("trunc file read 2", IORead(LIO, address of LOut[0], 2) = 2);
+  // The 2-byte read buffered more: those bytes past the new end must go
+  Check("trunc file shrink", IOTruncate(LIO, 5));
+  Check("trunc file shrink tell", IOTell(LIO) = 2);
+  Check("trunc file shrink size", IOSize(LIO) = 5);
+  Check("trunc file read after shrink", IORead(LIO, address of LOut[0], 8) = 3);
+  Check("trunc file read after shrink bytes", (LOut[0] = 42) and (LOut[2] = 44));
+  Check("trunc file seek end", IOSeek(LIO, 0, SeekOrigin.FromEnd) = 5);
+  // Buffered writes reach the file before the size changes
+  Check("trunc file write 2", IOWrite(LIO, address of LNew[0], 2) = 2);
+  Check("trunc file pending", IOTruncate(LIO, 6));
+  Check("trunc file pending size", IOSize(LIO) = 6);
+  Check("trunc file tell past end", IOTell(LIO) = 7);
+  Check("trunc file grow", IOTruncate(LIO, 9));
+  Check("trunc file grow size", IOSize(LIO) = 9);
+  Check("trunc file seek start", IOSeek(LIO, 0, SeekOrigin.FromStart) = 0);
+  Check("trunc file read all", IORead(LIO, address of LOut[0], 16) = 9);
+  Check("trunc file bytes", (LOut[0] = 40) and (LOut[4] = 44) and (LOut[5] = 90) and (LOut[6] = 0) and (LOut[8] = 0));
+  Check("trunc file negative", not IOTruncate(LIO, -1));
+  Check("trunc file negative error", IOStatus(LIO) = IOState.Error);
+  Check("trunc file close", IOClose(LIO));
+  LIO := CreateFileIO(LPath, FileMode.Read);
+  Check("trunc file ro", not IOTruncate(LIO, 0));
+  Check("trunc file ro readonly", IOStatus(LIO) = IOState.ReadOnly);
+  Check("trunc file ro keeps size", IOSize(LIO) = 9);
+  Check("trunc file ro close", IOClose(LIO));
+  Check("trunc file removed", TestDoRemove(ResolvePath(LPath)));
+
+  // The resize goes through the open file, never by the path it was opened
+  // by: renamed while open, another file put under the old name, the open
+  // one is resized and the new one kept. Windows refuses the rename of a
+  // file the CRT has open (no share-delete): the resize still reaches it.
+  // Linux works in the system temp folder (TestDoTempPath says why).
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  LPath := "$P:../std_customio_trunc_open.dat";
+  LMoved := "$P:../std_customio_trunc_moved.dat";
+@else
+  LPath := TestDoTempPath("std_customio_trunc_open.dat");
+  LMoved := TestDoTempPath("std_customio_trunc_moved.dat");
+@endif
+  LIO := CreateFileIO(LPath, FileMode.Write);
+  Check("trunc renamed write 8", IOWrite(LIO, address of LIn[0], 8) = 8);
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  Check("trunc renamed open refused", not TestDoRename(ResolvePath(LPath), ResolvePath(LMoved)));
+  Check("trunc renamed shrink", IOTruncate(LIO, 3));
+  Check("trunc renamed io size", IOSize(LIO) = 3);
+  Check("trunc renamed close", IOClose(LIO));
+  Check("trunc renamed file size", TestDoFileSize(ResolvePath(LPath)) = 3);
+  Check("trunc renamed removed", TestDoRemove(ResolvePath(LPath)));
+@else
+  Check("trunc renamed open", TestDoRename(ResolvePath(LPath), ResolvePath(LMoved)));
+  LOther := CreateFileIO(LPath, FileMode.Write);
+  Check("trunc renamed other write 2", IOWrite(LOther, address of LNew[0], 2) = 2);
+  Check("trunc renamed other write 2 more", IOWrite(LOther, address of LNew[0], 2) = 2);
+  Check("trunc renamed other close", IOClose(LOther));
+  Check("trunc renamed shrink", IOTruncate(LIO, 3));
+  Check("trunc renamed io size", IOSize(LIO) = 3);
+  Check("trunc renamed close", IOClose(LIO));
+  Check("trunc renamed moved size", TestDoFileSize(ResolvePath(LMoved)) = 3);
+  Check("trunc renamed other kept", TestDoFileSize(ResolvePath(LPath)) = 4);
+  Check("trunc renamed moved removed", TestDoRemove(ResolvePath(LMoved)));
+  Check("trunc renamed other removed", TestDoRemove(ResolvePath(LPath)));
+@endif
+end;
+
 // A folder source over repo\bin: its entries are files under it, its
 // subfolder output reached as "output/..."; a second source over
 // repo\bin\output, where a `..` would reach repo\bin\res if it were let out
@@ -949,6 +1830,7 @@ var
   LOutput: IOSource;
   LIO: IO;
   LEntry: string;
+  LRemoved: string;
   LI: int32;
 begin
   LEntry := "output/std_customio_src_ü€.dat";
@@ -1005,6 +1887,39 @@ begin
   Check("folder refuse trailing space", IOSourceOpen(LSrc, "output/std_customio_src_sp ", FileMode.Write) = nil);
   Check("folder refuse device", IOSourceOpen(LSrc, "nul", FileMode.Write) = nil);
   Check("folder refuse device ext", IOSourceOpen(LSrc, "output/Com1.txt", FileMode.Write) = nil);
+
+  // Remove: the entry's file goes; missing, a folder, a refused path: false
+  LRemoved := "output/std_customio_src_rm.dat";
+  Check("folder can remove", IOSourceCanRemove(LSrc));
+  LIO := IOSourceOpen(LSrc, LRemoved, FileMode.Write);
+  Check("folder remove made", (LIO <> nil) and (IOWrite(LIO, address of LIn[0], 5) = 5) and IOClose(LIO));
+  Check("folder remove", IOSourceRemove(LSrc, "output/none/../std_customio_src_rm.dat"));
+  Check("folder remove gone", not IOSourceExists(LSrc, LRemoved));
+  Check("folder remove file gone", not FileExists("$P:../std_customio_src_rm.dat"));
+  Check("folder remove again", not IOSourceRemove(LSrc, LRemoved));
+  Check("folder remove subfolder", not IOSourceRemove(LSrc, "output"));
+  Check("folder remove refused path", not IOSourceRemove(LSrc, "../x.dat"));
+  Check("folder remove empty path", not IOSourceRemove(LSrc, ""));
+
+  // Remove while an IO on the entry is open: Windows refuses (the file IO
+  // does not share deletion), Linux unlinks and the IO reads on
+  LIO := IOSourceOpen(LSrc, LRemoved, FileMode.Write);
+  Check("folder remove open made", (LIO <> nil) and (IOWrite(LIO, address of LIn[0], 5) = 5) and IOClose(LIO));
+  LIO := IOSourceOpen(LSrc, LRemoved);
+  Check("folder remove open read", LIO <> nil);
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  Check("folder remove open refused", not IOSourceRemove(LSrc, LRemoved));
+  Check("folder remove open kept", IOSourceExists(LSrc, LRemoved));
+@else
+  Check("folder remove open removed", IOSourceRemove(LSrc, LRemoved));
+  Check("folder remove open gone", not IOSourceExists(LSrc, LRemoved));
+@endif
+  Check("folder remove open reads on", (LIO <> nil) and (IORead(LIO, address of LOut[0], 8) = 5) and (LOut[0] = 60));
+  Check("folder remove open close", (LIO <> nil) and IOClose(LIO));
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  Check("folder remove after close", IOSourceRemove(LSrc, LRemoved));
+@endif
+  Check("folder remove open file gone", not FileExists("$P:../std_customio_src_rm.dat"));
   Check("folder close", IOSourceClose(LSrc));
 
   // `..` resolves inside the root, never above it
@@ -1046,6 +1961,13 @@ begin
   return false;
 end;
 
+routine UserSourceRemove(const AUserData: ptr; const APath: string): bool;
+begin
+  GSourcePath := APath;
+  GSourceCalls := GSourceCalls + 1;
+  return APath = "a/c.txt";
+end;
+
 // A source the program defines: the callbacks see the canonical path only,
 // a refused path never reaches them, a nil callback is a clean failure
 routine TestUserSource();
@@ -1069,8 +1991,22 @@ begin
   Check("source user negative size", IOSourceSize(LSrc, "x") = -1);
   Check("source user size called", (GSourceCalls = 2) and (GSourcePath = "x"));
   Check("source user no open", IOSourceOpen(LSrc, "x") = nil);
+  Check("source user no remove", (not IOSourceCanRemove(LSrc)) and (not IOSourceRemove(LSrc, "a/c.txt")));
+  Check("source user no remove not called", GSourceCalls = 2);
   Check("source user close result", not IOSourceClose(LSrc));
   Check("source user close called", GClosed = 1);
+
+  // A Remove callback: canonical path, its own result, refused path never sent
+  LInterface.Remove := UserSourceRemove;
+  LSrc := CreateIOSource(LInterface, nil);
+  Check("source user can remove", IOSourceCanRemove(LSrc));
+  Check("source user remove", IOSourceRemove(LSrc, "a/./b/../c.txt"));
+  Check("source user remove canonical", (GSourceCalls = 3) and (GSourcePath = "a/c.txt"));
+  Check("source user remove false", not IOSourceRemove(LSrc, "x"));
+  Check("source user remove refused", not IOSourceRemove(LSrc, "/a/c.txt"));
+  Check("source user remove refused not called", GSourceCalls = 4);
+  Check("source user remove close", not IOSourceClose(LSrc));
+  LInterface.Remove := nil;
 
   // Every callback nil, and the nil source
   LInterface.Exists := nil;
@@ -1079,10 +2015,12 @@ begin
   LSrc := CreateIOSource(LInterface, nil);
   Check("source nil exists", not IOSourceExists(LSrc, "x"));
   Check("source nil size", IOSourceSize(LSrc, "x") = -1);
+  Check("source nil remove", (not IOSourceCanRemove(LSrc)) and (not IOSourceRemove(LSrc, "x")));
   Check("source nil close", IOSourceClose(LSrc));
   Check("source none open", IOSourceOpen(nil, "x") = nil);
   Check("source none exists", not IOSourceExists(nil, "x"));
   Check("source none size", IOSourceSize(nil, "x") = -1);
+  Check("source none remove", (not IOSourceCanRemove(nil)) and (not IOSourceRemove(nil, "x")));
   Check("source none close", not IOSourceClose(nil));
 end;
 
@@ -1263,6 +2201,8 @@ begin
   Check("zip stored dot segments", IOSourceSize(LZip, "data/../hello.txt") = 12);
   Check("zip stored missing exists", not IOSourceExists(LZip, "missing.txt"));
   Check("zip stored missing size", IOSourceSize(LZip, "missing.txt") = -1);
+  Check("zip stored no remove", (not IOSourceCanRemove(LZip)) and (not IOSourceRemove(LZip, "hello.txt")));
+  Check("zip stored remove kept", IOSourceSize(LZip, "hello.txt") = 12);
   Check("zip stored refused path", not IOSourceExists(LZip, "../hello.txt"));
   Check("zip stored close", IOSourceClose(LZip));
 
@@ -1573,6 +2513,7 @@ begin
   TestUserIO();
   TestNilAndInvalid();
   TestFileIO();
+  TestTruncate();
   TestFolderSource();
   TestUserSource();
   TestZipSource();
