@@ -1712,25 +1712,38 @@ begin
 end;
 
 exported type
-  /// Where a video stands: stopped (at its start), playing, or paused
+  /// Where a video stands: VideoStopped (at its start, no frame shown until it
+  /// plays), VideoPlaying, or VideoPaused (where it was, its frame still drawn).
+  /// A video starts stopped; one that does not loop is stopped again at its end.
+  /// @example `if GetVideoStatus(LIntro) = VideoStatus.VideoStopped then PlayVideo(LIntro); end;`
   /// @since 0.2
   /// @see GetVideoStatus
   VideoStatus = choices(VideoStopped, VideoPlaying, VideoPaused);
 
-  /// Called on every change of a video's status (the end of one that does
-  /// not loop included: VideoStopped), with the name it was loaded from
+  /// Called on every change of a video's status: by PlayVideo, PauseVideo and
+  /// StopVideo when they change it, and by UpdateVideo at the end of a video
+  /// that does not loop (VideoStopped). A call that changes nothing (PlayVideo
+  /// on a playing video) calls nothing, and neither does UnloadVideo.
+  /// @example `routine OnVideo(const AStatus: VideoStatus; const AName: ptr to const char); begin ... end;`
   /// @since 0.2
   /// @see SetVideoStatusCallback
   VideoStatusCallback = routine(const AStatus: VideoStatus; const AName: ptr to const char);
 
-  /// An MPEG-1 video (pl_mpeg) with its MP2 audio, as raylib's Music: load
-  /// with LoadVideo / LoadVideoIO / LoadVideoZip, unload with UnloadVideo.
-  /// ctxData is the player (nil: no video); width / height its size.
+  /// An MPEG-1 video (pl_mpeg) with its MP2 audio, used as raylib's Music is:
+  /// load it with LoadVideo, LoadVideoIO or LoadVideoZip, PlayVideo it, call
+  /// UpdateVideo once a frame and DrawVideo it, then UnloadVideo it. The record
+  /// is a handle: copies name the same video. Every routine takes a video that
+  /// did not load (ctxData nil) and does nothing with it, giving 0, false or
+  /// VideoStopped.
+  /// @example `LIntro := LoadVideoZip("$P:assets.zip", "res/assets/videos/intro.mpg", ""); PlayVideo(LIntro);`
   /// @since 0.2
   /// @see LoadVideo
   Video = record
+    /// The player; nil when the video did not load (IsVideoValid)
     ctxData: ptr;
+    /// The frame width in pixels; 0 when the video did not load
     width: int32;
+    /// The frame height in pixels; 0 when the video did not load
     height: int32;
   end;
 
@@ -1806,45 +1819,73 @@ end;
 
 /// Unloads a video: stopped, its textures, shader and audio stream freed,
 /// its own IO closed (LoadVideo / LoadVideoZip; LoadVideoIO's stays the
-/// caller's). The status callback is not called.
+/// caller's, to close after this). The status callback is not called. A
+/// video that did not load is left as it is.
 /// @param AVideo the video
+/// @example `UnloadVideo(LIntro); IOClose(LIO);`
 /// @since 0.2
+/// @see LoadVideo
 exported routine UnloadVideo(const AVideo: Video);
 begin
   RaylibExtDoVClose(AVideo.ctxData);
 end;
 
-/// True when the video loaded (ctxData set)
+/// Whether the video loaded: a load that found no MPEG-1 video (a missing
+/// file or entry, other data) gives a video whose ctxData is nil.
+/// @param AVideo the video
+/// @returns true when the video loaded
+/// @example `if not IsVideoValid(LIntro) then println("no intro"); end;`
 /// @since 0.2
+/// @see LoadVideo
 exported routine IsVideoValid(const AVideo: Video): bool;
 begin
   return AVideo.ctxData <> nil;
 end;
 
-/// Plays the video (from where it paused, or from its start)
+/// Plays the video: from where it was paused, or from its start when it is
+/// stopped. Its audio resumes with it. On a playing video it does nothing.
+/// The status callback is called with VideoPlaying when the status changed.
+/// @param AVideo the video
+/// @example `PlayVideo(LIntro);`
 /// @since 0.2
+/// @see PauseVideo
+/// @see UpdateVideo
 exported routine PlayVideo(const AVideo: Video);
 begin
   RaylibExtDoVideoNotify(AVideo, RaylibExtDoVPlay(AVideo.ctxData));
 end;
 
-/// Pauses a playing video where it is
+/// Pauses a playing video where it is: its frame stays drawn, its audio
+/// pauses. On a video that is not playing it does nothing. The status
+/// callback is called with VideoPaused when the status changed.
+/// @param AVideo the video
+/// @example `if IsKeyPressed(KEY_SPACE) then PauseVideo(LIntro); end;`
 /// @since 0.2
+/// @see PlayVideo
 exported routine PauseVideo(const AVideo: Video);
 begin
   RaylibExtDoVideoNotify(AVideo, RaylibExtDoVPause(AVideo.ctxData));
 end;
 
-/// Stops the video back at its start (no frame shown until it plays)
+/// Stops the video back at its start: its audio stopped and emptied, no
+/// frame drawn until it plays again. On a stopped video it does nothing.
+/// The status callback is called with VideoStopped when the status changed.
+/// @param AVideo the video
+/// @example `StopVideo(LIntro);`
 /// @since 0.2
+/// @see PlayVideo
 exported routine StopVideo(const AVideo: Video);
 begin
   RaylibExtDoVideoNotify(AVideo, RaylibExtDoVStop(AVideo.ctxData));
 end;
 
-/// Advances a playing video by the real time since its last update (call
-/// once a frame): decodes, uploads the newest frame, feeds the audio; the
-/// end of a video that does not loop stops it at its start.
+/// Advances a playing video by the real time since its last update; call
+/// it once a frame. It decodes, uploads the newest frame (once a window is
+/// open) and feeds the audio. The end of a video that does not loop stops
+/// it at its start and calls the status callback with VideoStopped; a
+/// looping one starts again. A video that is not playing is left as it is.
+/// @param AVideo the video
+/// @example `UpdateVideo(LIntro); BeginDrawing(); DrawVideo(LIntro, 0, 0, WHITE); EndDrawing();`
 /// @since 0.2
 /// @see DrawVideo
 exported routine UpdateVideo(const AVideo: Video);
@@ -1852,9 +1893,13 @@ begin
   RaylibExtDoVideoNotify(AVideo, RaylibExtDoVUpdate(AVideo.ctxData, -1.0));
 end;
 
-/// UpdateVideo by a given step instead of the real time
-/// @param ASeconds the time to advance (0 or less: nothing decoded)
+/// UpdateVideo by a given step instead of the real time, for a fixed time
+/// step or a frame-by-frame tool.
+/// @param AVideo the video
+/// @param ASeconds the time to advance, in seconds (0 or less: nothing decoded)
+/// @example `UpdateVideo(LIntro, 1.0 / 60.0);`
 /// @since 0.2
+/// @see GetVideoFrameRate
 exported routine UpdateVideo(const AVideo: Video; const ASeconds: float64);
 var
   LStep: float64;
@@ -1866,110 +1911,183 @@ begin
   RaylibExtDoVideoNotify(AVideo, RaylibExtDoVUpdate(AVideo.ctxData, LStep));
 end;
 
-/// The video's status
+/// The video's status.
+/// @param AVideo the video
+/// @returns VideoStopped, VideoPlaying or VideoPaused; VideoStopped for a
+///   video that did not load
+/// @example `if GetVideoStatus(LIntro) = VideoStatus.VideoPaused then PlayVideo(LIntro); end;`
 /// @since 0.2
+/// @see VideoStatus
 exported routine GetVideoStatus(const AVideo: Video): VideoStatus;
 begin
   return static_cast<VideoStatus>(RaylibExtDoVStatus(AVideo.ctxData));
 end;
 
-/// True while the video plays
+/// Whether the video plays.
+/// @param AVideo the video
+/// @returns true while its status is VideoPlaying
+/// @example `while IsVideoPlaying(LIntro) and not WindowShouldClose() do ... end;`
 /// @since 0.2
+/// @see GetVideoStatus
 exported routine IsVideoPlaying(const AVideo: Video): bool;
 begin
   return GetVideoStatus(AVideo) = VideoStatus.VideoPlaying;
 end;
 
-/// Sets whether the video starts again at its end
+/// Sets whether the video starts again at its end instead of stopping.
+/// A video loads not looping.
+/// @param AVideo the video
+/// @param ALoop true to loop
+/// @example `SetVideoLooping(LBackground, true);`
 /// @since 0.2
+/// @see IsVideoLooping
 exported routine SetVideoLooping(const AVideo: Video; const ALoop: bool);
 begin
   RaylibExtDoVSetLooping(AVideo.ctxData, ALoop);
 end;
 
-/// True when the video starts again at its end
+/// Whether the video starts again at its end.
+/// @param AVideo the video
+/// @returns true when it loops; false for a video that did not load
 /// @since 0.2
+/// @see SetVideoLooping
 exported routine IsVideoLooping(const AVideo: Video): bool;
 begin
   return RaylibExtDoVLooping(AVideo.ctxData);
 end;
 
-/// Sets the video's volume, 0 .. 1 (clamped), heard through Math's
-/// PerceivedVolume so equal steps sound equal
+/// Sets the video's volume as a level a person sets: 0 (silent) to 1 (full),
+/// clamped, NaN as 0. The audio stream gets the linear volume the level
+/// stands for (Math's PerceivedVolume), so equal steps sound equal. A video
+/// loads at volume 1.
+/// @param AVideo the video
+/// @param AVolume the level, 0 .. 1
+/// @example `SetVideoVolume(LIntro, 0.5);`
 /// @since 0.2
+/// @see GetVideoVolume
 exported routine SetVideoVolume(const AVideo: Video; const AVolume: float32);
 begin
   RaylibExtDoVSetVolume(AVideo.ctxData, AVolume);
 end;
 
-/// The video's volume as set (0 .. 1)
+/// The video's volume level as set (after clamping), not the linear volume
+/// the stream plays at.
+/// @param AVideo the video
+/// @returns the level, 0 .. 1; 0 for a video that did not load
 /// @since 0.2
+/// @see SetVideoVolume
 exported routine GetVideoVolume(const AVideo: Video): float32;
 begin
   return RaylibExtDoVVolume(AVideo.ctxData);
 end;
 
-/// Sets the routine called on every status change (nil: none)
+/// Sets the routine called on every status change of the video, with the
+/// name the video was loaded under, replacing the one set before.
+/// @param AVideo the video
+/// @param ACallback the routine; nil for none
+/// @example `SetVideoStatusCallback(LIntro, OnVideo);`
 /// @since 0.2
+/// @see VideoStatusCallback
 exported routine SetVideoStatusCallback(const AVideo: Video; const ACallback: VideoStatusCallback);
 begin
   RaylibExtDoVSetCallback(AVideo.ctxData, reinterpret_cast<ptr>(ACallback));
 end;
 
-/// The video's frame rate (frames a second); 0 with no video
+/// The video's frame rate.
+/// @param AVideo the video
+/// @returns frames a second; 0 for a video that did not load
+/// @example `UpdateVideo(LIntro, 1.0 / GetVideoFrameRate(LIntro));`
 /// @since 0.2
+/// @see GetVideoDuration
 exported routine GetVideoFrameRate(const AVideo: Video): float64;
 begin
   return RaylibExtDoVFrameRate(AVideo.ctxData);
 end;
 
-/// The video's length in seconds (the last frame's start plus one frame)
+/// The video's length: the last frame's start plus one frame.
+/// @param AVideo the video
+/// @returns the length in seconds; 0 for a video that did not load
+/// @example `LProgress := GetVideoTime(LIntro) / GetVideoDuration(LIntro);`
 /// @since 0.2
+/// @see GetVideoTime
 exported routine GetVideoDuration(const AVideo: Video): float64;
 begin
   return RaylibExtDoVDuration(AVideo.ctxData);
 end;
 
-/// Where the video is, in seconds from its start
+/// Where the video is, from its start: 0 when it is stopped.
+/// @param AVideo the video
+/// @returns the time in seconds; 0 for a video that did not load
 /// @since 0.2
+/// @see GetVideoDuration
 exported routine GetVideoTime(const AVideo: Video): float64;
 begin
   return RaylibExtDoVTime(AVideo.ctxData);
 end;
 
-/// True when the video has an audio track
+/// Whether the video has an MP2 audio track. A video with one plays it through
+/// raylib's audio device when that is ready (InitAudioDevice), else silently.
+/// @param AVideo the video
+/// @returns true when it has an audio track; false for a video that did not load
 /// @since 0.2
+/// @see GetVideoSampleRate
 exported routine HasVideoAudio(const AVideo: Video): bool;
 begin
   return RaylibExtDoVHasTrack(AVideo.ctxData);
 end;
 
-/// The audio track's sample rate (0 with none)
+/// The audio track's sample rate.
+/// @param AVideo the video
+/// @returns samples a second; 0 with no audio track or a video that did not load
 /// @since 0.2
+/// @see HasVideoAudio
 exported routine GetVideoSampleRate(const AVideo: Video): int32;
 begin
   return RaylibExtDoVSampleRate(AVideo.ctxData);
 end;
 
-/// True when the video is drawn through its YCbCr shader (else converted
-/// on the CPU); decided at the first frame with a window open
+/// Whether the video's frames are drawn through its YCbCr shader on the GPU
+/// (else converted to RGBA on the CPU). It is decided at the first frame
+/// decoded with a window open: the shader when it loads.
+/// @param AVideo the video
+/// @returns true when the shader draws it; false before that first frame and
+///   for a video that did not load
 /// @since 0.2
+/// @see DrawVideo
 exported routine IsVideoShaderUsed(const AVideo: Video): bool;
 begin
   return RaylibExtDoVGpu(AVideo.ctxData);
 end;
 
 /// Draws the current frame at its own size with its top left at
-/// (APosX, APosY), as DrawTexture draws (nothing before the first frame)
+/// (APosX, APosY), as DrawTexture draws; call it between BeginDrawing and
+/// EndDrawing. Nothing is drawn before the first frame (a stopped video, one
+/// not updated yet) or for a video that did not load.
+/// @param AVideo the video
+/// @param APosX the left edge, in screen pixels
+/// @param APosY the top edge, in screen pixels
+/// @param ATint the colour the frame is multiplied by (WHITE: as decoded)
+/// @example `DrawVideo(LIntro, 0, 0, WHITE);`
 /// @since 0.2
+/// @see DrawVideoPro
 exported routine DrawVideo(const AVideo: Video; const APosX: int32; const APosY: int32; const ATint: Color);
 begin
   RaylibExtDoVDrawAt(AVideo.ctxData, APosX, APosY, ATint);
 end;
 
-/// Draws part of the current frame (ASource in the frame's pixels) placed,
-/// scaled and rotated as DrawTexturePro draws
+/// Draws part of the current frame placed, scaled and rotated, as
+/// DrawTexturePro draws. Nothing is drawn before the first frame or for a
+/// video that did not load.
+/// @param AVideo the video
+/// @param ASource the part of the frame, in the frame's pixels (0, 0, width,
+///   height: all of it)
+/// @param ADest where it goes on the screen, and at what size
+/// @param AOrigin the rotation centre, relative to ADest's top left
+/// @param ARotation the rotation, in degrees
+/// @param ATint the colour the frame is multiplied by (WHITE: as decoded)
+/// @example `DrawVideoPro(LIntro, LFrame, LScreen, LOrigin, 0.0f, WHITE);`
 /// @since 0.2
+/// @see DrawVideo
 exported routine DrawVideoPro(const AVideo: Video; const ASource: Rectangle; const ADest: Rectangle; const AOrigin: ::Vector2; const ARotation: float32; const ATint: Color);
 begin
   RaylibExtDoVDraw(AVideo.ctxData, ASource, ADest, AOrigin, ARotation, ATint);

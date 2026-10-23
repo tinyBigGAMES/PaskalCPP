@@ -76,7 +76,9 @@ static std::int64_t RuntimeCount()
 /// @since 0.2
 exported type
   ResDataEntry = record
+    /// The first byte; nil when the binary holds no such key
     Data: ptr to const uint8;
+    /// How many bytes (the zero byte after them not counted)
     Size: int64;
   end;
 

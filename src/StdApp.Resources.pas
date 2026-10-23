@@ -1983,6 +1983,20 @@ resourcestring
   RSPcDevVersionFailed = 'Cannot stamp the version on %s (is it running?): %s';
   { RSPcDevExeNotFound }
   RSPcDevExeNotFound = 'Program to stamp not found: %s';
+  { RSPcDevHelpDistro }
+  RSPcDevHelpDistro = 'Set distro.yml''s version to the PaskalCPP version (%s)';
+  { RSPcDevHelpAll }
+  RSPcDevHelpAll = 'Run every verb in order (--distro last)';
+  { RSPcDevDistroNotFound }
+  RSPcDevDistroNotFound = 'Distro file not found: %s';
+  { RSPcDevDistroNoVersion }
+  RSPcDevDistroNoVersion = 'No top-level "version:" line in %s';
+  { RSPcDevDistroFailed }
+  RSPcDevDistroFailed = 'Cannot update %s: %s';
+  { RSPcDevDistroUpdated }
+  RSPcDevDistroUpdated = 'Version %s set in %s (was %s)';
+  { RSPcDevDistroCurrent }
+  RSPcDevDistroCurrent = 'Version %s already set in %s';
 
 implementation
 

@@ -896,7 +896,10 @@ exported type
   /// @since 0.2
   /// @see RandomInt
   RandomGenerator = object
+    /// The generator's engine, C++'s std::mt19937; use the methods, which keep
+    /// Seed() true
     Engine: std::mt19937;
+    /// The seed the sequence started from, as Seed() returns it
     SeedValue: uint32;
     /// A generator seeded from the system's entropy source.
     /// @see Randomize
@@ -1112,7 +1115,9 @@ exported type
   /// @since 0.2
   /// @see Rect
   Vector2 = object
+    /// The X coordinate (+X to the right)
     X: float32;
+    /// The Y coordinate (+Y down the screen)
     Y: float32;
     /// The zero vector.
     init();
@@ -1286,6 +1291,10 @@ exported type
       LResult.Y := std::lerp(self.Y, ATo.Y, AT);
       return LResult;
     end;
+    /// The sum, component by component.
+    /// @param A the first vector
+    /// @param B the second vector
+    /// @returns (A.X + B.X, A.Y + B.Y)
     operator +(const A: Vector2; const B: Vector2): Vector2;
     var
       LResult: Vector2;
@@ -1294,6 +1303,10 @@ exported type
       LResult.Y := A.Y + B.Y;
       return LResult;
     end;
+    /// The difference, component by component: the vector from B to A.
+    /// @param A the vector subtracted from
+    /// @param B the vector subtracted
+    /// @returns (A.X - B.X, A.Y - B.Y)
     operator -(const A: Vector2; const B: Vector2): Vector2;
     var
       LResult: Vector2;
@@ -1302,6 +1315,9 @@ exported type
       LResult.Y := A.Y - B.Y;
       return LResult;
     end;
+    /// The vector turned around: the same length, the opposite way.
+    /// @param A the vector
+    /// @returns (-A.X, -A.Y)
     operator -(const A: Vector2): Vector2;
     var
       LResult: Vector2;
@@ -1310,6 +1326,10 @@ exported type
       LResult.Y := -A.Y;
       return LResult;
     end;
+    /// The vector scaled.
+    /// @param A the vector
+    /// @param AScale the factor
+    /// @returns (A.X * AScale, A.Y * AScale)
     operator *(const A: Vector2; const AScale: float32): Vector2;
     var
       LResult: Vector2;
@@ -1318,6 +1338,10 @@ exported type
       LResult.Y := A.Y * AScale;
       return LResult;
     end;
+    /// The vector scaled, the factor written first.
+    /// @param AScale the factor
+    /// @param A the vector
+    /// @returns (A.X * AScale, A.Y * AScale)
     operator *(const AScale: float32; const A: Vector2): Vector2;
     var
       LResult: Vector2;
@@ -1326,6 +1350,11 @@ exported type
       LResult.Y := A.Y * AScale;
       return LResult;
     end;
+    /// The vector divided by a factor, by float rules: a factor of 0 gives
+    /// infinities or NaN.
+    /// @param A the vector
+    /// @param AScale the divisor
+    /// @returns (A.X / AScale, A.Y / AScale)
     operator /(const A: Vector2; const AScale: float32): Vector2;
     var
       LResult: Vector2;
@@ -1334,10 +1363,19 @@ exported type
       LResult.Y := A.Y / AScale;
       return LResult;
     end;
+    /// Whether two vectors are exactly equal, component by component (for a
+    /// tolerance, use SameValue on each component).
+    /// @param A the first vector
+    /// @param B the second vector
+    /// @returns true when A.X = B.X and A.Y = B.Y
     operator =(const A: Vector2; const B: Vector2): bool;
     begin
       return (A.X = B.X) and (A.Y = B.Y);
     end;
+    /// Whether two vectors differ in any component: the opposite of `=`.
+    /// @param A the first vector
+    /// @param B the second vector
+    /// @returns true when A.X <> B.X or A.Y <> B.Y
     operator <>(const A: Vector2; const B: Vector2): bool;
     begin
       return (A.X <> B.X) or (A.Y <> B.Y);
@@ -1352,9 +1390,13 @@ exported type
   /// @since 0.2
   /// @see Extent
   Rect = object
+    /// The left edge (the corner's X)
     X: float32;
+    /// The top edge (the corner's Y)
     Y: float32;
+    /// The width; negative spans to the left of X
     Width: float32;
+    /// The height; negative spans above Y
     Height: float32;
     /// The empty rectangle at (0, 0).
     init();
@@ -1446,9 +1488,13 @@ exported type
   /// @since 0.2
   /// @see Rect
   Extent = object
+    /// The smallest X (the left edge)
     MinX: float32;
+    /// The smallest Y (the top edge)
     MinY: float32;
+    /// The largest X (the right edge)
     MaxX: float32;
+    /// The largest Y (the bottom edge)
     MaxY: float32;
     /// The empty extent at (0, 0).
     init();
@@ -1494,8 +1540,11 @@ exported type
   /// @since 0.2
   /// @see LineIntersection
   LineHit = object
+    /// How the segments meet
     Kind: LineHitKind;
+    /// The point where they meet; read it only when Kind is Point
     Point: Vector2;
+    /// No meeting: Kind Miss, Point (0, 0).
     init();
     begin
       self.Point.init();
@@ -1508,8 +1557,11 @@ exported type
   /// @since 0.2
   /// @see ObbsOverlap
   Obb = object
+    /// The box's centre
     Center: Vector2;
+    /// Half its width (X) and half its height (Y)
     HalfSize: Vector2;
+    /// The turn, in degrees (positive the way angles grow)
     Angle: float32;
     /// The box of no size at (0, 0).
     init();

@@ -776,8 +776,11 @@ exported type
   /// @since 0.2
   /// @example `LGold: Rgb(255, 215, 0);`
   Rgb = object
+    /// The red component, 0 .. 255
     R: uint8;
+    /// The green component, 0 .. 255
     G: uint8;
+    /// The blue component, 0 .. 255
     B: uint8;
     /// Black (0, 0, 0).
     init();
