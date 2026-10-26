@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_pointer_err_cast_const.pcpp - Type: a pointer cast that drops const
+
+  Break step of type_pointer: a pointer cast keeps const, no cast makes a
+  ptr to const a ptr to T (SM0265).
+*******************************************************************************/
+
+module exe type_pointer_err_cast_const;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LP: ptr to int32;
+  LC: ptr to const int32;
+
+begin
+  LC := nil;
+  LP := ptr to int32(LC); // ERROR SM0265@22: 'ptr to const int32' cannot be cast to 'ptr to int32': a pointer cast takes a pointer that keeps const, or an integer of pointer width
+end.

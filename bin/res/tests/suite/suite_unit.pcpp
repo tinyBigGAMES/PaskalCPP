@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  suite_unit.pcpp - Test suite: a unit test (analyzed only)
+
+  kind unit: a module unit has no program of its own, so it is only analyzed
+  (parsed and checked) in every cell and must report nothing. A unit that is
+  also used by a program gets a run test of that program as well.
+*******************************************************************************/
+
+module unit suite_unit;
+
+/*
+  @@test
+    kind unit
+  @@end
+*/
+
+exported routine SuiteUnitMax(const AA: int32; const AB: int32): int32;
+begin
+  if AA > AB then
+    return AA;
+  end;
+  return AB;
+end;
+
+end.

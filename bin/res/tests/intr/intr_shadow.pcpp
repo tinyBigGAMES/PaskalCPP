@@ -1,0 +1,58 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_shadow.pcpp - Intrinsic: the system scope
+
+  The intrinsic names live in an outer system scope, not as keywords (BNF.md
+  sec 7): a declaration shadows one (a routine print, a local len), and a C
+  function named like one (size) is still called through its C++ name
+  (::size). Where nothing shadows it, the intrinsic answers.
+*******************************************************************************/
+
+module exe intr_shadow;
+
+/*
+  @@test
+    kind run
+    expect
+    | my print: hello
+    | C size 42
+    | local named len 3
+    | intrinsic size still 4
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+int size(int x) { return x * 2; }
+
+routine print(AS: string);
+begin
+  println("my print: {}", AS);
+end;
+
+routine Measure(): int64;
+var
+  len: int64;
+begin
+  len := 3;
+  return len;
+end;
+
+begin
+  print("hello");
+  println("C size {}", ::size(21));
+  println("local named len {}", Measure());
+  println("intrinsic size still {}", size(int32));
+end.

@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  cpp_placement_err_body.pcpp - Cpp: placement, body
+
+  Break step of cpp_placement: cpp header; inside a body (PR0050).
+*******************************************************************************/
+
+module exe cpp_placement_err_body;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  cpp header; // ERROR PR0050@3: 'cpp header' / 'cpp source' set the placement
+end.

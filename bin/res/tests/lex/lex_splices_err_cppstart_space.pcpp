@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_splices_err_cppstart_space.pcpp - Lexical: a cppstart block ending in a blank splice
+
+  Break step of lex_splices: a cppstart block's last line of C++ ending
+  in a splice with a blank after its backslash warns, LX0201 at the
+  backslash, and is still a splice that would join cppend into the C++,
+  LX0014 at the same backslash. The marked line ends in the splice, so
+  its marker is a block-comment marker.
+  Its bytes are part of the test (see above): edit it with an editor
+  that keeps them as they are.
+*******************************************************************************/
+
+module exe lex_splices_err_cppstart_space;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+cppstart source
+int GX = 1; /* // WARN LX0201@60 // ERROR LX0014@59 // */ \ 
+cppend;
+
+begin
+  println("{}", 1);
+end.

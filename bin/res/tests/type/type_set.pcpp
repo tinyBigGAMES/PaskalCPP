@@ -1,0 +1,132 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_set.pcpp - Type: set types
+
+  A set type (BNF.md sec 4: set type) is set of a range of constants
+  (0..15, 'a'..'z', TColor.cRed..TColor.cGreen; at most 65536 members)
+  or set of an element type (a choices type, char, bool); a literal's
+  elements are of the range's family. Every part is used here and printed:
+  - a set literal lists values and ranges ([1, 3..5, LN]), [] is empty;
+    in tests a member; + - * are union, difference and intersection, as
+    += -= *= are (also on a field and through a var parameter); |= and
+    &= are C++'s as | and & are;
+  - = and <> compare two sets, >= and <= are superset and subset;
+  - a set prints its members in order; size of the widest set.
+*******************************************************************************/
+
+module exe type_set;
+
+/*
+  @@test
+    kind run
+    expect
+    | union true
+    | difference true
+    | intersection true
+    | field true true
+    | bitwise true false
+    | literal [1, 3, 4, 5, 9] count 5
+    | operators [0, 1, 3, 5, 9] [3, 9]
+    | compare false true true false
+    | empty true 0
+    | choices true false
+    | letters true false
+    | warm true false
+    | chars true
+    | flags true false
+    | wide true false size 8192
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+type
+  TColor = choices(cRed, cGreen, cBlue);
+  TS = set of 0..15;
+  TColors = set of TColor;
+  TLetters = set of 'a'..'z';
+  TChars = set of char;
+  TFlags = set of bool;
+  TWide = set of 0..65535;
+  TWarm = set of TColor.cRed..TColor.cGreen;
+  TR = record
+    S: TS;
+  end;
+
+routine Count(const ASet: TS): int32;
+var
+  LI: int32;
+  LN: int32 = 0;
+begin
+  for LI := 0 to 15 do
+    if LI in ASet then
+      LN := LN + 1;
+    end;
+  end;
+  return LN;
+end;
+
+routine AddRed(var AC: TColors);
+begin
+  AC += [TColor.cRed];
+end;
+
+var
+  LS: TS;
+  LT: TS;
+  LR: TR;
+  LC: TColors;
+  LL: TLetters;
+  LH: TChars;
+  LF: TFlags;
+  LW: TWide;
+  LM: TWarm;
+  LN: int32 = 9;
+
+begin
+  LS := [1, 2];
+  LS += [5];
+  println("union {}", LS = [1, 2, 5]);
+  LS -= [2];
+  println("difference {}", LS = [1, 5]);
+  LS *= [5, 7];
+  println("intersection {}", LS = [5]);
+  LR.S := [3];
+  LR.S += LS;
+  println("field {} {}", 3 in LR.S, 5 in LR.S);
+  LR.S |= [9];
+  LR.S &= [9, 3];
+  println("bitwise {} {}", 9 in LR.S, 5 in LR.S);
+  LS := [1, 3..5, LN];
+  println("literal {} count {}", LS, Count(LS));
+  LT := LS + [0] - [4];
+  println("operators {} {}", LT, LS * [3, 9, 15]);
+  println("compare {} {} {} {}", LS = LT, LS <> LT, LS >= [3, 9], LS <= [1, 3]);
+  LS := [];
+  println("empty {} {}", LS = [], Count(LS));
+  LC := [TColor.cGreen];
+  AddRed(LC);
+  println("choices {} {}", TColor.cRed in LC, TColor.cBlue in LC);
+  LL := ['a', 'e'..'g'];
+  println("letters {} {}", 'f' in LL, 'b' in LL);
+  LM := [TColor.cGreen];
+  println("warm {} {}", TColor.cGreen in LM, TColor.cRed in LM);
+  LH := ['x', 'y'];
+  println("chars {}", 'y' in LH);
+  LF := [true];
+  println("flags {} {}", true in LF, false in LF);
+  LW := [0, 65535];
+  println("wide {} {} size {}", 65535 in LW, 1 in LW, size(TWide));
+end.

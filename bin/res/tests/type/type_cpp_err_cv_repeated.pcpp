@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_cpp_err_cv_repeated.pcpp - Type: one cv qualifier twice in one slot
+
+  Break step of type_cpp: const const int (PR0029).
+*******************************************************************************/
+
+module exe type_cpp_err_cv_repeated;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+#include <vector>
+
+var
+  LN: const const int = 1; // ERROR PR0029@13: is repeated
+
+begin
+end.

@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_err_method_field_dup.pcpp - Type: object, method field dup
+
+  Break step of type_object: a method named like a field of the same object
+  (SM0004).
+*******************************************************************************/
+
+module exe type_object_err_method_field_dup;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    Put: int32;
+    method Put(); // ERROR SM0004@5: 'Put' is already declared in this scope
+    begin
+    end;
+  end;
+
+begin
+end.

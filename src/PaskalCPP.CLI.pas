@@ -62,6 +62,12 @@ const
   // `pcpp --dap`: the debug adapter on stdin / stdout (the editor runs it)
   PC_CLI_DAP_FLAG = '--dap';
 
+  { PC_CLI_NO_BANNER_FLAG }
+  // `pcpp ... --no-banner`: no banner (scripts, the test suite's cli tests:
+  // the banner's version changes every release). Read before the banner
+  // prints, anywhere before --, so -h and argument errors honour it too
+  PC_CLI_NO_BANNER_FLAG = '--no-banner';
+
   { PC_CLI_ARGS_FLAG }
   // `pcpp <file> -r|-d -- <args>`: the rest of the line is the program's
   PC_CLI_ARGS_FLAG = '--';
@@ -307,6 +313,8 @@ begin
     '  ' + RSPcCliHelpDefaults);
   TConsole.PrintLn('  ' + COLOR_CYAN + '--progress                 ' + COLOR_RESET +
     '  ' + RSPcCliHelpProgress);
+  TConsole.PrintLn('  ' + COLOR_CYAN + '--no-banner                ' + COLOR_RESET +
+    '  ' + RSPcCliHelpNoBanner);
   TConsole.PrintLn('  ' + COLOR_CYAN + '--terminal      <pipe>     ' + COLOR_RESET +
     '  ' + RSPcCliHelpTerminal);
   TConsole.PrintLn('  ' + COLOR_CYAN + 'editor [files]             ' + COLOR_RESET +
@@ -415,7 +423,8 @@ begin
     // The first build option is kept: --clean builds nothing and takes none
     // (an unknown flag is reported below either way)
     if (FBuildFlag = '') and LFlag.StartsWith('-') and (LFlag <> '--clean') and
-      (LFlag <> '--dry-run') and (LFlag <> '-h') and (LFlag <> '--help') then
+      (LFlag <> '--dry-run') and (LFlag <> '-h') and (LFlag <> '--help') and
+      (LFlag <> PC_CLI_NO_BANNER_FLAG) then
       FBuildFlag := LFlag;
 
     if (LFlag = '-h') or (LFlag = '--help') then
@@ -448,6 +457,10 @@ begin
       FDefaults := True
     else if LFlag = '--progress' then
       FProgressInPlace := True
+    else if LFlag = PC_CLI_NO_BANNER_FLAG then
+    begin
+      // Taken before the banner (Execute): nothing more to do here
+    end
     else if (LFlag = '-d') or (LFlag = '--debug') then
       FDebug := True
     else if LFlag = '--host' then
@@ -1007,7 +1020,8 @@ begin
   end;
 
   try
-    ShowBanner();
+    if not DoHasFlag(PC_CLI_NO_BANNER_FLAG) then
+      ShowBanner();
 
     if not ParseArgs() then
       Exit;

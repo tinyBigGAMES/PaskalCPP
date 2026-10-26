@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_cli_errors_args.pcpp - Build-kind compliance: program arguments without
+  -r
+
+  Everything after -- is the program's, so it needs a run (-r or -d): exit 2
+  and the hint to run pcpp -h. This file itself is never compiled.
+*******************************************************************************/
+
+module exe exe_cli_errors_args;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner <DIR>/fixtures/exe_cli_hello.pcpp -o $P:output -- one two"
+    exitcode 2
+    expect
+    | Error: -- (program arguments) is used with -r or -d only
+    | 
+    | Run pcpp -h to see available options
+  @@end
+*/
+
+begin
+end.

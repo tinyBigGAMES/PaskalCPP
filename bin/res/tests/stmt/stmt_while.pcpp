@@ -1,0 +1,73 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_while.pcpp - Statement: while
+
+  while ... do ... end; (BNF.md sec 5): the condition is bool and is tested
+  before each pass, so a false one runs the body never; leave ends the
+  loop, skip goes to the next test.
+*******************************************************************************/
+
+module exe stmt_while;
+
+/*
+  @@test
+    kind run
+    expect
+    | sum 15
+    | skipped odd 2 4
+    | left at 3
+    | never ran true
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+var
+  LI: int32;
+  LSum: int32;
+  LRan: bool;
+
+begin
+  LI := 1;
+  LSum := 0;
+  while LI <= 5 do
+    LSum += LI;
+    LI += 1;
+  end;
+  println("sum {}", LSum);
+  LI := 0;
+  print("skipped odd");
+  while LI < 4 do
+    LI += 1;
+    if LI mod 2 = 1 then
+      skip;
+    end;
+    print(" {}", LI);
+  end;
+  println("");
+  LI := 0;
+  while true do
+    LI += 1;
+    if LI = 3 then
+      leave;
+    end;
+  end;
+  println("left at {}", LI);
+  LRan := false;
+  while false do
+    LRan := true;
+  end;
+  println("never ran {}", not LRan);
+end.

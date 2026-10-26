@@ -1,0 +1,50 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_opaque_groups.pcpp - Expression: the opaque groups sizeof, alignof,
+  noexcept and typeid
+
+  An opaque group (BNF.md sec 6) is its keyword and a balanced ( ) copied
+  verbatim, never parsed inside: clang reads it. Each is a primary
+  expression whose value PaskalCPP uses like any other: sizeof and alignof
+  of a C++ type, noexcept of a call to a noexcept and a throwing-capable
+  routine, typeid compared with PaskalCPP's = (C++ ==).
+*******************************************************************************/
+
+module exe expr_opaque_groups;
+
+/*
+  @@test
+    kind run
+    expect
+    | sizeof 4 8
+    | alignof 8 4
+    | noexcept true false
+    | typeid true false
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+#include <typeinfo>
+
+int MayThrow() { return 1; }
+int NeverThrows() noexcept { return 2; }
+
+begin
+  println("sizeof {} {}", sizeof(int), sizeof(long long));
+  println("alignof {} {}", alignof(double), alignof(int));
+  println("noexcept {} {}", noexcept(NeverThrows()), noexcept(MayThrow()));
+  println("typeid {} {}", typeid(int) = typeid(int), typeid(int) = typeid(double));
+end.

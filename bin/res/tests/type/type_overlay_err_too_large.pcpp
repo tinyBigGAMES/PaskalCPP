@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_overlay_err_too_large.pcpp - Type: overlay, too large
+
+  Break step of type_overlay: no type holds more than 1152921504606846975
+  bytes: a field of exactly that many beside an int64 rounds the overlay up
+  past it (SM0277, at the overlay's name, judged in the emitted C++).
+*******************************************************************************/
+
+module exe type_overlay_err_too_large;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TV = overlay // ERROR SM0277@3: 'TV' is too large: a type holds at most 1152921504606846975 bytes
+    A: array[0..1152921504606846974] of uint8;
+    B: int64;
+  end;
+
+var
+  LV: TV;
+
+begin
+end.

@@ -1,0 +1,138 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_stamps.pcpp - Build kind: the icon and version info stamped on an exe (Windows)
+
+  @exeicon and @addverinfo on with the @vi* fields (BNF.md sec 2) are
+  stamped on the built Windows exe after the build. This program reads its
+  own resources and prints what it finds: an icon group, the file version of
+  the version resource's fixed part, and the product name and description
+  among its strings (what Explorer's Properties > Details tab shows).
+*******************************************************************************/
+
+module exe exe_stamps;
+
+/*
+  @@test
+    kind run
+    targets x86_64-windows-gnu
+    expect
+    | stamped
+    | icon group: yes
+    | file version: 1.2.3.0
+    | product name: yes
+    | description: yes
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@exeicon "$P:res/assets/icons/paskalcpp.ico";
+@addverinfo on;
+@vimajor 1;
+@viminor 2;
+@vipatch 3;
+@viproductname "PaskalCPP Compliance";
+@videscription "exe_stamps test program";
+@vifilename "exe_stamps.exe";
+@vicompanyname "tinyBigGAMES LLC";
+@vicopyright "Copyright 2026 tinyBigGAMES LLC";
+
+#include <windows.h>
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <string>
+
+// The bytes of the first resource of type AType in this program, or none
+static std::string exe_stamps_first(const WORD AType)
+{
+  LPWSTR LFound = nullptr;
+  EnumResourceNamesW(nullptr, MAKEINTRESOURCEW(AType),
+    [](HMODULE, LPCWSTR, LPWSTR AName, LONG_PTR AParam) -> BOOL
+    {
+      *reinterpret_cast<LPWSTR*>(AParam) = AName;
+      return FALSE;
+    },
+    reinterpret_cast<LONG_PTR>(&LFound));
+  if (LFound == nullptr)
+    return {};
+  HRSRC LRes = FindResourceW(nullptr, LFound, MAKEINTRESOURCEW(AType));
+  if (LRes == nullptr)
+    return {};
+  HGLOBAL LData = LoadResource(nullptr, LRes);
+  if (LData == nullptr)
+    return {};
+  const char* LBytes = static_cast<const char*>(LockResource(LData));
+  if (LBytes == nullptr)
+    return {};
+  return std::string(LBytes, SizeofResource(nullptr, LRes));
+}
+
+// 1 = the program carries an icon group (RT_GROUP_ICON = 14)
+static int exe_stamps_icon()
+{
+  return exe_stamps_first(14).empty() ? 0 : 1;
+}
+
+// The file version of the version resource's fixed part (RT_VERSION = 16),
+// found by its 0xFEEF04BD signature on a 4-byte boundary
+static std::string exe_stamps_version()
+{
+  std::string LBlock = exe_stamps_first(16);
+  for (size_t LAt = 0; LAt + 16 <= LBlock.size(); LAt += 4)
+  {
+    uint32_t LWord[4];
+    std::memcpy(LWord, LBlock.data() + LAt, sizeof(LWord));
+    if (LWord[0] == 0xFEEF04BDu)
+      return std::to_string(HIWORD(LWord[2])) + "." + std::to_string(LOWORD(LWord[2])) + "." +
+        std::to_string(HIWORD(LWord[3])) + "." + std::to_string(LOWORD(LWord[3]));
+  }
+  return "none";
+}
+
+// 1 = the version resource holds AText as a UTF-16 string
+static int exe_stamps_holds(const wchar_t* AText)
+{
+  std::string LBlock = exe_stamps_first(16);
+  const char* LText = reinterpret_cast<const char*>(AText);
+  size_t LLen = std::wcslen(AText) * sizeof(wchar_t);
+  return (std::search(LBlock.begin(), LBlock.end(), LText, LText + LLen) != LBlock.end()) ? 1 : 0;
+}
+
+static int exe_stamps_product()
+{
+  return exe_stamps_holds(L"PaskalCPP Compliance");
+}
+
+static int exe_stamps_description()
+{
+  return exe_stamps_holds(L"exe_stamps test program");
+}
+
+routine YesNo(const AValue: int32): string;
+begin
+  if AValue = 1 then
+    return "yes";
+  end;
+  return "no";
+end;
+
+begin
+  println("stamped");
+  println("icon group: {}", YesNo(cpp("exe_stamps_icon()")));
+  println("file version: {}", cpp("exe_stamps_version()"));
+  println("product name: {}", YesNo(cpp("exe_stamps_product()")));
+  println("description: {}", YesNo(cpp("exe_stamps_description()")));
+end.

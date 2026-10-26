@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_overload_err_same_types.pcpp - Decl: overload, same types
+
+  Break step of decl_overload: two routines with the same parameters.
+*******************************************************************************/
+
+module exe decl_overload_err_same_types;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine Show(AN: int32);
+begin
+end;
+
+routine Show(AN: int32); // ERROR SM0324@1
+begin
+end;
+
+begin
+end.

@@ -1,0 +1,195 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_init.pcpp - Type: init and done
+
+  An object is built by an init and ended by its done (BNF.md sec 4 object
+  type; they are their own member kinds, never methods). Shown here:
+  - init(...) runs when an object is built; `LB: TBox(1, 3);` gives it its
+    arguments, `LP: TPoint;` runs the init that takes none;
+  - an init begins with parent.init(...) (TBox) and then self.F.init(...)
+    for its object fields, in declaration order; a local of the init is
+    there for the rest of its body;
+  - an object is built parent first, then its fields, then its own body,
+    and ends the other way round: its done, its fields', its parent's;
+  - inits overload by parameter types (TPoint); an imported unit's object,
+    qualified, is built the same way (type_object_init_unit.TCounter);
+  - an init that raises: what it built ends (the field's done), its own
+    done never runs: the object never existed;
+  - a C/C++ type takes its constructor's arguments the same way: a field
+    (self.Text.init("label")) and a variable (std::string("cpp")).
+*******************************************************************************/
+
+module exe type_object_init;
+
+/*
+  @@test
+    kind run
+    expect
+    | init shape 1
+    | init log box
+    | init box 3 9
+    | area 9
+    | done box 3
+    | done log box
+    | done shape 1
+    | point 1 2 / 5 6
+    | counter starts at 10
+    | counter 11
+    | counter ends at 11
+    | init log fails
+    | done log fails
+    | caught
+    | label cpp
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/type/fixtures";
+
+import type_object_init_unit;
+
+type
+  TLog = object
+    Name: string;
+    init(const AName: string);
+    begin
+      self.Name := AName;
+      println("init log {}", self.Name);
+    end;
+    done;
+    begin
+      println("done log {}", self.Name);
+    end;
+  end;
+  TShape = object
+    Tag: int32;
+    init(const ATag: int32);
+    begin
+      self.Tag := ATag;
+      println("init shape {}", self.Tag);
+    end;
+    done;
+    begin
+      println("done shape {}", self.Tag);
+    end;
+    virtual method Area(): int32;
+    begin
+      return 0;
+    end;
+  end;
+  TBox = object(TShape)
+    Side: int32;
+    Log: TLog;
+    init(const ATag: int32; const ASide: int32);
+    var
+      LArea: int32;
+    begin
+      parent.init(ATag);
+      self.Log.init("box");
+      self.Side := ASide;
+      LArea := self.Side * self.Side;
+      println("init box {} {}", self.Side, LArea);
+    end;
+    done;
+    begin
+      println("done box {}", self.Side);
+    end;
+    override method Area(): int32;
+    begin
+      return self.Side * self.Side;
+    end;
+  end;
+  TPoint = object
+    X: int32;
+    Y: int32;
+    init();
+    begin
+      self.X := 1;
+      self.Y := 2;
+    end;
+    init(const AX: int32; const AY: int32);
+    begin
+      self.X := AX;
+      self.Y := AY;
+    end;
+  end;
+  TFails = object
+    Log: TLog;
+    init(const AFail: bool);
+    begin
+      self.Log.init("fails");
+      if AFail then
+        raise("init failed");
+      end;
+      println("init fails done");
+    end;
+    done;
+    begin
+      println("done fails");
+    end;
+  end;
+  TLabel = object
+    Text: std::string;
+    init();
+    begin
+      self.Text.init("label");
+    end;
+  end;
+
+routine UseCpp();
+var
+  LL: TLabel;
+  LT: std::string("cpp");
+begin
+  println("{} {}", LL.Text, LT);
+end;
+
+routine UseBox();
+var
+  LB: TBox(1, 3);
+begin
+  println("area {}", LB.Area());
+end;
+
+routine UseCounter();
+var
+  LC: type_object_init_unit.TCounter(10);
+begin
+  LC.Step();
+  println("counter {}", LC.Count);
+end;
+
+routine TryFails();
+var
+  LF: TFails(true);
+begin
+  println("never here {}", LF.Log.Name);
+end;
+
+var
+  LP: TPoint;
+  LQ: TPoint(5, 6);
+begin
+  UseBox();
+  println("point {} {} / {} {}", LP.X, LP.Y, LQ.X, LQ.Y);
+  UseCounter();
+  guard
+    TryFails();
+  except
+    println("caught");
+  end;
+  UseCpp();
+end.

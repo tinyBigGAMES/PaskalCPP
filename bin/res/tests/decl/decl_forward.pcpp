@@ -1,0 +1,167 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_forward.pcpp - Declaration: forward declarations
+
+  forward decl = "forward" ( "routine" [linkage] identifier [param list]
+  [":" type expr] | "type" identifier ) ";" (BNF.md sec 3). A name is
+  visible only after its declaration; forward makes it visible early.
+  - Types: TNode, TBits and TShape are forward-declared, used only behind
+    ptr to (a pointer alias, a record field) and then completed by a
+    record, an overlay and an object. A three-node list is walked through
+    its pointers; the overlay's low 16 bits of 305419896 (0x12345678) are
+    0x5678 = 22136 on both little-endian targets; the object's fields are
+    set through ^. and -> alike.
+  - Routines: IsEven and IsOdd call each other (mutual recursion through
+    the forward of IsOdd). Accumulate's forward spells var / const
+    parameters, ... and a return type, and the full declaration repeats
+    it exactly; AddThree calls it before its full declaration. CTwice's
+    forward has C linkage, and so has its full declaration.
+*******************************************************************************/
+
+module exe decl_forward;
+
+/*
+  @@test
+    kind run
+    expect
+    | IsEven(10) = true
+    | IsOdd(7) = true
+    | AddThree = 61
+    | GTotal = 61
+    | CTwice(21) = 42
+    | SumList = 6
+    | GBits.Low = 22136
+    | area = 42
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+forward type TNode;
+forward type TBits;
+forward type TShape;
+
+type
+  TNodeRef = ptr to TNode;
+  TList = record
+    Head: ptr to TNode;
+    Count: int32;
+  end;
+  TNode = record
+    Value: int32;
+    Next: TNodeRef;
+  end;
+  TBitsRef = ptr to TBits;
+  TBits = overlay
+    Whole: uint32;
+    Low: uint16;
+  end;
+  TShapeRef = ptr to TShape;
+  TShape = object
+    Width: int32;
+    Height: int32;
+  end;
+
+forward routine IsOdd(AN: int32): bool;
+forward routine Accumulate(var ATotal: int64; const ACount: int32; ...): int64;
+forward routine clink CTwice(AN: int32): int32;
+
+routine IsEven(AN: int32): bool;
+begin
+  if AN = 0 then
+    return true;
+  end;
+  return IsOdd(AN - 1);
+end;
+
+routine IsOdd(AN: int32): bool;
+begin
+  if AN = 0 then
+    return false;
+  end;
+  return IsEven(AN - 1);
+end;
+
+routine AddThree(var ATotal: int64): int64;
+begin
+  // Accumulate's full declaration comes later: its forward makes it callable here
+  return Accumulate(ATotal, 3, 10, 20, 30);
+end;
+
+routine Accumulate(var ATotal: int64; const ACount: int32; ...): int64;
+var
+  LI: int32;
+begin
+  LI := 0;
+  while LI < ACount do
+    ATotal := ATotal + varargs.next(int32);
+    LI := LI + 1;
+  end;
+  return ATotal;
+end;
+
+routine clink CTwice(AN: int32): int32;
+begin
+  return AN * 2;
+end;
+
+routine SumList(const AList: TList): int32;
+var
+  LP: TNodeRef;
+  LSum: int32;
+begin
+  LSum := 0;
+  LP := AList.Head;
+  while LP <> nil do
+    LSum := LSum + LP^.Value;
+    LP := LP^.Next;
+  end;
+  return LSum;
+end;
+
+var
+  GA: TNode;
+  GB: TNode;
+  GC: TNode;
+  GList: TList;
+  GBits: TBits;
+  GBitsRef: TBitsRef;
+  GShape: TShape;
+  GShapeRef: TShapeRef;
+  GTotal: int64 = 1;
+
+begin
+  println("IsEven(10) = {}", IsEven(10));
+  println("IsOdd(7) = {}", IsOdd(7));
+  println("AddThree = {}", AddThree(GTotal));
+  println("GTotal = {}", GTotal);
+  println("CTwice(21) = {}", CTwice(21));
+  GA.Value := 1;
+  GB.Value := 2;
+  GC.Value := 3;
+  GA.Next := address of GB;
+  GB.Next := address of GC;
+  GC.Next := nil;
+  GList.Head := address of GA;
+  GList.Count := 3;
+  println("SumList = {}", SumList(GList));
+  GBitsRef := address of GBits;
+  GBitsRef^.Whole := 305419896;
+  println("GBits.Low = {}", GBits.Low);
+  GShapeRef := address of GShape;
+  GShapeRef^.Width := 6;
+  GShapeRef->Height := 7;
+  println("area = {}", GShape.Width * GShapeRef^.Height);
+end.

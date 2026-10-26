@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_routine_err_count.pcpp - Type: a routine value called with too many arguments
+
+  Break step of type_routine: a routine value takes exactly its type's
+  arguments (SM0401).
+*******************************************************************************/
+
+module exe type_routine_err_count;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LF: routine(AN: int32): int32;
+  LN: int32;
+
+begin
+  LF := nil;
+  LN := LF(1, 2); // ERROR SM0401@9: takes 1 argument(s), 2 given
+end.

@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_external_err_lib_unknown.pcpp - Decl: external, lib unknown
+
+  Break step of decl_external: a name nothing declares as the library.
+*******************************************************************************/
+
+module exe decl_external_err_lib_unknown;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine clink lib_plain_add(AA: int32; AB: int32): int32; external CMissing; // ERROR SM0326@68
+
+begin
+  println("{}", lib_plain_add(2, 3));
+end.

@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addresdata_err_duplicate_lib.pcpp - Directive: a key a separately built library adds too
+
+  Break step of dir_addresdata: the dep dir_addresdata_err_duplicate_lib_dep
+  was built on its own, so this build cannot see its directives; both entries
+  land in this one program, which has one key space. The linker finds the
+  key twice and PaskalCPP reports it at this file's directive, with a note at
+  the @linklibrary of the library that holds the key too.
+*******************************************************************************/
+
+module exe dir_addresdata_err_duplicate_lib;
+
+/*
+  @@test
+    kind error
+    deps dir_addresdata_err_duplicate_lib_dep
+  @@end
+*/
+
+@addlibrarypath "$P:output/lib";
+@linklibrary "dir_addresdata_err_duplicate_lib_dep";
+@addresdata "hello" "$P:res/tests/dir/fixtures/dir_addresdata_hello.txt"; // ERROR SM0121@13
+
+routine clink dir_addresdata_dep_add(AA: int32; AB: int32): int32; external;
+
+begin
+  println("{}", dir_addresdata_dep_add(1, 2));
+end.

@@ -1,0 +1,76 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dbg_input.pcpp - Debugger: the program's terminal
+
+  The debugged program runs on a terminal: what it writes shows as it is
+  written, and it reads the keyboard while it runs. REPL: the console the
+  REPL runs in; editor: the TERMINAL tab. This program asks for a name,
+  greets it, then stops so the length can be watched.
+
+  How to check, from repo\bin:
+    REPL:   pcpp res\tests\dbg\dbg_input.pcpp -d   then type each step's words
+    Editor: open res\tests\dbg\dbg_input.pcpp, F5, then each step's keys
+  Each step: what to type, then "->" what both front-ends show.
+
+  Keys (REPL word = editor key):
+    c = F5 (continue)   n = F10 (over)   s = F11 (into)
+    finish = Shift+F11 (out)   q = Shift+F5 (stop)
+    b N = click the gutter left of line N
+    bt = the CALL STACK   f N = click CALL STACK row N (0 = top)
+    locals = the VARIABLES pane   p X = a WATCH row for X (hover is the same)
+    the program's output and keyboard = the console the REPL runs in /
+    the editor's TERMINAL tab
+
+  Steps:
+   1. (start)          -> REPL: held at entry (no breakpoint);
+                          editor: "Your name? " in the TERMINAL tab, waiting
+   2. c                -> REPL only: "Your name? ", waiting
+   3. type Ada, Enter  -> (editor: click into the TERMINAL tab first)
+                          "Hello, Ada!", then it stops at 75 (breakpoint)
+      p GLen           -> 3
+   4. c                -> prints "3 letters", the program ends
+*******************************************************************************/
+
+module exe dbg_input;
+
+/*
+  @@test
+    kind manual
+    targets x86_64-windows-gnu
+  @@end
+*/
+
+#include <cstdio>
+#include <cstring>
+
+var
+  GLen: int32;
+
+begin
+  cppstart source
+  char LName[64] = {0};
+  std::printf("Your name? ");
+  std::fflush(stdout);
+  if (std::fgets(LName, sizeof(LName), stdin) == nullptr)
+    LName[0] = 0;
+  LName[std::strcspn(LName, "\r\n")] = 0;
+  std::printf("Hello, %s!\n", LName);
+  std::fflush(stdout);
+  GLen = static_cast<int32_t>(std::strlen(LName));
+  cppend;
+  @breakpoint;
+  println("{} letters", GLen);
+end.

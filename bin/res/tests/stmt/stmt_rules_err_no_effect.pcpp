@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_rules_err_no_effect.pcpp - Stmt: rules, no effect
+
+  Break step of stmt_rules: an expression statement that has no effect
+  (SM0613).
+*******************************************************************************/
+
+module exe stmt_rules_err_no_effect;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int32;
+
+begin
+  LN := 1;
+  LN + 1; // ERROR SM0613@3: has no effect
+end.

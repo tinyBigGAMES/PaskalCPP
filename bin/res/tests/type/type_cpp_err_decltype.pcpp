@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_cpp_err_decltype.pcpp - Type: decltype with no ( ... ) after it
+
+  Break step of type_cpp: decltype takes a balanced ( ... ) (PR0037).
+*******************************************************************************/
+
+module exe type_cpp_err_decltype;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+#include <vector>
+
+var
+  LD: decltype; // ERROR PR0037@15: needs a balanced
+
+begin
+end.

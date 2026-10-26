@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_integers_suffixes.pcpp - Lexical: the capital binary prefix and every
+  int suffix order
+
+  BNF.md sec 9: binary takes 0b or 0B, and an int suffix is u / U first with
+  an optional l / L / ll / LL / z / Z after it, or one of those first with
+  an optional u / U after it. Each form below lexes as one literal and keeps
+  its value.
+*******************************************************************************/
+
+module exe lex_integers_suffixes;
+
+/*
+  @@test
+    kind run
+    expect
+    | binary 5 5
+    | u first 7 7 7 7 7 7
+    | u last 7 7 7 7 7 7
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+begin
+  println("binary {} {}", 0B101, 0b1'01);
+  println("u first {} {} {} {} {} {}", 7ul, 7UL, 7uLL, 7Ull, 7uz, 7UZ);
+  println("u last {} {} {} {} {} {}", 7lu, 7LU, 7llu, 7LLU, 7zu, 7ZU);
+end.

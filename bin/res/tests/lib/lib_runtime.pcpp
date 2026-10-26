@@ -1,0 +1,118 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lib_runtime.pcpp - Build kind: a program that links a lib that uses the runtime
+
+  Its dep lib_runtime_lib uses the runtime, so that lib's build leaves
+  pcpp_runtime beside it in output\lib and no build folder of its own: the
+  runtime is a second library of the lib's one zig build. This program links
+  the lib (and its own runtime, never pcpp_runtime) and calls its routine;
+  the program's runtime serves the lib too, so a raise inside the lib
+  reaches this program's guard. Then it looks from its own folder
+  (output\bin) at what the lib's build left: the runtime library in
+  output\lib under the target's name, and no output\runtime folder.
+*******************************************************************************/
+
+module exe lib_runtime;
+
+/*
+  @@test
+    kind run
+    deps lib_runtime_lib
+    expect
+    | lib_runtime_lib_div(7, 2) = 3
+    | caught from the lib: Divide by zero
+    | pcpp_runtime beside the lib: yes
+    | runtime build folder: none
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addlibrarypath "$P:output/lib";
+@linklibrary "lib_runtime_lib";
+
+#include <filesystem>
+#include <string>
+#include <system_error>
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+// The output root: the parent of the folder this program's own file is in
+// (output\bin); empty when the program's path cannot be read
+static std::filesystem::path lib_test_root()
+{
+  std::error_code LError;
+  std::filesystem::path LSelf;
+#ifdef _WIN32
+  wchar_t LPath[MAX_PATH];
+  DWORD LLen = GetModuleFileNameW(nullptr, LPath, MAX_PATH);
+  if ((LLen == 0) || (LLen == MAX_PATH))
+    return {};
+  LSelf = std::filesystem::path(std::wstring(LPath, LLen));
+#else
+  LSelf = std::filesystem::read_symlink("/proc/self/exe", LError);
+  if (LError)
+    return {};
+#endif
+  return LSelf.parent_path().parent_path();
+}
+
+// 1 = the static library named AName is in <root>/lib under the target's
+// file name (AName.lib on Windows, libAName.a on Linux)
+static int lib_test_in_lib(const char* AName)
+{
+  std::error_code LError;
+#ifdef _WIN32
+  std::string LFile = std::string(AName) + ".lib";
+#else
+  std::string LFile = std::string("lib") + AName + ".a";
+#endif
+  return std::filesystem::is_regular_file(lib_test_root() / "lib" / LFile, LError) ? 1 : 0;
+}
+
+// 1 = a <root>/runtime folder exists (the old separate runtime build)
+static int lib_runtime_folder()
+{
+  std::error_code LError;
+  return std::filesystem::exists(lib_test_root() / "runtime", LError) ? 1 : 0;
+}
+
+// 1 = the runtime library the dep's build installs is in output\lib
+static int lib_runtime_beside()
+{
+  return lib_test_in_lib("pcpp_runtime");
+}
+
+routine clink lib_runtime_lib_div(AA: int32; AB: int32): int32; external;
+
+begin
+  println("lib_runtime_lib_div(7, 2) = {}", lib_runtime_lib_div(7, 2));
+  guard
+    println("{}", lib_runtime_lib_div(1, 0));
+  except
+    println("caught from the lib: {}", excmsg());
+  end;
+  if cpp("lib_runtime_beside()") = 1 then
+    println("pcpp_runtime beside the lib: yes");
+  else
+    println("pcpp_runtime beside the lib: no");
+  end;
+  if cpp("lib_runtime_folder()") = 1 then
+    println("runtime build folder: present");
+  else
+    println("runtime build folder: none");
+  end;
+end.

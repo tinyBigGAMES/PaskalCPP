@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_exeicon_err_dll.pcpp - Directive: @exeicon on a dll
+
+  Break step of dir_exeicon: only an executable takes an icon; a warning,
+  not used, the file is not looked for.
+*******************************************************************************/
+
+module dll dir_exeicon_err_dll;
+
+/*
+  @@test
+    kind build
+  @@end
+*/
+
+@exeicon "$P:res/assets/icons/paskalcpp.ico"; // WARN SM0103@1: does not apply to
+
+end.

@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_conditional_err_afterelse.pcpp - Directive: a second @else
+
+  Break step of dir_conditional: nothing but @endif may follow @else.
+*******************************************************************************/
+
+module exe dir_conditional_err_afterelse;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@ifdef DIR_CND_NONE
+@else
+@else // ERROR CD0003@1
+@endif
+
+begin
+end.

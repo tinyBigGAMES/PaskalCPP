@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_return_err_needs_value.pcpp - Stmt: return, needs value
+
+  Break step of stmt_return: return with no value in a function (SM0610).
+*******************************************************************************/
+
+module exe stmt_return_err_needs_value;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine F(): int32;
+begin
+  return; // ERROR SM0610@3: return needs a value of type
+end;
+
+begin
+end.

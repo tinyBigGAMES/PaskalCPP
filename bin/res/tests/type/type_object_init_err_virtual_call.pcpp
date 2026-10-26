@@ -1,0 +1,44 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_init_err_virtual_call.pcpp - Type: object init, virtual call
+
+  Break step of type_object_init: a virtual method called in an init: the
+  object is not its own type yet (SM0348).
+*******************************************************************************/
+
+module exe type_object_init_err_virtual_call;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    N: int32;
+    init();
+    begin
+      self.N := self.Size(); // ERROR SM0348@17: 'Size' is virtual
+    end;
+    virtual method Size(): int32;
+    begin
+      return 1;
+    end;
+  end;
+
+begin
+end.

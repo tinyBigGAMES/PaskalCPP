@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_digraphs_err_paste.pcpp - Lexical: %:%: after other tokens
+
+  Break step of lex_digraphs: %:%: (##) after other tokens on its line is
+  two %: digraphs, and each is LX0008 (a %: must be the first token on its
+  line): one mistake, two reports.
+*******************************************************************************/
+
+module exe lex_digraphs_err_paste;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int32;
+
+begin
+  LN := 1;
+  LN := 2; %:%: // ERROR LX0008@12 // ERROR LX0008@14
+end.

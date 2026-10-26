@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_strings_err_multichar.pcpp - Lexical: a character literal of several
+
+  Break step of lex_strings: a character literal of several characters is
+  PR0064, a warning, once each: it is the int32 its bytes make ('ab' is
+  97 * 256 + 98). Past 4 characters it is too long for its type and keeps
+  the last 4, still one report.
+*******************************************************************************/
+
+module exe lex_strings_err_multichar;
+
+/*
+  @@test
+    kind run
+    expect
+    | 24930
+    | 1650680933
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+begin
+  println("{}", 'ab'); // WARN PR0064@17: character literal: multi-character character constant
+  println("{}", 'abcde'); // WARN PR0064@17: character literal: character constant too long for its type
+end.

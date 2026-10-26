@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  test_mode_err_lib.pcpp - Test: mode, lib
+
+  Break step of test_mode: @unitTestMode in a lib module, where no program
+  runs its tests (SM0110).
+*******************************************************************************/
+
+module lib test_mode_err_lib;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@unitTestMode on; // ERROR SM0110@1: @unitTestMode in a dll or lib module
+
+end.

@@ -1,0 +1,43 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_init_err_no_init_takes.pcpp - Type: object init, no init takes
+
+  Break step of type_object_init: arguments no init of the type takes
+  (SM0351).
+*******************************************************************************/
+
+module exe type_object_init_err_no_init_takes;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    N: int32;
+    init(const AN: int32);
+    begin
+      self.N := AN;
+    end;
+  end;
+
+var
+  GA: TA("five"); // ERROR SM0351@9: no init of 'TA' takes
+
+begin
+end.

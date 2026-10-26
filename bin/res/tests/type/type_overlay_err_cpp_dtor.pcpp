@@ -1,0 +1,47 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_overlay_err_cpp_dtor.pcpp - Type: overlay, cpp dtor
+
+  Break step of type_overlay: a C++ type that cleans up after itself (a
+  destructor) cannot share an overlay's storage, in a record's anonymous
+  overlay too (SM0313, judged in the emitted C++).
+*******************************************************************************/
+
+module exe type_overlay_err_cpp_dtor;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+struct CRes { ~CRes() {} int H; };
+
+type
+  TV = record
+    K: int32;
+    overlay
+      I: int64;
+      R: CRes; // ERROR SM0313@7: is not plain data
+    end;
+  end;
+
+var
+  V: TV;
+
+begin
+  V.K := 1;
+end.

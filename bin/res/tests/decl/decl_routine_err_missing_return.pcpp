@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_routine_err_missing_return.pcpp - Decl: routine, missing return
+
+  Break step of decl_routine: a function that can reach its end without
+  returning (reported at its end).
+*******************************************************************************/
+
+module exe decl_routine_err_missing_return;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine Sign(AN: int32): int32;
+begin
+  if AN > 0 then
+    return 1;
+  end;
+end; // ERROR SM0612@1
+
+begin
+  println("{}", Sign(1));
+end.

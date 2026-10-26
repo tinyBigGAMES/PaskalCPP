@@ -1,0 +1,62 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_preproc.pcpp - Lexical: preprocessor lines
+
+  A # first on its line starts a C++ preprocessor line, read whole as one
+  token up to its logical line's end (BNF.md sec 9): the next line holds
+  tokens of its own again (the var section after LX_FIVE); a // inside a
+  quote on a # line is text, not a comment (LX_URL keeps its http://); a
+  block comment may run over lines inside a # line (LX_SUM is 1 + 2, and
+  GAfter, the next line's __LINE__, shows both lines were counted). An
+  unclosed quote on a # line ends at its newline, and a slash-star after it
+  is text: under #if 0 (clang skips the line), the #endif after it still
+  closes the #if.
+*******************************************************************************/
+
+module exe lex_preproc;
+
+/*
+  @@test
+    kind run
+    expect
+    | five 5
+    | url http://x
+    | sum 3
+    | after 51
+    | skipped ok
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+#define LX_FIVE 5
+var
+  LN: int32 = LX_FIVE;
+
+#define LX_URL "http://x"
+#define LX_SUM 1 /* a comment over
+  two lines */ + 2
+int GAfter = __LINE__;
+#if 0
+#define LX_QUOTE 'a /*
+#endif
+
+begin
+  println("five {}", LN);
+  println("url {}", LX_URL);
+  println("sum {}", LX_SUM);
+  println("after {}", GAfter);
+  println("skipped ok");
+end.

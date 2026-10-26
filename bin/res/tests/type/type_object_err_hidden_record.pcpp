@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_err_hidden_record.pcpp - Type: object, hidden record
+
+  Break step of type_object: hidden in a record: only an object's members are
+  hidden (PR0034).
+*******************************************************************************/
+
+module exe type_object_err_hidden_record;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TR = record
+    hidden N: int32; // ERROR PR0034@5: 'hidden' is not allowed in a record
+  end;
+
+begin
+end.

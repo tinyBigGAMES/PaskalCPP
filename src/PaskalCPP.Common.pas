@@ -45,16 +45,16 @@ uses
 const
   { PC_MAJOR_VERSION }
   // PaskalCPP's version: the one place it is written (pcppdev stamps it on
-  // the editor and its package.json)
-  PC_MAJOR_VERSION = 0;
+  // the exes, the editor and its package.json). The parts are strings so
+  // PC_VERSION_STR is joined from them and can never drift; pcppdev turns
+  // them into numbers for the exe version resource
+  PC_MAJOR_VERSION = '0';
   { PC_MINOR_VERSION }
-  PC_MINOR_VERSION = 2;
+  PC_MINOR_VERSION = '3';
   { PC_PATCH_VERSION }
-  PC_PATCH_VERSION = 0;
-  { PC_VERSION }
-  PC_VERSION = (PC_MAJOR_VERSION * 10000) + (PC_MINOR_VERSION * 100) + PC_PATCH_VERSION;
+  PC_PATCH_VERSION = '0';
   { PC_VERSION_STR }
-  PC_VERSION_STR = '0.2.0';
+  PC_VERSION_STR = PC_MAJOR_VERSION + '.' + PC_MINOR_VERSION + '.' + PC_PATCH_VERSION;
 
   { PC_SRC_EXT }
   PC_SRC_EXT = 'pcpp';
@@ -3070,7 +3070,10 @@ var
 begin
   // Splices go first (phase 2 before escapes): a '\' that starts one is not
   // an escape. An escape's next character is read past any splices between
-  // them; an unknown one loses its '\', every other character is copied
+  // them; an unknown one loses its '\', every other character is copied.
+  // PaskalCPP has no trigraphs (nor has C++23), but clang still warns on the
+  // raw text ("trigraph ignored"): a '?' right after a '?' and right before
+  // a trigraph character is written '\?', the same value
   LLength := Length(AText);
   LBuilder := TStringBuilder.Create(LLength);
   try
@@ -3079,7 +3082,11 @@ begin
     begin
       if AText[LIndex] <> '\' then
       begin
-        LBuilder.Append(AText[LIndex]);
+        if (AText[LIndex] = '?') and (LIndex > 1) and (AText[LIndex - 1] = '?') and
+          (LIndex < LLength) and CharInSet(AText[LIndex + 1], ['=', '/', '''', '(', ')', '!', '<', '>', '-']) then
+          LBuilder.Append('\?')
+        else
+          LBuilder.Append(AText[LIndex]);
         Inc(LIndex);
         Continue;
       end;

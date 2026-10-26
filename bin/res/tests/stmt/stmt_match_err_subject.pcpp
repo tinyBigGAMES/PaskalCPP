@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_match_err_subject.pcpp - Stmt: match, subject
+
+  Break step of stmt_match: a string subject (SM0603).
+*******************************************************************************/
+
+module exe stmt_match_err_subject;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LS: string;
+
+begin
+  LS := "a";
+  match LS of // ERROR SM0603@9: a match subject is
+    1: println("one");
+  end;
+end.

@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_call_member_err_not_callable.pcpp - Expr: call member, not callable
+
+  Break step of expr_call_member: an int32 variable called (SM0400).
+*******************************************************************************/
+
+module exe expr_call_member_err_not_callable;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int32;
+  LM: int32;
+
+begin
+  LM := 1;
+  LN := LM(1); // ERROR SM0400@9: 'LM' is not callable
+end.

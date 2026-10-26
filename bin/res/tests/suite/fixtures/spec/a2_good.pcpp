@@ -1,0 +1,41 @@
+/****************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+ ---------------------------------------------------------------------------
+  a2_good - test-suite input (spec scanner)
+****************************************************************************/
+module exe a2_good;
+
+/*
+  @@test
+    kind run                       -- a note runs to the line end
+    deps a2_lib_one a2_lib_two
+    targets x86_64-windows-gnu x86_64-linux-gnu
+    opt debug fast
+    subsystem console gui
+    define TRACE LEVEL=2
+    args "one \"two\" c:\\dir"
+    exitcode 3
+    warnings allow
+    expect
+    | hello   
+    |  indented
+    |
+    expect x86_64-linux-gnu
+    | from linux
+  @@end
+*/
+
+begin
+end.

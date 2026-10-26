@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_array_err_bounds_family.pcpp - Type: array, bounds family
+
+  Break step of type_array: both static bounds are of one family: 0 and a char
+  are not (SM0322).
+*******************************************************************************/
+
+module exe type_array_err_bounds_family;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = array[0..'Z'] of int32; // ERROR SM0322@8: array bounds are integer, char or choices of one family
+
+begin
+end.

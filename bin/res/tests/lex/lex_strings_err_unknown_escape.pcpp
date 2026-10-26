@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_strings_err_unknown_escape.pcpp - Lexical: an escape C++ does not know
+
+  Break step of lex_strings: \q is no C++ escape, PR0021, a warning,
+  reported once (the C++ build adds nothing about it). The text keeps the
+  q, as clang does, so the program prints aqb.
+*******************************************************************************/
+
+module exe lex_strings_err_unknown_escape;
+
+/*
+  @@test
+    kind run
+    expect
+    | aqb
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+begin
+  println("{}", "a\qb"); // WARN PR0021@17: string literal: unknown escape sequence '\q'
+end.

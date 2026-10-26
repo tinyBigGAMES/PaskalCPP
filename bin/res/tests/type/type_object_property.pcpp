@@ -1,0 +1,121 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property.pcpp - Type: properties
+
+  property X: T read ...; [[hidden] write ...;] in an object is a value
+  read and written through accessors, never storage (BNF.md sec 4
+  property decl). Shown here:
+  - a read or a write bound to a field (Celsius: zero cost, the field
+    itself), or written with a body (Fahrenheit: read returns a value,
+    write(AValue) takes one of the property's type);
+  - a hidden write: Log is read anywhere, written only in the methods of
+    TTemp and its descendants (Note);
+  - parent.Celsius in a descendant, an own's object (LO.Celsius), an
+    element of an array; a read through a const object (Show: a read
+    changes nothing);
+  - X OP= v reads, operates and writes; the object, then the value, are
+    evaluated once each, in that order (index before value).
+*******************************************************************************/
+
+module exe type_object_property;
+
+/*
+  @@test
+    kind run
+    expect
+    | 100 212
+    | 0
+    | value 7
+    | 12
+    | const 12 53
+    | ab
+    | 6
+    | index
+    | value 5
+    | index
+    | value 1
+    | 6
+    | [Heap] Allocs: 1, Frees: 1, Leaked: 0
+  @@end
+*/
+
+type
+  TTemp = object
+    FC: int32;
+    FLog: string;
+    property Celsius: int32 read FC; write FC;
+    property Fahrenheit: int32 read
+      begin
+        return self.FC * 9 div 5 + 32;
+      end;
+      write(AValue)
+      begin
+        self.FC := (AValue - 32) * 5 div 9;
+      end;
+    property Log: string read FLog; hidden write FLog;
+    method Note(const AText: string);
+    begin
+      self.Log := self.Log + AText;
+    end;
+  end;
+  TChild = object(TTemp)
+    method Warm();
+    begin
+      parent.Celsius += 5;
+    end;
+  end;
+
+routine Pick(const AValue: int32): int32;
+begin
+  println("value {}", AValue);
+  return AValue;
+end;
+
+routine Idx(): int32;
+begin
+  println("index");
+  return 1;
+end;
+
+routine Show(const AT: TTemp);
+begin
+  println("const {} {}", AT.Celsius, AT.Fahrenheit);
+end;
+
+var
+  LT: TChild;
+  LO: own TTemp;
+  LA: array[0..1] of TTemp;
+begin
+  LT.Celsius := 100;
+  println("{} {}", LT.Celsius, LT.Fahrenheit);
+  LT.Fahrenheit := 32;
+  println("{}", LT.Celsius);
+  LT.Celsius += Pick(7);
+  LT.Warm();
+  println("{}", LT.Celsius);
+  Show(LT);
+  LT.Note("a");
+  LT.Note("b");
+  println("{}", LT.Log);
+  LO := own TTemp;
+  LO.Celsius := 3;
+  LO.Celsius *= 2;
+  println("{}", LO.Celsius);
+  LA[Idx()].Celsius := Pick(5);
+  LA[Idx()].Celsius += Pick(1);
+  println("{}", LA[1].Celsius);
+end.

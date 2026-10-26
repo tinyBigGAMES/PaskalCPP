@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_arithmetic_err_div_int64.pcpp - Expr: arithmetic, div int64
+
+  Break step of expr_arithmetic: an int64 divided with / (SM0200): / is real
+  division in float64, which cannot hold every int64; write float64(LBig) / 2
+  or LBig div 2.
+*******************************************************************************/
+
+module exe expr_arithmetic_err_div_int64;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LBig: int64 = 9;
+  LR: float64;
+
+begin
+  LR := LBig / 2; // ERROR SM0200@9: 'int64' does not convert implicitly to 'float64'
+end.

@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_unary_postfix_err_negate_string.pcpp - Expr: unary postfix, negate string
+
+  Break step of expr_unary_postfix: unary minus on a string (SM0250).
+*******************************************************************************/
+
+module exe expr_unary_postfix_err_negate_string;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LS: string;
+
+begin
+  LS := "a";
+  LS := -LS; // ERROR SM0250@9: does not take 'string'
+end.

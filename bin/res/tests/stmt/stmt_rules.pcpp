@@ -1,0 +1,70 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_rules.pcpp - Statement: the statement rules
+
+  Every statement ends in ; (BNF.md sec 5), so two expressions in a row
+  are a syntax error, never two statements, and there is no empty
+  statement. A begin ... end; block is a statement; an expression
+  statement is any expression with an effect: an assignment (:= and the
+  compound forms), a call, a C++ expression (LV.push_back(1)). C++
+  statements have PaskalCPP forms (switch = match, try = guard, throw =
+  raise); one that has none goes in cppstart source ... cppend;.
+*******************************************************************************/
+
+module exe stmt_rules;
+
+/*
+  @@test
+    kind run
+    expect
+    | block 1
+    | assign 7 14
+    | call 3
+    | cpp 2
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+#include <vector>
+
+routine Three(): int32;
+begin
+  return 3;
+end;
+
+routine Note(AN: int32);
+begin
+  println("call {}", AN);
+end;
+
+var
+  LN: int32;
+  LV: std::vector<int>;
+
+begin
+  begin
+    LN := 1;
+    println("block {}", LN);
+  end;
+  LN := 7;
+  print("assign {} ", LN);
+  LN *= 2;
+  println("{}", LN);
+  Note(Three());
+  LV.push_back(1);
+  LV.push_back(2);
+  println("cpp {}", LV.size());
+end.

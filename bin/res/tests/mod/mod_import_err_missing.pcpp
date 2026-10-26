@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_import_err_missing.pcpp - Module: a unit no folder holds
+
+  Break step of mod_import: neither this file's folder nor a module path
+  holds mod_import_missing.pcpp.
+*******************************************************************************/
+
+module exe mod_import_err_missing;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_import_missing; // ERROR PR0012@8
+
+begin
+end.

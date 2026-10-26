@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_alias_unit.pcpp - Type fixture: a unit the alias and pointer tests import
+
+  An exported type (TKind = int64) and an exported variable (GUnitCount):
+  type_alias uses the type qualified, type_alias_err_module /
+  type_alias_err_unit_var / type_pointer_err_qualified_star break on them.
+*******************************************************************************/
+
+module unit type_alias_unit;
+
+exported type
+  TKind = int64;
+
+exported var
+  GUnitCount: int32 = 4;
+
+end.

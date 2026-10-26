@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_err_anon_overlay_packed.pcpp - Type: record, anon overlay packed
+
+  Break step of type_record: an anonymous overlay takes no packed (PR0033).
+*******************************************************************************/
+
+module exe type_record_err_anon_overlay_packed;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TR = record
+    overlay packed // ERROR PR0033@13: 'packed' is not allowed on an anonymous overlay
+      B: int32;
+      F: float32;
+    end;
+  end;
+
+begin
+end.

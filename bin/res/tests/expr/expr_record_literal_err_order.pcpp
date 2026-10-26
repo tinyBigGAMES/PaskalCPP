@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_record_literal_err_order.pcpp - Expr: record literal, order
+
+  Break step of expr_record_literal: fields out of declaration order (SM0416).
+*******************************************************************************/
+
+module exe expr_record_literal_err_order;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TP = record
+    X: int32;
+    Y: int32;
+  end;
+
+var
+  LP: TP;
+
+begin
+  LP := TP(Y: 1, X: 2); // ERROR SM0416@18: 'X' comes before 'Y' in 'TP'
+end.

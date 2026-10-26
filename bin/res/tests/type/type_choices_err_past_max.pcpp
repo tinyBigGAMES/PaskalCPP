@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_choices_err_past_max.pcpp - Type: a value after the largest int64
+
+  Break step of type_choices: no value follows the largest int64, it would
+  have no number (SM0256).
+*******************************************************************************/
+
+module exe type_choices_err_past_max;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TB = choices(bTop = 9223372036854775807, bPast); // ERROR SM0256@44: constant overflows 'int64'
+
+begin
+end.

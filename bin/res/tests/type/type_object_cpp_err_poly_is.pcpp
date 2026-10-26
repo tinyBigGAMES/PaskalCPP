@@ -1,0 +1,51 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_cpp_err_poly_is.pcpp - Type: object cpp, poly is
+
+  Break step of type_object_cpp: is on an object whose C++ base has no virtual
+  method (SM0271).
+*******************************************************************************/
+
+module exe type_object_cpp_err_poly_is;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+struct CPlain {
+  int tag = 5;
+};
+
+type
+  TA = object(CPlain)
+    N: int32;
+  end;
+  TB = object(TA)
+    M: int32;
+  end;
+
+routine Check(const AA: TA): bool;
+begin
+  return AA is TB; // ERROR SM0271
+end;
+
+var
+  LB: TB;
+begin
+  println("{}", Check(LB));
+end.

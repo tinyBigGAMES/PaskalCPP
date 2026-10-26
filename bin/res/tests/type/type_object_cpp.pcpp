@@ -1,0 +1,196 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_cpp.pcpp - Type: objects across the C++ boundary
+
+  An object and C++ classes derive from each other (BNF.md sec 4). Shown here:
+  - object(CShape) derives from a C++ struct declared plain in this file:
+    its members are C++'s (self.sides), and `override method area()`
+    overrides the C++ virtual, so C++ code calling area() through a
+    CShape& runs the PaskalCPP body; a plain method may hide a plain C++
+    method of its name (perimeter), as it hides a PaskalCPP parent's, but a
+    method matching a C++ virtual needs override (D7, reported by clang
+    from the generated class, so its break files are built);
+  - an exported object of an imported unit (TAnimal) is a plain C++ class:
+    C++ code derives from it (CDog overrides the virtual Sound) and builds
+    it with its init's arguments (TAnimal(4), cat(3)), as PaskalCPP does
+    (LCow: TAnimal(4));
+  - an object with no virtual method of its own is polymorphic when its
+    C++ base is (TLeaf through CNode): is / as and an own of the ancestor
+    work on it; one whose C++ base has none (TPlainKid through CPlain) is
+    copied to its ancestor by value. Only clang sees the C++ class, so the
+    break files for these rules are built;
+  - `const method` changes nothing of self: it may be called through a
+    const parameter (Measure) and call only const methods through self
+    (Size calls Twice); it overrides a C++ const virtual (corners, called
+    by C++ through a const CShape&), and an interface may require one;
+  - a method named without its call (a routine value, an argument,
+    address of, parent.M) is an error: a method runs on its object.
+*******************************************************************************/
+
+module exe type_object_cpp;
+
+/*
+  @@test
+    kind run
+    expect
+    | 9
+    | 9
+    | 4 3
+    | 12
+    | woof 4
+    | ... 3
+    | ... 4
+    | true false
+    | 7
+    | true
+    | 3 5
+    | 12 4
+    | [Heap] Allocs: 1, Frees: 1, Leaked: 0
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/type/fixtures";
+
+import type_object_cpp_unit;
+
+struct CShape {
+  virtual ~CShape() = default;
+  virtual int area() { return 0; }
+  int perimeter() { return 0; }
+  virtual int corners() const { return 0; }
+  int sides = 0;
+};
+
+int cpp_area(CShape& s) { return s.area(); }
+
+int cpp_corners(const CShape& s) { return s.corners(); }
+
+struct CNode {
+  virtual ~CNode() = default;
+  virtual int kind() { return 1; }
+};
+
+struct CPlain {
+  int tag = 5;
+};
+
+type
+  TSquare = object(CShape)
+    S: int32;
+    init(const AS: int32);
+    begin
+      self.S := AS;
+      self.sides := 4;
+    end;
+    override method area(): int32;
+    begin
+      return self.S * self.S;
+    end;
+    method perimeter(): int32;
+    begin
+      return self.S * 4;
+    end;
+    override const method corners(): int32;
+    begin
+      return self.sides;
+    end;
+  end;
+  IMeasure = interface
+    const method Size(): int32;
+  end;
+  TRuler = object implements IMeasure
+    Len: int32;
+    virtual const method Size(): int32;
+    begin
+      return self.Twice();
+    end;
+    const method Twice(): int32;
+    begin
+      return self.Len * 2;
+    end;
+  end;
+  TLeaf = object(CNode)
+    V: int32;
+  end;
+  TBranch = object(TLeaf)
+    W: int32;
+  end;
+  TPlainBase = object(CPlain)
+    P: int32;
+  end;
+  TPlainKid = object(TPlainBase)
+    Q: int32;
+  end;
+
+routine Probe(const AN: TLeaf): bool;
+begin
+  return AN is TBranch;
+end;
+
+routine Widen(var AN: TLeaf);
+begin
+  (AN as TBranch).W := 7;
+end;
+
+routine Measure(const AR: TRuler): int32;
+begin
+  return AR.Size();
+end;
+
+struct CDog : ::pcpp_m_type_object_cpp_unit::TAnimal {
+  CDog() : TAnimal(4) {}
+  std::string Sound() override { return "woof"; }
+};
+
+std::string cpp_dog() {
+  CDog d;
+  ::pcpp_m_type_object_cpp_unit::TAnimal& a = d;
+  return a.Sound() + " " + std::to_string(a.Legs);
+}
+
+std::string cpp_cat() {
+  ::pcpp_m_type_object_cpp_unit::TAnimal cat(3);
+  return cat.Sound() + " " + std::to_string(cat.Legs);
+}
+
+var
+  LSq: TSquare(3);
+  LCow: type_object_cpp_unit.TAnimal(4);
+  LB: TBranch;
+  LL: TLeaf;
+  LO: own TLeaf;
+  LPB: TPlainBase;
+  LPK: TPlainKid;
+  LR: TRuler;
+begin
+  println("{}", cpp_area(LSq));
+  println("{}", LSq.area());
+  println("{} {}", LSq.sides, LSq.S);
+  println("{}", LSq.perimeter());
+  println("{}", cpp_dog());
+  println("{}", cpp_cat());
+  println("{} {}", LCow.Sound(), LCow.Legs);
+  println("{} {}", Probe(LB), Probe(LL));
+  Widen(LB);
+  println("{}", LB.W);
+  LO := own TBranch;
+  println("{}", LO is TBranch);
+  LPK.P := 3;
+  LPB := LPK;
+  println("{} {}", LPB.P, LPB.tag);
+  LR.Len := 6;
+  println("{} {}", Measure(LR), cpp_corners(LSq));
+end.

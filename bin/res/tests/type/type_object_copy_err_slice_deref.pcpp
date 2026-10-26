@@ -1,0 +1,46 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_copy_err_slice_deref.pcpp - Type: object copy, slice deref
+
+  Break step of type_object_copy: a polymorphic object assigned through a
+  pointer: it may be a descendant (SM0429).
+*******************************************************************************/
+
+module exe type_object_copy_err_slice_deref;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    N: int32;
+    virtual method M();
+    begin
+    end;
+  end;
+
+routine Reset(AP: ptr to TA);
+var
+  LB: TA;
+begin
+  AP^ := LB; // ERROR SM0429@3: 'AP^' may hold a descendant of 'TA' (it is polymorphic)
+end;
+
+begin
+end.

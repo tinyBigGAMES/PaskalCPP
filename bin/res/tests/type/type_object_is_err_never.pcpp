@@ -1,0 +1,50 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_is_err_never.pcpp - Type: object is, never
+
+  Break step of type_object_is: is between two objects of different branches
+  (SM0273).
+*******************************************************************************/
+
+module exe type_object_is_err_never;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TShape = object
+    virtual method Name(): string;
+    begin
+      return "shape";
+    end;
+  end;
+  TCircle = object(TShape)
+    R: int32;
+  end;
+  TSquare = object(TShape)
+    S: int32;
+  end;
+
+routine Check(const AC: TCircle): bool;
+begin
+  return AC is TSquare; // ERROR SM0273
+end;
+
+begin
+end.

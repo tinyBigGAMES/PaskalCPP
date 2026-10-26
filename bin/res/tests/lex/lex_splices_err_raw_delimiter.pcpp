@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_splices_err_raw_delimiter.pcpp - Lexical: a splice in a raw delimiter
+
+  Break step of lex_splices: a raw string's delimiter is never spliced (as
+  in clang), so a backslash in it is a character a delimiter may not hold,
+  LX0010, at the raw string. The marked line ends in the splice, so its
+  marker is a block-comment marker.
+*******************************************************************************/
+
+module exe lex_splices_err_raw_delimiter;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  println(/* // ERROR LX0010@39 // */ R"x\
+y(a)x\
+y");
+end.

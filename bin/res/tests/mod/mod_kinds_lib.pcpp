@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_kinds_lib.pcpp - Module: the lib kind
+
+  module lib emits a static library (BNF.md sec 1): no begin body, the
+  module ends with end. alone. Linking a lib is the lib area's.
+*******************************************************************************/
+
+module lib mod_kinds_lib;
+
+/*
+  @@test
+    kind build
+  @@end
+*/
+
+exported routine clink mod_kinds_lib_twice(AX: int32): int32;
+begin
+  return AX * 2;
+end;
+
+end.

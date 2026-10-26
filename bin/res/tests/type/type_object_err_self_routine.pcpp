@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_err_self_routine.pcpp - Type: object, self routine
+
+  Break step of type_object: self in a routine: self is a method's object
+  (SM0011).
+*******************************************************************************/
+
+module exe type_object_err_self_routine;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine F(): int32;
+begin
+  return self.N; // ERROR SM0011@10: 'self' outside a method
+end;
+
+begin
+end.

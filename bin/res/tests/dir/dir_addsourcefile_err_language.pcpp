@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addsourcefile_err_language.pcpp - Directive: @addsourcefile of a file no toolchain compiles
+
+  Break step of dir_addsourcefile: a .h. The extension, exact case, must be
+  one of .c .C .cc .cp .cpp .CPP .cxx .CXX .c++ .C++ .S .s .ll (checked
+  before the file is looked for).
+*******************************************************************************/
+
+module exe dir_addsourcefile_err_language;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addsourcefile "$P:res/tests/dir/fixtures/dir_addsourcefile_c.h"; // ERROR SM0114@16
+
+begin
+end.

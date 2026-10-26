@@ -1,0 +1,69 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_primary.pcpp - Expression: primary expressions
+
+  true, false, nil, self and parent, literals and ( ) (BNF.md sec 6 primary
+  expr). self is the object a method runs on, parent.<member> its parent's
+  member; both exist only inside a method, parent only in an object with a
+  parent.
+*******************************************************************************/
+
+module exe expr_primary;
+
+/*
+  @@test
+    kind run
+    expect
+    | bools true false
+    | nil true
+    | self parent true 105
+    | parens 20
+    | literals 42 2.5 text c
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+type
+  TBase = object
+    N: int32;
+    method Get(): int32;
+    begin
+      return self.N;
+    end;
+  end;
+  TKid = object(TBase)
+    method Get(): int32;
+    begin
+      return parent.Get() + 100;
+    end;
+    method Me(): bool;
+    begin
+      return self.N = 5;
+    end;
+  end;
+
+var
+  LK: TKid;
+  LP: ptr to int32;
+
+begin
+  LK.N := 5;
+  println("bools {} {}", true, false);
+  println("nil {}", LP = nil);
+  println("self parent {} {}", LK.Me(), LK.Get());
+  println("parens {}", (2 + 3) * 4);
+  println("literals {} {} {} {}", 42, 2.5, "text", 'c');
+end.

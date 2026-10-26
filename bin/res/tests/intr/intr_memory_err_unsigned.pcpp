@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_memory_err_unsigned.pcpp - Intr: memory, unsigned
+
+  Break step of intr_memory: getmem given a uint64 size (SM0409).
+*******************************************************************************/
+
+module exe intr_memory_err_unsigned;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LQ: ptr;
+  LN: uint64 = 16;
+
+begin
+  LQ := getmem(LN); // ERROR SM0409@16: 'getmem' takes (int64)
+end.

@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_import_err_noname.pcpp - Module: a name the unit does not declare
+
+  Break step of mod_import: mod_import_a declares no Product.
+*******************************************************************************/
+
+module exe mod_import_err_noname;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_import_a;
+
+begin
+  println("{}", mod_import_a.Product(2, 3)); // ERROR SM0005@17
+end.

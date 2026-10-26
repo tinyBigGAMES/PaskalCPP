@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_comments_err_escaped_end_space.pcpp - Lexical: a spliced closer with a blank
+
+  Break step of lex_comments: a splice with a blank after its backslash
+  between the star and the slash that close a block comment still
+  closes it, and warns twice, as clang does: LX0202 (the escaped
+  closer) at the backslash and LX0201 (the blank) right after it. The
+  module builds. The marked line is inside the comment, so the comment
+  itself carries the markers.
+  Its bytes are part of the test (see above): edit it with an editor
+  that keeps them as they are.
+*******************************************************************************/
+
+module exe lex_comments_err_escaped_end_space;
+
+/*
+  @@test
+    kind build
+  @@end
+*/
+
+begin
+  /* // WARN LX0202@68 // WARN LX0201@69 // the closer is spliced *\ 
+/
+end.

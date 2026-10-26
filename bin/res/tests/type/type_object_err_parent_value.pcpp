@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_err_parent_value.pcpp - Type: object, parent value
+
+  Break step of type_object: parent as a value: parent only reaches the
+  parent's members, write parent.<member> (SM0016).
+*******************************************************************************/
+
+module exe type_object_err_parent_value;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    Z: int32;
+  end;
+  TB = object(TA)
+    method Copy(): TA;
+    begin
+      return parent; // ERROR SM0016@14: 'parent' reaches the parent's members
+    end;
+  end;
+
+begin
+end.

@@ -1,0 +1,50 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_debug_heap.pcpp - Build-kind compliance: the debug heap report
+
+  A debug build (the default) counts every getmem and freemem and prints
+  [Heap] Allocs, Frees and Leaked at shutdown, after finalize: here one
+  block is freed and one is not. A release build prints no report:
+  exe_debug_heap_release.
+*******************************************************************************/
+
+module exe exe_debug_heap;
+
+/*
+  @@test
+    kind run
+    expect
+    | blocks taken
+    | final
+    | [Heap] Allocs: 2, Frees: 1, Leaked: 1
+  @@end
+*/
+
+var
+  LKept: ptr;
+  LFreed: ptr;
+
+finalize
+begin
+  println("final");
+end;
+
+begin
+  LKept := getmem(16);
+  LFreed := getmem(32);
+  freemem(LFreed);
+  println("blocks taken");
+end.

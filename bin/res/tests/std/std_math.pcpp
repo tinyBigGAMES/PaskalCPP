@@ -1,0 +1,531 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_math.pcpp - Std library compliance: the Math unit
+  (res\libs\std\Math.pcpp)
+
+  PerceivedVolume maps a level 0 .. 1 to a linear volume 0 .. max: level 1 is
+  exactly the max (0 dB), the knee level 0.1 is -range dB (default 50), the
+  levels between are even steps in decibels, and below the knee the volume
+  fades in a straight line to exact silence at 0. A level past 1 is the max,
+  at or below 0 or NaN is 0; a max of 0 is 0; a range of 0 is linear.
+  PerceivedLevel is its inverse: a level comes back from its volume. The
+  float32 overloads give the same values. Every row below was computed by
+  hand from that rule before the first run (10^(-50 (1 - L) / 0.9 / 20) x 100
+  above the knee, L / 0.1 x 10^(-2.5) x 100 below it).
+
+  The scalar groups: the constants; Clamp and Wrap (bounds
+  in either order, Wrap however far outside, int ends both included, float
+  [min, max)); SameSign and SameValue (the default tolerance scales past 1);
+  Lerp; AngleDifference in [-180, 180); SmoothMove; every Easing curve at 0,
+  0.25, 0.5, 0.75 and 1 (exactly 0 and 1 at the ends) and EaseBetween; and
+  Random: a seed's sequence, the same on both targets, and Randomize (the
+  object's and the free one: a fresh system seed that SetSeed(Seed()) /
+  SetRandomSeed(RandomSeed()) repeats; its rows print only true / false,
+  the seeds themselves differ every run). The Easing and Random
+  rows are scripts\vendor\math\math_expected.py's (the prior art's Penner
+  forms; an MT19937 of its own, checked against the C++ standard's value),
+  the other rows were computed by hand.
+*******************************************************************************/
+
+module exe std_math;
+
+/*
+  @@test
+    kind run
+    expect
+    | volume 0 -> 0.0000
+    | volume 0.05 -> 0.1581
+    | volume 0.1 -> 0.3162
+    | volume 0.25 -> 0.8254
+    | volume 0.5 -> 4.0842
+    | volume 0.75 -> 20.2095
+    | volume 1 -> 100.0000
+    | volume 1.5 -> 100.0000
+    | volume -0.5 -> 0.0000
+    | volume NaN -> 0.0000
+    | max 0 -> 0.0000
+    | range 20 -> 27.8256
+    | range 0 -> 50.0000
+    | round trip 0.05 -> 0.0500
+    | round trip 0.1 -> 0.1000
+    | round trip 0.25 -> 0.2500
+    | round trip 0.5 -> 0.5000
+    | round trip 0.75 -> 0.7500
+    | round trip range 20 -> 0.5000
+    | level 100 -> 1.0000
+    | level 150 -> 1.0000
+    | level -1 -> 0.0000
+    | level NaN -> 0.0000
+    | float32 volume 0.5 -> 4.0842
+    | float32 round trip 0.5 -> 0.5000
+    | qualified 1.0000
+    | pi 3.141593
+    | deg to rad 1.570796
+    | rad to deg 180.000000
+    | epsilon 1e-05 1e-12
+    | nan nan true
+    | clamp int 5 0 10 0 10
+    | clamp int64 4000000000
+    | clamp float 1 0 0.25
+    | clamp nan true
+    | wrap int 1 0 359 5 3 2
+    | wrap int64 3 9223372036854775807
+    | wrap float 5 0 270 1 10
+    | wrap float32 0.5
+    | same sign true false true false true false false
+    | same value true false true true true false true
+    | lerp 12.5 20 0.5
+    | angle 20 -20 -180 -180 0
+    | smooth 2 5 -5 2 0 0
+    | ease Linear 0.000000 0.250000 0.500000 0.750000 1.000000
+    | ease InQuad 0.000000 0.062500 0.250000 0.562500 1.000000
+    | ease OutQuad 0.000000 0.437500 0.750000 0.937500 1.000000
+    | ease InOutQuad 0.000000 0.125000 0.500000 0.875000 1.000000
+    | ease InCubic 0.000000 0.015625 0.125000 0.421875 1.000000
+    | ease OutCubic 0.000000 0.578125 0.875000 0.984375 1.000000
+    | ease InOutCubic 0.000000 0.062500 0.500000 0.937500 1.000000
+    | ease InQuart 0.000000 0.003906 0.062500 0.316406 1.000000
+    | ease OutQuart 0.000000 0.683594 0.937500 0.996094 1.000000
+    | ease InOutQuart 0.000000 0.031250 0.500000 0.968750 1.000000
+    | ease InQuint 0.000000 0.000977 0.031250 0.237305 1.000000
+    | ease OutQuint 0.000000 0.762695 0.968750 0.999023 1.000000
+    | ease InOutQuint 0.000000 0.015625 0.500000 0.984375 1.000000
+    | ease InSine 0.000000 0.076120 0.292893 0.617317 1.000000
+    | ease OutSine 0.000000 0.382683 0.707107 0.923880 1.000000
+    | ease InOutSine 0.000000 0.146447 0.500000 0.853553 1.000000
+    | ease InExpo 0.000000 0.005524 0.031250 0.176777 1.000000
+    | ease OutExpo 0.000000 0.823223 0.968750 0.994476 1.000000
+    | ease InOutExpo 0.000000 0.015625 0.500000 0.984375 1.000000
+    | ease InCircle 0.000000 0.031754 0.133975 0.338562 1.000000
+    | ease OutCircle 0.000000 0.661438 0.866025 0.968246 1.000000
+    | ease InOutCircle 0.000000 0.066987 0.500000 0.933013 1.000000
+    | ease held 0 1 0
+    | ease between 12.5 100 10
+    | ease float32 0.5
+    | seed 5489
+    | int 3 1 3 6 5 2 6 6
+    | int reversed 3 1 3 6 5 2 6 6
+    | int64 0 -1 -3 -2
+    | float 0.2784982188670484 0.5468815192049838 0.9575068354342976
+    | float32 0.964888513 0.967694879 0.157613039
+    | bool true true true true false false true true
+    | equal bounds 3 2.5
+    | int full -1538086436
+    | int64 full -9135132322789028815
+    | free seed 7 16 93 22
+    | free same true
+    | randomize new seed true
+    | randomize repeat true
+    | free randomize new seed true
+    | free randomize repeat true
+    | vector 5 25 6 4 true false
+    | vector unit 0.6 0.8 0 0
+    | vector dot 3 -4
+    | vector distance 4.472136
+    | vector truncate 1.8000001 2.4 3 4 0 0
+    | vector project 3 0 0 0
+    | vector perpendicular -4 3
+    | vector rotate 0.000000 1.000000 -4.000000 3.000000
+    | vector heading 53.130104 90.000000 180.000000 0.000000 -90.000000
+    | vector thrust 13.000000 4.000000 3.000000 6.000000
+    | vector lerp 2 2 1 0
+    | vector scale 6 8 6 8 1.5 2
+    | rect contains true false false true
+    | rect intersection true 5 5 5 5
+    | rect touch false
+    | rect center 5 5
+    | extent 5 5 15 15 10
+    | point in circle true true false
+    | point in triangle true false false false true
+    | circles overlap true true false
+    | circle rect true true false
+    | line Point 5.000000 5.000000
+    | line Miss
+    | line Parallel
+    | line Collinear
+    | line Miss
+    | line Point 1.000000 0.000000
+    | line Point 5.000000 0.000000
+    | radius overlap true false
+    | obb true false true false true false
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import Math;
+
+routine Volume(const ALevel: float64);
+begin
+  println("volume {} -> {:.4f}", ALevel, PerceivedVolume(ALevel, 100.0));
+end;
+
+routine RoundTrip(const ALevel: float64);
+begin
+  println("round trip {} -> {:.4f}", ALevel, PerceivedLevel(PerceivedVolume(ALevel, 100.0), 100.0));
+end;
+
+// ACount draws of ARng.NextInt(ALow, AHigh) on one row, one draw per
+// statement (C++ leaves the order of a call's arguments open)
+routine ShowInts(var ARng: RandomGenerator; const ALabel: string; const ALow: int32; const AHigh: int32;
+  const ACount: int32);
+var
+  LI: int32;
+  LValue: int32;
+begin
+  print("{}", ALabel);
+  for LI := 1 to ACount do
+    LValue := ARng.NextInt(ALow, AHigh);
+    print(" {}", LValue);
+  end;
+  println("");
+end;
+
+// Builders for the geometry rows
+routine V(const AX: float32; const AY: float32): Vector2;
+var
+  LResult: Vector2;
+begin
+  LResult.X := AX;
+  LResult.Y := AY;
+  return LResult;
+end;
+
+routine R(const AX: float32; const AY: float32; const AW: float32; const AH: float32): Rect;
+var
+  LResult: Rect;
+begin
+  LResult.X := AX;
+  LResult.Y := AY;
+  LResult.Width := AW;
+  LResult.Height := AH;
+  return LResult;
+end;
+
+routine Box(const ACX: float32; const ACY: float32; const AHX: float32; const AHY: float32; const ADeg: float32): Obb;
+var
+  LResult: Obb;
+begin
+  LResult.Center.X := ACX;
+  LResult.Center.Y := ACY;
+  LResult.HalfSize.X := AHX;
+  LResult.HalfSize.Y := AHY;
+  LResult.Angle := ADeg;
+  return LResult;
+end;
+
+// One segment-meeting row: its kind, and the point when it is one
+routine ShowHit(const A1: Vector2; const A2: Vector2; const B1: Vector2; const B2: Vector2);
+var
+  LHit: LineHit;
+begin
+  LHit := LineIntersection(A1, A2, B1, B2);
+  if LHit.Kind = LineHitKind.Point then
+    println("line {} {:.6f} {:.6f}", LHit.Kind, LHit.Point.X, LHit.Point.Y);
+  else
+    println("line {}", LHit.Kind);
+  end;
+end;
+
+var
+  LZero: float64 = 0.0;
+  LOne: float64 = 1.0;
+  LNaN: float64;
+  LInf: float64;
+  LLevel: float32 = 0.5f;
+  LMax: float32 = 100.0f;
+  LQuarter32: float32 = 0.25f;
+  LWrap32: float32 = 2.5f;
+  LBig: int64 = 5000000000;
+  LZero64: int64 = 0;
+  LCap: int64 = 4000000000;
+  LTen: int64 = 10;
+  LMinus3: int64 = -3;
+  LThree: int64 = 3;
+  LMax64: int64 = 9223372036854775807;
+  LMin64: int64;
+  LMin32: int32;
+  LKind: Easing;
+  LRng: RandomGenerator(5489);
+  LCheck: RandomGenerator(7);
+  LI: int32;
+  LInt64: int64;
+  LFloat: float64;
+  LFloat32: float32;
+  LBool: bool;
+  LEqualInt: int32;
+  LEqualFloat: float64;
+  LFull: int32;
+  LFull64: int64;
+  LFreeA: int32;
+  LFreeB: int32;
+  LFreeC: int32;
+  LSame: bool;
+  LFresh: RandomGenerator;
+  LOldSeed: uint32;
+  LNewSeed: uint32;
+  LTries: int32;
+  LDrawA: int32;
+  LDrawB: int32;
+  LDrawC: int32;
+  LRepeat: bool;
+  LVA: Vector2;
+  LVB: Vector2;
+  LVC: Vector2;
+  LVZ: Vector2;
+  LV1: Vector2;
+  LV2: Vector2;
+  LV3: Vector2;
+  LRA: Rect;
+  LRB: Rect;
+  LRI: Rect;
+  LExt: Extent;
+  LOk: bool;
+
+begin
+  // A NaN no constant fold sees: zero over zero at run time
+  LNaN := LZero / LZero;
+  Volume(0.0);
+  Volume(0.05);
+  Volume(0.1);
+  Volume(0.25);
+  Volume(0.5);
+  Volume(0.75);
+  Volume(1.0);
+  Volume(1.5);
+  Volume(-0.5);
+  println("volume NaN -> {:.4f}", PerceivedVolume(LNaN, 100.0));
+  println("max 0 -> {:.4f}", PerceivedVolume(0.5, 0.0));
+  println("range 20 -> {:.4f}", PerceivedVolume(0.5, 100.0, 20.0));
+  println("range 0 -> {:.4f}", PerceivedVolume(0.5, 100.0, 0.0));
+  RoundTrip(0.05);
+  RoundTrip(0.1);
+  RoundTrip(0.25);
+  RoundTrip(0.5);
+  RoundTrip(0.75);
+  println("round trip range 20 -> {:.4f}", PerceivedLevel(PerceivedVolume(0.5, 100.0, 20.0), 100.0, 20.0));
+  println("level 100 -> {:.4f}", PerceivedLevel(100.0, 100.0));
+  println("level 150 -> {:.4f}", PerceivedLevel(150.0, 100.0));
+  println("level -1 -> {:.4f}", PerceivedLevel(-1.0, 100.0));
+  println("level NaN -> {:.4f}", PerceivedLevel(LNaN, 100.0));
+  println("float32 volume 0.5 -> {:.4f}", PerceivedVolume(LLevel, LMax));
+  println("float32 round trip 0.5 -> {:.4f}", PerceivedLevel(PerceivedVolume(LLevel, LMax), LMax));
+  println("qualified {:.4f}", Math.PerceivedLevel(100.0, 100.0));
+  LInf := LOne / LZero;
+  LMin64 := -LMax64 - 1;
+  LMin32 := -2147483647 - 1;
+  // The constants
+  println("pi {:.6f}", Pi);
+  println("deg to rad {:.6f}", 90.0 * DegToRad);
+  println("rad to deg {:.6f}", Pi * RadToDeg);
+  println("epsilon {} {}", Epsilon32, Epsilon64);
+  println("nan {} {}", NaN, NaN <> NaN);
+  // Clamp: bounds in either order; a NaN stays NaN
+  println("clamp int {} {} {} {} {}", Clamp(5, 0, 10), Clamp(-3, 0, 10), Clamp(12, 0, 10), Clamp(-3, 10, 0),
+    Clamp(12, 10, 0));
+  println("clamp int64 {}", Clamp(LBig, LZero64, LCap));
+  println("clamp float {} {} {}", Clamp(1.5, 0.0, 1.0), Clamp(-2.0, 0.0, 1.0), Clamp(LLevel, 0.0f, LQuarter32));
+  LFloat := Clamp(LNaN, 0.0, 1.0);
+  println("clamp nan {}", LFloat <> LFloat);
+  // Wrap: however far outside; int ends both included, float [min, max)
+  println("wrap int {} {} {} {} {} {}", Wrap(361, 0, 359), Wrap(360, 0, 359), Wrap(-1, 0, 359), Wrap(725, 0, 359),
+    Wrap(3, 5, 1), Wrap(7, 5, 1));
+  println("wrap int64 {} {}", Wrap(LTen, LMinus3, LThree), Wrap(LMax64, LMin64, LMax64));
+  println("wrap float {} {} {} {} {}", Wrap(725.0, 0.0, 360.0), Wrap(360.0, 0.0, 360.0), Wrap(-90.0, 0.0, 360.0),
+    Wrap(1.0, 1.0, 1.0), Wrap(370.0, 360.0, 0.0));
+  println("wrap float32 {}", Wrap(LWrap32, 0.0f, 1.0f));
+  // SameSign: 0 is a sign of its own; a NaN matches nothing
+  println("same sign {} {} {} {} {} {} {}", SameSign(3, 5), SameSign(-3, 5), SameSign(0, 0), SameSign(0, 5),
+    SameSign(-0.5, -2.0), SameSign(LNaN, LNaN), SameSign(1.0, -0.0));
+  // SameValue: the default tolerance (Epsilon64 / Epsilon32) scales past 1
+  println("same value {} {} {} {} {} {} {}", SameValue(1.0, 1.0000000000001), SameValue(1.0, 1.0001),
+    SameValue(1.0, 1.0001, 0.001), SameValue(1000000000000000.0, 1000000000000000.5), SameValue(1.0f, 1.000001f),
+    SameValue(LNaN, LNaN), SameValue(LInf, LInf));
+  println("lerp {} {} {}", Lerp(10.0, 20.0, 0.25), Lerp(10.0, 20.0, 1.0), Lerp(0.0f, 1.0f, 0.5f));
+  println("angle {} {} {} {} {}", AngleDifference(350.0, 10.0), AngleDifference(10.0, 350.0),
+    AngleDifference(0.0, 180.0), AngleDifference(0.0, 540.0), AngleDifference(90.0, 90.0));
+  println("smooth {} {} {} {} {} {}", SmoothMove(0.0, 2.0, 5.0, 1.0), SmoothMove(4.0, 2.0, 5.0, 1.0),
+    SmoothMove(-4.0, -2.0, 5.0, 1.0), SmoothMove(3.0, 0.0, 5.0, 1.0), SmoothMove(0.5, 0.0, 5.0, 1.0),
+    SmoothMove(-0.5, 0.0, 5.0, 1.0));
+  // Every curve: exactly 0 and 1 at the ends
+  for LKind := Easing.Linear to Easing.InOutCircle do
+    println("ease {} {:.6f} {:.6f} {:.6f} {:.6f} {:.6f}", LKind, Ease(LKind, 0.0), Ease(LKind, 0.25),
+      Ease(LKind, 0.5), Ease(LKind, 0.75), Ease(LKind, 1.0));
+  end;
+  println("ease held {} {} {}", Ease(Easing.OutCubic, -1.0), Ease(Easing.OutCubic, 2.0), Ease(Easing.OutCubic, LNaN));
+  println("ease between {} {} {}", EaseBetween(Easing.InQuad, 10.0, 20.0, 0.5), EaseBetween(Easing.OutExpo, 0.0,
+    100.0, 1.0), EaseBetween(Easing.InExpo, 10.0, 20.0, 0.0));
+  println("ease float32 {}", Ease(Easing.InOutQuad, LLevel));
+  // Random: the sequence of a seed, one draw per statement
+  println("seed {}", LRng.Seed());
+  ShowInts(LRng, "int", 1, 6, 8);
+  LRng.SetSeed(5489);
+  ShowInts(LRng, "int reversed", 6, 1, 8);
+  print("int64");
+  for LI := 1 to 4 do
+    LInt64 := LRng.NextInt64(-5, 5);
+    print(" {}", LInt64);
+  end;
+  println("");
+  print("float");
+  for LI := 1 to 3 do
+    LFloat := LRng.NextFloat(0.0, 1.0);
+    print(" {}", LFloat);
+  end;
+  println("");
+  print("float32");
+  for LI := 1 to 3 do
+    LFloat32 := LRng.NextFloat32(0.0f, 1.0f);
+    print(" {:.9g}", LFloat32);
+  end;
+  println("");
+  print("bool");
+  for LI := 1 to 8 do
+    LBool := LRng.NextBool();
+    print(" {}", LBool);
+  end;
+  println("");
+  LEqualInt := LRng.NextInt(3, 3);
+  LEqualFloat := LRng.NextFloat(2.5, 2.5);
+  println("equal bounds {} {}", LEqualInt, LEqualFloat);
+  LFull := LRng.NextInt(LMin32, 2147483647);
+  println("int full {}", LFull);
+  LFull64 := LRng.NextInt64(LMin64, LMax64);
+  println("int64 full {}", LFull64);
+  // The free routines: the unit's own generator, repeatable by seed
+  SetRandomSeed(7);
+  LFreeA := RandomInt(1, 100);
+  LFreeB := RandomInt(1, 100);
+  LFreeC := RandomInt(1, 100);
+  println("free seed {} {} {} {}", RandomSeed(), LFreeA, LFreeB, LFreeC);
+  LSame := LCheck.NextInt(1, 100) = LFreeA;
+  LSame := LSame and (LCheck.NextInt(1, 100) = LFreeB);
+  LSame := LSame and (LCheck.NextInt(1, 100) = LFreeC);
+  println("free same {}", LSame);
+  // Randomize: a fresh seed from the system (LFresh was built without one,
+  // so its init already randomized it). A new seed equal to the old one is a
+  // 1 in 2^32 chance, so a few tries make a false failure out of reach.
+  LOldSeed := LFresh.Seed();
+  LFresh.Randomize();
+  LTries := 1;
+  while (LFresh.Seed() = LOldSeed) and (LTries < 4) do
+    LFresh.Randomize();
+    LTries := LTries + 1;
+  end;
+  println("randomize new seed {}", LFresh.Seed() <> LOldSeed);
+  // SetSeed(Seed()) after Randomize repeats its sequence
+  LNewSeed := LFresh.Seed();
+  LDrawA := LFresh.NextInt(1, 1000000);
+  LDrawB := LFresh.NextInt(1, 1000000);
+  LDrawC := LFresh.NextInt(1, 1000000);
+  LFresh.SetSeed(LNewSeed);
+  LRepeat := LFresh.NextInt(1, 1000000) = LDrawA;
+  LRepeat := LRepeat and (LFresh.NextInt(1, 1000000) = LDrawB);
+  LRepeat := LRepeat and (LFresh.NextInt(1, 1000000) = LDrawC);
+  println("randomize repeat {}", LRepeat);
+  // The free Randomize reseeds the unit's own generator, repeatable the same way
+  SetRandomSeed(7);
+  LOldSeed := RandomSeed();
+  Randomize();
+  LTries := 1;
+  while (RandomSeed() = LOldSeed) and (LTries < 4) do
+    Randomize();
+    LTries := LTries + 1;
+  end;
+  println("free randomize new seed {}", RandomSeed() <> LOldSeed);
+  LNewSeed := RandomSeed();
+  LDrawA := RandomInt(1, 1000000);
+  LDrawB := RandomInt(1, 1000000);
+  LDrawC := RandomInt(1, 1000000);
+  SetRandomSeed(LNewSeed);
+  LRepeat := RandomInt(1, 1000000) = LDrawA;
+  LRepeat := LRepeat and (RandomInt(1, 1000000) = LDrawB);
+  LRepeat := LRepeat and (RandomInt(1, 1000000) = LDrawC);
+  println("free randomize repeat {}", LRepeat);
+  // Vector2: operators, and the zero vector well defined everywhere
+  LVA := V(3.0f, 4.0f);
+  LVB := V(1.0f, 0.0f);
+  LVC := LVA + LVB * 2.0f - (-LVB);
+  println("vector {} {} {} {} {} {}", LVA.Length(), LVA.LengthSquared(), LVC.X, LVC.Y, LVA = V(3.0f, 4.0f), LVA <> LVA);
+  LV1 := LVA.Normalized();
+  LV2 := LVZ.Normalized();
+  println("vector unit {} {} {} {}", LV1.X, LV1.Y, LV2.X, LV2.Y);
+  println("vector dot {} {}", LVA.Dot(LVB), LVA.Cross(LVB));
+  println("vector distance {:.6f}", LVA.Distance(LVB));
+  LV1 := LVA.Truncated(3.0f);
+  LV2 := LVA.Truncated(10.0f);
+  LV3 := LVA.Truncated(0.0f);
+  println("vector truncate {} {} {} {} {} {}", LV1.X, LV1.Y, LV2.X, LV2.Y, LV3.X, LV3.Y);
+  LV1 := LVA.Project(LVB);
+  LV2 := LVA.Project(LVZ);
+  println("vector project {} {} {} {}", LV1.X, LV1.Y, LV2.X, LV2.Y);
+  LV1 := LVA.Perpendicular();
+  println("vector perpendicular {} {}", LV1.X, LV1.Y);
+  LV1 := LVB.Rotated(90.0f);
+  LV2 := LVA.Rotated(90.0f);
+  println("vector rotate {:.6f} {:.6f} {:.6f} {:.6f}", LV1.X, LV1.Y, LV2.X, LV2.Y);
+  println("vector heading {:.6f} {:.6f} {:.6f} {:.6f} {:.6f}", LVA.Heading(), V(0.0f, 1.0f).Heading(),
+    V(-1.0f, 0.0f).Heading(), LVZ.Heading(), V(0.0f, -1.0f).Heading());
+  LV1 := LVA.Thrust(0.0f, 10.0f);
+  LV2 := LVA.Thrust(90.0f, 2.0f);
+  println("vector thrust {:.6f} {:.6f} {:.6f} {:.6f}", LV1.X, LV1.Y, LV2.X, LV2.Y);
+  LV1 := LVA.Lerp(LVB, 0.5f);
+  LV2 := LVA.Lerp(LVB, 1.0f);
+  println("vector lerp {} {} {} {}", LV1.X, LV1.Y, LV2.X, LV2.Y);
+  LV1 := LVA * 2.0f;
+  LV2 := 2.0f * LVA;
+  LV3 := LVA / 2.0f;
+  println("vector scale {} {} {} {} {} {}", LV1.X, LV1.Y, LV2.X, LV2.Y, LV3.X, LV3.Y);
+  // Rect: SFML's rules (far edges outside, a negative size spans back, touching is no overlap)
+  LRA := R(0.0f, 0.0f, 10.0f, 10.0f);
+  LRB := R(5.0f, 5.0f, 10.0f, 10.0f);
+  println("rect contains {} {} {} {}", LRA.Contains(V(0.0f, 0.0f)), LRA.Contains(V(10.0f, 5.0f)),
+    LRA.Contains(V(5.0f, 10.0f)), R(10.0f, 10.0f, -10.0f, -10.0f).Contains(V(5.0f, 5.0f)));
+  LOk := LRA.Intersection(LRB, LRI);
+  println("rect intersection {} {} {} {} {}", LOk, LRI.X, LRI.Y, LRI.Width, LRI.Height);
+  println("rect touch {}", LRA.Overlaps(R(10.0f, 0.0f, 5.0f, 5.0f)));
+  LV1 := LRA.Center();
+  println("rect center {} {}", LV1.X, LV1.Y);
+  LExt := ExtentOf(LRB);
+  println("extent {} {} {} {} {}", LExt.MinX, LExt.MinY, LExt.MaxX, LExt.MaxY, LExt.ToRect().Width);
+  // Collisions
+  println("point in circle {} {} {}", PointInCircle(LVA, LVZ, 5.0f), PointInCircle(LVB, LVZ, 5.0f),
+    PointInCircle(V(4.0f, 4.0f), LVZ, 5.0f));
+  println("point in triangle {} {} {} {} {}", PointInTriangle(V(2.0f, 2.0f), LVZ, V(10.0f, 0.0f), V(0.0f, 10.0f)),
+    PointInTriangle(V(5.0f, 5.0f), LVZ, V(10.0f, 0.0f), V(0.0f, 10.0f)),
+    PointInTriangle(V(8.0f, 8.0f), LVZ, V(10.0f, 0.0f), V(0.0f, 10.0f)),
+    PointInTriangle(V(1.0f, 1.0f), LVZ, V(1.0f, 1.0f), V(2.0f, 2.0f)),
+    PointInTriangle(V(2.0f, 2.0f), LVZ, V(0.0f, 10.0f), V(10.0f, 0.0f)));
+  println("circles overlap {} {} {}", CirclesOverlap(LVZ, 1.0f, V(2.0f, 0.0f), 1.0f),
+    CirclesOverlap(LVZ, 1.0f, V(1.0f, 0.0f), 1.0f), CirclesOverlap(LVZ, 1.0f, V(3.0f, 0.0f), 1.0f));
+  println("circle rect {} {} {}", CircleOverlapsRect(V(15.0f, 5.0f), 5.0f, LRA),
+    CircleOverlapsRect(V(5.0f, 5.0f), 1.0f, LRA), CircleOverlapsRect(V(15.0f, 15.0f), 5.0f, LRA));
+  ShowHit(LVZ, V(10.0f, 10.0f), V(0.0f, 10.0f), V(10.0f, 0.0f));
+  ShowHit(LVZ, V(1.0f, 0.0f), V(2.0f, -1.0f), V(2.0f, 1.0f));
+  ShowHit(LVZ, V(10.0f, 0.0f), V(0.0f, 1.0f), V(10.0f, 1.0f));
+  ShowHit(LVZ, V(10.0f, 0.0f), V(5.0f, 0.0f), V(15.0f, 0.0f));
+  ShowHit(LVZ, V(1.0f, 0.0f), V(2.0f, 0.0f), V(3.0f, 0.0f));
+  ShowHit(LVZ, V(1.0f, 0.0f), V(1.0f, 0.0f), V(1.0f, 5.0f));
+  ShowHit(V(5.0f, 0.0f), V(5.0f, 0.0f), LVZ, V(10.0f, 0.0f));
+  println("radius overlap {} {}", RadiusOverlap(1.0f, LVZ, 1.0f, V(1.5f, 0.0f), 1.0f),
+    RadiusOverlap(1.0f, LVZ, 1.0f, V(1.5f, 0.0f), 0.5f));
+  // OBB: the last pair turns the long box by +30 and -30: only +30 reaches the point
+  println("obb {} {} {} {} {} {}", ObbsOverlap(Box(0.0f, 0.0f, 1.0f, 1.0f, 0.0f), Box(1.5f, 0.0f, 1.0f, 1.0f, 0.0f)),
+    ObbsOverlap(Box(0.0f, 0.0f, 1.0f, 1.0f, 0.0f), Box(3.0f, 0.0f, 1.0f, 1.0f, 0.0f)),
+    ObbsOverlap(Box(0.0f, 0.0f, 1.0f, 1.0f, 0.0f), Box(2.3f, 0.0f, 1.0f, 1.0f, 45.0f)),
+    ObbsOverlap(Box(0.0f, 0.0f, 1.0f, 1.0f, 0.0f), Box(2.5f, 0.0f, 1.0f, 1.0f, 45.0f)),
+    ObbsOverlap(Box(0.0f, 0.0f, 2.0f, 0.5f, 30.0f), Box(1.5f, 0.9f, 0.1f, 0.1f, 0.0f)),
+    ObbsOverlap(Box(0.0f, 0.0f, 2.0f, 0.5f, -30.0f), Box(1.5f, 0.9f, 0.1f, 0.1f, 0.0f)));
+end.

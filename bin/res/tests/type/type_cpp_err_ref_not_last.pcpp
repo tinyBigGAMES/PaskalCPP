@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_cpp_err_ref_not_last.pcpp - Type: a * after a reference
+
+  Break step of type_cpp: & or && stands last and once (PR0030).
+*******************************************************************************/
+
+module exe type_cpp_err_ref_not_last;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+#include <vector>
+
+var
+  LR: int&*; // ERROR PR0030@11: stands last and once
+
+begin
+end.

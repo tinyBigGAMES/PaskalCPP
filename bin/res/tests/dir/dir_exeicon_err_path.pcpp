@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_exeicon_err_path.pcpp - Directive: an icon path no file can have
+
+  Break step of dir_exeicon: a '<' in it, so it cannot even be resolved and
+  is not looked for.
+*******************************************************************************/
+
+module exe dir_exeicon_err_path;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@exeicon "icon<1.ico"; // ERROR PR0022@10: cannot be resolved
+
+begin
+end.

@@ -798,13 +798,15 @@ type
     // or of a compound assignment's value
     function DoArithResult(const ANode: TPCExpr; const AOp: TPCBinaryOp; const ALeft: TPCExpr;
       const ARight: TPCExpr; const AResult: TPCTokenKind): TPCTypeExpr;
+    function DoArithOperandConverts(const ANode: TPCExpr; const AOp: TPCBinaryOp; const AOperand: TPCExpr;
+      const AResult: TPCTokenKind): Boolean;
     function DoCheckNumericCompound(const AAssign: TPCAssign; const ATarget: TPCExpr;
       const AValue: TPCExpr): Boolean;
     function DoConstPattern(const AExpr: TPCExpr): UInt64;
     function DoMinOf(const ABits: Integer): Int64;
     procedure DoStoreFolded(const AExpr: TPCExpr; const AToken: TPCTokenKind; const APattern: UInt64;
       const ASetType: Boolean);
-    function DoFoldSignedness(const ANode: TPCExpr; const AOpText: string; const AOperand: TPCExpr;
+    function DoCheckSignedness(const ANode: TPCExpr; const AOpText: string; const AOperand: TPCExpr;
       const APromoted: TPCTokenKind; const ACommon: TPCTokenKind): Boolean;
     function DoSignedFold(const AOp: TPCBinaryOp; const ALeft: Int64; const ARight: Int64; const ABits: Integer;
       out AResult: Int64): Boolean;
@@ -3582,7 +3584,7 @@ begin
         // converting to it (int32 < uint32 compared as unsigned: -1 < 1u
         // was silently false)
         if LHasTokens and DoNumericResult(boAdd, LLeftToken, LRightToken, LNumeric) and
-          (DoArithResult(ANode, boAdd, ALeft, ARight, LNumeric) = nil) then
+          (DoArithResult(ANode, AOp, ALeft, ARight, LNumeric) = nil) then
           Exit(nil);
         // PLAN-RECORDS F-A4c: an extension pointer compared with its base's
         DoNoteComparedUpcast(ALeft, ARight);
@@ -3593,7 +3595,7 @@ begin
         if not DoCheckComparable(ANode, PC_SEM_BINARY_TEXT[AOp], ALeft, ARight) then
           Exit(nil);
         if LHasTokens and DoNumericResult(boAdd, LLeftToken, LRightToken, LNumeric) and
-          (DoArithResult(ANode, boAdd, ALeft, ARight, LNumeric) = nil) then
+          (DoArithResult(ANode, AOp, ALeft, ARight, LNumeric) = nil) then
           Exit(nil);
         DoNoteComparedUpcast(ALeft, ARight);
         Exit(FAst.OpaqueType());
@@ -3932,32 +3934,54 @@ begin
   // PLAN-ARITH A2 (BNF 6 "No hidden conversions"): C++ converts each operand
   // of an arithmetic / bitwise operator to the result type (DoNumericResult:
   // the usual arithmetic conversions; float64 for `/`), so each one must
-  // convert implicitly to it: int32 + uint32 (the int32 becomes uint32),
-  // int64 / 2 (float64 cannot hold every int64), int32 * float32. Else
-  // SM0200 at that operand with the cast hint (DoCheckConvert), the node
-  // poisoned (nil). A constant operand converts as a constant (it fits).
+  // convert implicitly to it: int64 / 2 (float64 cannot hold every int64),
+  // int32 * float32. Else SM0200 at that operand with the cast hint
+  // (DoCheckConvert), the node poisoned (nil). A constant operand converts
+  // as a constant (it fits).
   // A shift's count is not converted ([expr.shift]); two folded constants
-  // are judged by the fold (SM0251 / SM0256, one report)
+  // are judged by the fold (SM0251 / SM0256, one report). A signed operand
+  // an unsigned result type takes is Q8's (SM0251, DoCheckSignedness), never
+  // the plain conversion's SM0200: one report per operand. AOp is the
+  // operator written (a comparison passes its own, so the message names it)
   Result := FAst.BuiltinType(AResult);
   if AOp in [boShl, boShr] then
     Exit;
   if DoFoldOperand(ALeft, LLeftToken) and DoFoldOperand(ARight, LRightToken) then
     Exit;
   LReported := False;
-  if not DoConvertsImplicitly(ALeft, Result) then
-  begin
-    DoCheckConvert(ALeft, Result);
+  if not DoArithOperandConverts(ANode, AOp, ALeft, AResult) then
     LReported := True;
-  end;
-  if not DoConvertsImplicitly(ARight, Result) then
-  begin
-    DoCheckConvert(ARight, Result);
+  if not DoArithOperandConverts(ANode, AOp, ARight, AResult) then
     LReported := True;
-  end;
   if LReported then
   begin
     DoPoison(ANode);
     Result := nil;
+  end;
+end;
+
+function TPCSemantics.DoArithOperandConverts(const ANode: TPCExpr; const AOp: TPCBinaryOp;
+  const AOperand: TPCExpr; const AResult: TPCTokenKind): Boolean;
+var
+  LToken: TPCTokenKind;
+  LBits: Integer;
+  LIsUnsigned: Boolean;
+  LResultType: TPCTypeExpr;
+begin
+  // One operand of DoArithResult: Q8 first (a signed operand an unsigned
+  // result type takes: SM0251), then the plain implicit conversion (SM0200
+  // with the cast hint). False = reported; the caller poisons ANode
+  Result := True;
+  if DoIntTypeInfo(AResult, LBits, LIsUnsigned) and LIsUnsigned and DoTokenOf(AOperand, LToken) then
+  begin
+    if not DoCheckSignedness(ANode, PC_SEM_BINARY_TEXT[AOp], AOperand, DoPromotedToken(LToken), AResult) then
+      Exit(False);
+  end;
+  LResultType := FAst.BuiltinType(AResult);
+  if not DoConvertsImplicitly(AOperand, LResultType) then
+  begin
+    DoCheckConvert(AOperand, LResultType);
+    Result := False;
   end;
 end;
 
@@ -4072,20 +4096,24 @@ begin
     AExpr.ConstInt := Int64(LPattern);
 end;
 
-function TPCSemantics.DoFoldSignedness(const ANode: TPCExpr; const AOpText: string; const AOperand: TPCExpr;
+function TPCSemantics.DoCheckSignedness(const ANode: TPCExpr; const AOpText: string; const AOperand: TPCExpr;
   const APromoted: TPCTokenKind; const ACommon: TPCTokenKind): Boolean;
 var
   LBits: Integer;
   LIsUnsigned: Boolean;
   LCommonText: string;
 begin
-  // Q8 (folding.md :184-197): a signed operand the usual arithmetic
-  // conversions would make unsigned is an error naming the cast, unless it
-  // is a folded constant >= 0 (it converts exactly). False = reported, ANode
-  // poisoned
+  // Q8 (folding.md :184-197, types.md :95): a signed operand the usual
+  // arithmetic conversions would make unsigned is an error naming the cast,
+  // folded or not, unless it is a folded constant >= 0 (it converts
+  // exactly). The one rule for the fold (DoFoldArith) and for every other
+  // numeric operand (DoArithResult). False = reported, ANode poisoned
   Result := True;
-  DoIntTypeInfo(APromoted, LBits, LIsUnsigned);
-  if LIsUnsigned or AOperand.ConstIsUnsigned or (AOperand.ConstInt >= 0) then
+  if not DoIntTypeInfo(APromoted, LBits, LIsUnsigned) then
+    Exit;
+  if LIsUnsigned then
+    Exit;
+  if AOperand.HasConstValue and (AOperand.ConstIsUnsigned or (AOperand.ConstInt >= 0)) then
     Exit;
   LCommonText := FAst.BuiltinType(ACommon).TypeText();
   DoError(AOperand, PC_ERR_SEM_251, RSSemTypeSignedToUnsigned,
@@ -4205,9 +4233,9 @@ begin
   DoIntTypeInfo(LCommon, LBits, LIsUnsigned);
   if LIsUnsigned then
   begin
-    if not DoFoldSignedness(ABinary, LOpText, LLeft, LLeftPromoted, LCommon) then
+    if not DoCheckSignedness(ABinary, LOpText, LLeft, LLeftPromoted, LCommon) then
       Exit;
-    if not DoFoldSignedness(ABinary, LOpText, LRight, LRightPromoted, LCommon) then
+    if not DoCheckSignedness(ABinary, LOpText, LRight, LRightPromoted, LCommon) then
       Exit;
   end;
   // Every operand value is exact in the common type now: its pattern is it

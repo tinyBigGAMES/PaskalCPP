@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_cpp_err_sizeof_parens.pcpp - Expr: cpp, sizeof parens
+
+  Break step of expr_cpp: sizeof without parentheses (PR0045).
+*******************************************************************************/
+
+module exe expr_cpp_err_sizeof_parens;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int64;
+
+begin
+  LN := sizeof int; // ERROR PR0045@16: needs parentheses
+end.

@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property_virtual_err_override_final.pcpp - Type: object property virtual, override final
+
+  Break step of type_object_property_virtual: a final property is not
+  overridden (SM0335).
+*******************************************************************************/
+
+module exe type_object_property_virtual_err_override_final;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBase = object
+    FA: int32;
+    virtual final property A: int32 read FA;
+  end;
+  TKid = object(TBase)
+    override property A: int32 read FA; // ERROR SM0335@5: 'TBase.A' is final
+  end;
+
+begin
+end.

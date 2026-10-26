@@ -23,6 +23,7 @@ program pcpp;
 uses
   System.SysUtils,
   UPCPP in 'UPCPP.pas',
+  PaskalCPP.Archive in '..\..\src\PaskalCPP.Archive.pas',
   PaskalCPP.Asar in '..\..\src\PaskalCPP.Asar.pas',
   PaskalCPP.AST in '..\..\src\PaskalCPP.AST.pas',
   PaskalCPP.BuildOutput in '..\..\src\PaskalCPP.BuildOutput.pas',
@@ -38,7 +39,9 @@ uses
   PaskalCPP.Debug.Symbols in '..\..\src\PaskalCPP.Debug.Symbols.pas',
   PaskalCPP.Debug.Target in '..\..\src\PaskalCPP.Debug.Target.pas',
   PaskalCPP.Emitter in '..\..\src\PaskalCPP.Emitter.pas',
+  PaskalCPP.Icon in '..\..\src\PaskalCPP.Icon.pas',
   PaskalCPP.Lexer in '..\..\src\PaskalCPP.Lexer.pas',
+  PaskalCPP.LSP.Calls in '..\..\src\PaskalCPP.LSP.Calls.pas',
   PaskalCPP.LSP.Completion in '..\..\src\PaskalCPP.LSP.Completion.pas',
   PaskalCPP.LSP.Diagnostics in '..\..\src\PaskalCPP.LSP.Diagnostics.pas',
   PaskalCPP.LSP.Docs in '..\..\src\PaskalCPP.LSP.Docs.pas',
@@ -55,11 +58,15 @@ uses
   PaskalCPP.Semantics in '..\..\src\PaskalCPP.Semantics.pas',
   PaskalCPP.SerializedDiag in '..\..\src\PaskalCPP.SerializedDiag.pas',
   PaskalCPP.SourceText in '..\..\src\PaskalCPP.SourceText.pas',
+  PaskalCPP.TestSuite in '..\..\src\PaskalCPP.TestSuite.pas',
+  PaskalCPP.TestSuite.Spec in '..\..\src\PaskalCPP.TestSuite.Spec.pas',
+  PaskalCPP.TestSuite.Types in '..\..\src\PaskalCPP.TestSuite.Types.pas',
   PaskalCPP.TokenStream in '..\..\src\PaskalCPP.TokenStream.pas',
   PaskalCPP.UnicodeNames in '..\..\src\PaskalCPP.UnicodeNames.pas',
   PaskalCPP.ZigBuild in '..\..\src\PaskalCPP.ZigBuild.pas',
   PaskalCPP.ZigBuild.Targets in '..\..\src\PaskalCPP.ZigBuild.Targets.pas',
-  StdApp.Resources in '..\..\src\StdApp.Resources.pas';
+  StdApp.Resources in '..\..\src\StdApp.Resources.pas',
+  PaskalCPP.TestSuite.CodeTest in '..\..\src\PaskalCPP.TestSuite.CodeTest.pas';
 
 begin
   ReportMemoryLeaksOnShutdown := True;

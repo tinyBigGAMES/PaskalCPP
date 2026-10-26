@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_exported_err_placement.pcpp - Decl: exported, placement
+
+  Break step of decl_exported: 'exported' before cpp header; (a placement is
+  no declaration of its own).
+*******************************************************************************/
+
+module exe decl_exported_err_placement;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+exported cpp header; // ERROR PR0024@10
+
+begin
+end.

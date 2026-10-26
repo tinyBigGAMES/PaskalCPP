@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_forward_err_after_full.pcpp - Decl: forward, after full
+
+  Break step of decl_forward: a forward type written after its full
+  declaration (it declares nothing).
+*******************************************************************************/
+
+module exe decl_forward_err_after_full;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TNode = record
+    Value: int32;
+  end;
+
+forward type TNode; // ERROR SM0304@1
+
+begin
+end.

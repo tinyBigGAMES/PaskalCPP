@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_err_align_below.pcpp - Type: record, align below
+
+  Break step of type_record: align(2) on an int32 field: below the natural
+  alignment 4; every field is a PaskalCPP type, so PaskalCPP knows the layout
+  (SM0311, at the align value).
+*******************************************************************************/
+
+module exe type_record_err_align_below;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TR = record align(2) // ERROR SM0311@21: align 2 is below the natural alignment 4 of 'TR', lower it with packed
+    B: int32;
+  end;
+
+begin
+end.

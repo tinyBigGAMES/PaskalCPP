@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_strings_err_unknown_escape_char.pcpp - Lexical: an unknown escape in a char
+
+  Break step of lex_strings: \q in a character literal is PR0064, a
+  warning, reported once. The character is the q, so the program prints q.
+*******************************************************************************/
+
+module exe lex_strings_err_unknown_escape_char;
+
+/*
+  @@test
+    kind run
+    expect
+    | q
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+begin
+  println("{}", '\q'); // WARN PR0064@17: character literal: unknown escape sequence '\q'
+end.

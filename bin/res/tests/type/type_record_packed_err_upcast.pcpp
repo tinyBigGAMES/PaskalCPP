@@ -1,0 +1,48 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_packed_err_upcast.pcpp - Type: record packed, upcast
+
+  Break step of type_record_packed: a packed extension passed to a var
+  parameter of its base: its int32 base part may be misaligned (SM0270).
+*******************************************************************************/
+
+module exe type_record_packed_err_upcast;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBase = record
+    X: int32;
+  end;
+  TPe = record(TBase) packed
+    Y: int8;
+  end;
+
+routine Grow(var AB: TBase);
+begin
+  AB.X := AB.X + 1;
+end;
+
+var
+  LE: TPe;
+
+begin
+  Grow(LE); // ERROR SM0270@8: it may be misaligned
+end.

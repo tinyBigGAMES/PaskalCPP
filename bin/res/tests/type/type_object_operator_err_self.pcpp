@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_operator_err_self.pcpp - Type: object operator, self
+
+  Break step of type_object_operator: self in an operator (it has no object)
+  (SM0011).
+*******************************************************************************/
+
+module exe type_object_operator_err_self;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TVec = record
+    X: int32;
+    Y: int32;
+    operator +(const A: TVec; const B: TVec): TVec;
+    begin
+      return self; // ERROR SM0011
+    end;
+  end;
+
+begin
+end.

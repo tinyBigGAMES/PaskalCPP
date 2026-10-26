@@ -1,0 +1,66 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lsp_diagnostics_syntax.pcpp - LSP compliance: a syntax error while you type
+
+  This file has a syntax mistake on purpose: a missing ';'. While you type
+  the rest of the file keeps working around it: other mistakes are still
+  underlined, hover and the parameter hints still show.
+
+  How to check:
+    1. Open this file. The first CHECK: a red squiggle right after its 1.
+       Hover it: "expected ';', found 'GText'" (PR0001).
+    2. The second CHECK: GCount's second declaration is underlined too
+       (SM0004), although the file has a syntax error.
+    3. The third CHECK: the line right after the missing ';' still parses
+       (the ';' is taken as missing, nothing is skipped): hover GText there
+       shows its declaration, F12 jumps to it.
+    4. The last CHECK: hover Add and see its declaration; the call shows
+       the hints AA: and AB:.
+    5. Type the ';' after the 1 WITHOUT saving: that squiggle disappears,
+       the SM0004 one stays.
+*******************************************************************************/
+
+module exe lsp_diagnostics_syntax;
+
+/*
+  @@test
+    kind manual
+  @@end
+*/
+
+routine Add(const AA: int32; const AB: int32): int32;
+begin
+  return AA + AB;
+end;
+
+var
+  GCount: int32;
+  // CHECK: this whole declaration is underlined: SM0004 'GCount' is already
+  //        declared in this scope
+  GCount: int32; // ERROR SM0004@3: is already declared in this scope
+  GText: string;
+
+begin
+  // CHECK: squiggle right after the 1 below: the ';' is missing
+  GCount := 1 // ERROR PR0001@14: expected ';'
+  // CHECK: hover GText on the line below -> var GText: string; F12 jumps to
+  //        its declaration: the line after the missing ';' still parses
+  GText := "y";
+
+  // CHECK: hover Add -> routine Add(const AA: int32; const AB: int32): int32
+  //        hints: AA: before 3, AB: before 4
+  GCount := Add(3, 4);
+end.

@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property_err_bare.pcpp - Type: object property, bare
+
+  Break step of type_object_property: a property named bare in a method: write
+  self.N (SM0018).
+*******************************************************************************/
+
+module exe type_object_property_err_bare;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBox = object
+    FN: int32;
+    property N: int32 read FN; write FN;
+    method Put();
+    begin
+      N := 1; // ERROR SM0018@7: write self.N
+    end;
+  end;
+
+begin
+end.

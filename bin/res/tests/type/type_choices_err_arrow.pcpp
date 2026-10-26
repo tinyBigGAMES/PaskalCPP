@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_choices_err_arrow.pcpp - Type: a value reached with ->
+
+  Break step of type_choices: a type reaches its values with '.', not '->'
+  (SM0014).
+*******************************************************************************/
+
+module exe type_choices_err_arrow;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TColor = choices(cRed, cGreen, cBlue);
+
+var
+  LC: TColor;
+
+begin
+  LC := TColor->cRed; // ERROR SM0014@9: 'TColor' is a module or a type: reach its names with '.'
+end.

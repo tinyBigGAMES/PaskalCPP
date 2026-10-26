@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_float_const_err_lost_bit.pcpp - Expr: float const, lost bit
+
+  Break step of expr_float_const: the constant 16777216.0 + 1.0 (= 16777217,
+  computed in float64) stored into a float32 (SM0200): float32 holds 24 bits,
+  so 16777217 does not fit; write float32(16777216.0 + 1.0).
+*******************************************************************************/
+
+module exe expr_float_const_err_lost_bit;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LF: float32;
+
+begin
+  LF := 16777216.0 + 1.0; // ERROR SM0200@9: 'float64' does not convert implicitly to 'float32'
+end.

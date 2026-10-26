@@ -1,0 +1,69 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_release_guards_safe.pcpp - Build-kind compliance: a guard catches a nil
+  access in a safe build
+
+  The program of exe_release_guards.pcpp built with @optimize safe: a write
+  and a read through a nil pointer the optimizer can see, directly and
+  through a routine, are still real accesses, so each guard catches
+  exception 3 and the program goes on.
+*******************************************************************************/
+
+module exe exe_release_guards_safe;
+
+/*
+  @@test
+    kind run
+    opt safe
+    expect
+    | nil write: 3 Access violation
+    | nil write through a routine: 3 Access violation
+    | nil read: 3 Access violation
+    | done
+  @@end
+*/
+
+@optimize safe;
+
+routine Write(AP: ptr to int32);
+begin
+  AP^ := 1;
+end;
+
+var
+  LP: ptr to int32;
+  LN: int32;
+
+begin
+  LP := nil;
+  guard
+    LP^ := 1;
+  except
+    println("nil write: {} {}", exccode(), excmsg());
+  end;
+  guard
+    Write(LP);
+  except
+    println("nil write through a routine: {} {}", exccode(), excmsg());
+  end;
+  guard
+    LN := LP^;
+    println("read {}", LN);
+  except
+    println("nil read: {} {}", exccode(), excmsg());
+  end;
+  println("done");
+end.

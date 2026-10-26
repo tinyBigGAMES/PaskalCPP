@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_message_err_fatal.pcpp - Directive: @message fatal as a statement
+
+  Break step of dir_message: reported as fatal, the build fails.
+*******************************************************************************/
+
+module exe dir_message_err_fatal;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  @message fatal "dir_message: a fatal message"; // FATAL SM0108@3: a fatal message
+end.

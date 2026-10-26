@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  cpp_preprocessor_unit.pcpp - Fixture: part of cpp_preprocessor.pcpp: a unit
+  with one #define in its source (the default placement: private to the unit)
+  and one after cpp header; (in its header: seen by every importer).
+
+  Nothing to check here: cpp_preprocessor.pcpp checks it.
+*******************************************************************************/
+
+module unit cpp_preprocessor_unit;
+
+#define CPP_PRE_PRIVATE 1
+
+cpp header;
+#define CPP_PRE_SHARED 2
+cpp source;
+
+// The unit's own code sees its private #define
+exported routine PrivateValue(): int32;
+begin
+  return cpp("CPP_PRE_PRIVATE");
+end;
+
+end.

@@ -1,0 +1,56 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_build_run.pcpp - Build-kind compliance: an exe, built and run
+
+  module exe builds an executable (BNF.md sec 1): its initialize section
+  runs, then its begin body, then finalize; the program exits with 0.
+  pcpp -r builds it and runs it in its own folder.
+*******************************************************************************/
+
+module exe exe_build_run;
+
+/*
+  @@test
+    kind run
+    expect
+    | init
+    | body 7
+    | final
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+var
+  GBase: int32 = 3;
+
+routine Add(AA: int32; AB: int32): int32;
+begin
+  return AA + AB;
+end;
+
+initialize
+begin
+  println("init");
+end;
+
+finalize
+begin
+  println("final");
+end;
+
+begin
+  println("body {}", Add(GBase, 4));
+end.

@@ -1,0 +1,46 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_identifiers.pcpp - Lexical: identifiers
+
+  An identifier (BNF.md sec 9) is a letter or _ then letters, digits and _.
+  PaskalCPP is case-sensitive: LValue, lvalue and LVALUE are three names,
+  and Begin is a name because the keyword is begin, lowercase.
+*******************************************************************************/
+
+module exe lex_identifiers;
+
+/*
+  @@test
+    kind run
+    expect
+    | 1 2 3
+    | 4 5 6
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+var
+  LValue: int32 = 1;
+  lvalue: int32 = 2;
+  LVALUE: int32 = 3;
+  _hidden: int32 = 4;
+  a_1_b: int32 = 5;
+  Begin: int32 = 6;
+
+begin
+  println("{} {} {}", LValue, lvalue, LVALUE);
+  println("{} {} {}", _hidden, a_1_b, Begin);
+end.

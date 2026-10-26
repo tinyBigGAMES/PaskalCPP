@@ -1,0 +1,51 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addsourcefile.pcpp - Directive: @addsourcefile
+
+  @addsourcefile "<path>"; builds a C / C++ / assembly / LLVM IR file into
+  the program beside the emitted C++ (BNF.md sec 2). The extension, exact
+  case, picks the language the way clang reads it:
+  fixtures\dir_addsourcefile_c.c is C, fixtures\dir_addsourcefile_cpp.C (a
+  capital C) and fixtures\dir_addsourcefile_plus.c++ are C++. All are
+  called through clink external routines.
+*******************************************************************************/
+
+module exe dir_addsourcefile;
+
+/*
+  @@test
+    kind run
+    expect
+    | from C: 2 + 3 = 5
+    | from C++: twice 4 = 8
+    | from .c++: next 4 = 5
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addsourcefile "$P:res/tests/dir/fixtures/dir_addsourcefile_c.c";
+@addsourcefile "$P:res/tests/dir/fixtures/dir_addsourcefile_cpp.C";
+@addsourcefile "$P:res/tests/dir/fixtures/dir_addsourcefile_plus.c++";
+
+routine clink dir_asf_add(AA: int32; AB: int32): int32; external;
+routine clink dir_asf_twice(AA: int32): int32; external;
+routine clink dir_asf_plus(AA: int32): int32; external;
+
+begin
+  println("from C: 2 + 3 = {}", dir_asf_add(2, 3));
+  println("from C++: twice 4 = {}", dir_asf_twice(4));
+  println("from .c++: next 4 = {}", dir_asf_plus(4));
+end.

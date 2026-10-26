@@ -1,0 +1,55 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_memory.pcpp - Intrinsic: getmem, resizemem and freemem
+
+  getmem(N) gives N bytes (nil for 0), resizemem(P, N) resizes a block and
+  keeps its bytes (from nil it allocates, to 0 it frees), freemem(P) frees
+  it (BNF.md sec 7); getmem and resizemem are expressions and statements. The
+  debug build counts each block the heap gives and takes back.
+*******************************************************************************/
+
+module exe intr_memory;
+
+/*
+  @@test
+    kind run
+    expect
+    | resized keeps 7
+    | zero bytes nil true
+    | from nil true
+    | done
+    | [Heap] Allocs: 2, Frees: 2, Leaked: 0
+  @@end
+*/
+
+var
+  LP: ptr to int32;
+  LQ: ptr;
+  LN: ptr;
+
+begin
+  LP := ptr to int32(getmem(16));
+  LP^ := 7;
+  LP := ptr to int32(resizemem(LP, 64));
+  println("resized keeps {}", LP^);
+  freemem(LP);
+  LN := getmem(0);
+  println("zero bytes nil {}", LN = nil);
+  LQ := resizemem(nil, 8);
+  println("from nil {}", LQ <> nil);
+  resizemem(LQ, 0);
+  println("done");
+end.

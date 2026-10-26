@@ -1,0 +1,53 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  suite_run.pcpp - Test suite: a run test
+
+  kind run: the program is built in every cell (both official targets by
+  default), run, and its whole output and exit code are compared with the
+  spec. The expect lines hold every line the program prints, the runtime's
+  heap report included; exitcode is the code it must leave with (0 when the
+  key is left out). Here the program leaves through std::exit, plain C++.
+*******************************************************************************/
+
+module exe suite_run;
+
+/*
+  @@test
+    kind run
+    exitcode 3
+    expect
+    | counting to 3
+    | 1
+    | 2
+    | 3
+    | leaving with 3
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+#include <cstdlib>
+
+var
+  LIndex: int32;
+
+begin
+  println("counting to 3");
+  for LIndex := 1 to 3 do
+    println("{}", LIndex);
+  end;
+  println("leaving with 3");
+  std::exit(3);
+end.

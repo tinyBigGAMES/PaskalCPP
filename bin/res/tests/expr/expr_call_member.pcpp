@@ -1,0 +1,92 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_call_member.pcpp - Expression: calls, indexes and members
+
+  A call ( ), an index [ ], a member through . and through -> (BNF.md sec 6
+  postfix op), chained on any value: a call result, a nested record, a
+  record through a pointer. After . and -> any keyword is a name, so a C++
+  member named begin, end or type is reached as written. Only a routine or a
+  routine value is called.
+*******************************************************************************/
+
+module exe expr_call_member;
+
+/*
+  @@test
+    kind run
+    expect
+    | call 3 5
+    | result member 2
+    | nested 4 7 4
+    | cpp members 2 10
+    | index 20
+    | string 5 h
+    | keyword names 3 4
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+#include <string>
+#include <vector>
+
+struct CBox {
+  int type;
+  int end;
+};
+
+type
+  TP = record
+    X: int32;
+    Y: int32;
+  end;
+  TQ = record
+    P: TP;
+    A: array[0..2] of int32;
+  end;
+
+routine Add(AA: int32; AB: int32): int32;
+begin
+  return AA + AB;
+end;
+
+routine Make(): TP;
+begin
+  return TP(X: 1, Y: 2);
+end;
+
+var
+  LQ: TQ;
+  LQP: ptr to TQ;
+  LV: std::vector<int>;
+  LS: string = "hello";
+  LBox: CBox;
+
+begin
+  println("call {} {}", Add(1, 2), Add(Add(1, 1), 3));
+  println("result member {}", Make().Y);
+  LQ.P.X := 4;
+  LQ.A[1] := 7;
+  LQP := address of LQ;
+  println("nested {} {} {}", LQ.P.X, LQ.A[1], LQP->P.X);
+  LV.push_back(10);
+  LV.push_back(20);
+  println("cpp members {} {}", LV.size(), *LV.begin());
+  println("index {}", LV[1]);
+  println("string {} {}", LS.size(), LS[0]);
+  LBox.type := 3;
+  LBox.end := 4;
+  println("keyword names {} {}", LBox.type, LBox.end);
+end.

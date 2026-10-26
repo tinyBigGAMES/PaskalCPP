@@ -205,9 +205,17 @@ type
     MessageText: string;
     Notes: TArray<TPCBuildNote>;
     // A location-less zig error for a library no search folder holds
-    // (PC_ZIG_MISSING_LIB_PREFIX): the library's name, which the frontend
-    // locates (TPCLibraryLocator); '' for any other diagnostic
+    // (PC_ZIG_MISSING_LIB_PREFIX), or a location-less linker message that
+    // opens with the file of a library this build links (TPCLinkedFile: the
+    // linker cannot use it): the library's name, which the frontend locates
+    // (TPCLibraryLocator); '' for any other diagnostic
     LibraryName: string;
+    // A diagnostic read from a TU's .dia: that TU's source file (resolved
+    // and absolute, TPCDiagUnit.SourceFile). One with no location of its own
+    // (a .ll's target triple overridden) is about that file: the frontend
+    // locates where its source names it (TPCSourceFileLocator). '' = read
+    // from zig's lines
+    UnitSource: string;
     // A location-less duplicate-symbol linker error (PC_LINKER_DUPLICATE_SYMBOL):
     // the symbol, and per holder the archive file name it came from, bare ('' =
     // an object of this build), in the linker's order; '' / nil otherwise
@@ -216,6 +224,16 @@ type
     // clang's warning group as the .dia names it (DIAG_FLAG, no -W); ''
     // = none or a diagnostic read from zig's lines (O13b)
     FlagText: string;
+  end;
+
+  { TPCLinkedFile }
+  // A library this build links, as the linker finds it: its file (resolved
+  // and absolute) and the name the build links it by (@linklibrary, an
+  // external clause, the API). Handed to the filter before the build
+  // (TPCBuildOutputFilter.SetLinkedFiles)
+  TPCLinkedFile = record
+    FilePath: string;
+    LibraryName: string;
   end;
 
   { TPCLocationTranslator }
@@ -237,6 +255,24 @@ type
   TPCLibraryLocator = reference to function(const ALibrary: string;
     out AOutFilename: string; out AOutLine: UInt64;
     out AOutColumn: UInt64): Boolean;
+
+  { TPCSourceFileLocator }
+  // Where the frontend's source names a build source file (an @addsourcefile;
+  // the frontend looks it up in its AST; the build never sees the AST). True =
+  // the source names ASourceFile (resolved and absolute): AOut* hold the
+  // .pcpp location of its first naming. False = no module names it (a
+  // generated module TU, the runtime, a file set through the API): no location
+  TPCSourceFileLocator = reference to function(const ASourceFile: string;
+    out AOutFilename: string; out AOutLine: UInt64;
+    out AOutColumn: UInt64): Boolean;
+
+  { TPCDiagUnit }
+  // One TU of a finished build as the commit reads it: its .dia path and its
+  // source file (both resolved and absolute)
+  TPCDiagUnit = record
+    DiagFile: string;
+    SourceFile: string;
+  end;
 
   { TPCGeneratedFileTest }
   // Whether the frontend wrote AFilename for this build (its generated C++:
@@ -309,7 +345,12 @@ type
     FBlockStderr: Boolean;
     FChain: TArray<TPCBuildNote>;
 
+    // The libraries this build links, by file (SetLinkedFiles)
+    FLinkedFiles: TArray<TPCLinkedFile>;
+
     function DoResolve(const AText: string): string;
+    function DoLinkedFileLibrary(const AMessage: string): string;
+    function DoWithoutLineSuffix(const APath: string): string;
     function DoWrapperLine(const ALine: string): Boolean;
     function DoErrorLine(const ALine: string): Boolean;
     function DoChildLine(const ALine: string): Boolean;
@@ -337,6 +378,11 @@ type
     // directory, resolved and absolute.
     procedure Init(const ABuildRoot: string);
 
+    // After Init: the libraries this build links, by file. A location-less
+    // linker message that opens with one of these files ('<file>: ...', the
+    // linker cannot use it) is that library's (TPCBuildDiag.LibraryName)
+    procedure SetLinkedFiles(const AFiles: TArray<TPCLinkedFile>);
+
     // One line of zig's output, as captured (no line terminator)
     procedure AddLine(const ALine: string);
 
@@ -360,6 +406,7 @@ type
     FGeneratedFileTest: TPCGeneratedFileTest;
     FFrontendCheck: TPCFrontendCheck;
     FDuplicateSymbolCheck: TPCDuplicateSymbolCheck;
+    FSourceFileLocator: TPCSourceFileLocator;
     FCommitted: TList<TPCBuildDiag>;
     FErrorsReported: Integer;
 
@@ -371,9 +418,14 @@ type
       var AColumn: UInt64);
     procedure DoLocateLibrary(const ALibrary: string; var AFilename: string;
       var ALine: UInt64; var AColumn: UInt64);
+    procedure DoLocateSourceFile(const ASourceFile: string; var AFilename: string;
+      var ALine: UInt64; var AColumn: UInt64);
     function DoFrontendOwned(const ADiag: TPCBuildDiag): Boolean;
     function DoFrontendIncludeStep(const ANote: TPCBuildNote): Boolean;
     class function DoEvaluatedText(const ADiag: TPCBuildDiag): string; static;
+    // A note's text as reported: an include-chain step's from its location
+    class function DoNoteText(const ANote: TPCBuildNote; const AFilename: string;
+      const ALine: UInt64): string; static;
     function DoFrontendCheck(const ADiag: TPCBuildDiag; var AKey: TPCBuildDiag;
       out ACode: string): Boolean;
     function DoDuplicateCheck(const ADiag: TPCBuildDiag; var AKey: TPCBuildDiag;
@@ -384,12 +436,12 @@ type
     constructor Create(); override;
     destructor Destroy(); override;
 
-    // ADiagFiles = the .dia path of every TU, in source order. A
-    // file that is absent is a TU zig served from its cache: nothing to
+    // AUnits = every TU (its .dia path and source file), in source order. A
+    // .dia that is absent is a TU zig served from its cache: nothing to
     // report. ATranslator, ALocator, AGeneratedFileTest and AFrontendCheck
     // may be nil (no frontend ran).
     procedure Commit(const AFilter: TPCBuildOutputFilter;
-      const ADiagFiles: TArray<string>; const ABuildRoot: string;
+      const AUnits: TArray<TPCDiagUnit>; const ABuildRoot: string;
       const ATranslator: TPCLocationTranslator;
       const ALocator: TPCLibraryLocator;
       const AGeneratedFileTest: TPCGeneratedFileTest;
@@ -397,6 +449,8 @@ type
 
     // Kept across commits; nil = no frontend owns a duplicate symbol
     procedure SetDuplicateSymbolCheck(const ACheck: TPCDuplicateSymbolCheck);
+    // Kept across commits; nil = no frontend names build source files
+    procedure SetSourceFileLocator(const ALocator: TPCSourceFileLocator);
 
     // Errors (not warnings) the last Commit reported
     function ErrorsReported(): Integer;
@@ -627,6 +681,57 @@ begin
   FInBlock := False;
   FBlockStderr := False;
   FChain := nil;
+  FLinkedFiles := nil;
+end;
+
+procedure TPCBuildOutputFilter.SetLinkedFiles(const AFiles: TArray<TPCLinkedFile>);
+begin
+  FLinkedFiles := AFiles;
+end;
+
+function TPCBuildOutputFilter.DoLinkedFileLibrary(const AMessage: string): string;
+var
+  LCut: Integer;
+  LPath: string;
+  LFile: TPCLinkedFile;
+begin
+  // The library whose file a location-less linker message opens with
+  // ('<file>: unknown file type', the linker cannot use it; on ELF lld
+  // reads a file that is no archive as a linker script and says
+  // '<file>:<line>: unknown directive: ...'); '' when none.
+  // The text before the first ': ' is compared as a path spelling only
+  // (TUtils.SamePath), never resolved: most messages open with no path
+  Result := '';
+  if Length(FLinkedFiles) = 0 then
+    Exit;
+  LCut := AMessage.IndexOf(': ');
+  if LCut <= 0 then
+    Exit;
+  LPath := DoWithoutLineSuffix(AMessage.Substring(0, LCut).Trim());
+  for LFile in FLinkedFiles do
+  begin
+    if TUtils.SamePath(LPath, LFile.FilePath) then
+      Exit(LFile.LibraryName);
+  end;
+end;
+
+function TPCBuildOutputFilter.DoWithoutLineSuffix(const APath: string): string;
+var
+  LColon: Integer;
+  LI: Integer;
+begin
+  // APath without a trailing ':<digits>' (the line a linker message names
+  // inside the file); APath itself when it has none
+  Result := APath;
+  LColon := APath.LastIndexOf(':');
+  if (LColon <= 0) or (LColon = APath.Length - 1) then
+    Exit;
+  for LI := LColon + 1 to APath.Length - 1 do
+  begin
+    if not CharInSet(APath.Chars[LI], ['0'..'9']) then
+      Exit;
+  end;
+  Result := APath.Substring(0, LColon);
 end;
 
 function TPCBuildOutputFilter.DoResolve(const AText: string): string;
@@ -939,11 +1044,14 @@ begin
   end;
   LDiag.Severity := ASeverity;
   LDiag.MessageText := AMessage;
-  // Only a location-less error can be zig's missing-library one: the
-  // frontend gives it the location of the library's naming at the commit
+  // Only a location-less error can be zig's missing-library one, or the
+  // linker's about a linked library's file: the frontend gives it the
+  // location of the library's naming at the commit
   if AFilename = '' then
   begin
     LDiag.LibraryName := DoMissingLibraryName(AMessage);
+    if LDiag.LibraryName = '' then
+      LDiag.LibraryName := DoLinkedFileLibrary(AMessage);
     LDiag.DuplicateSymbol := DoDuplicateSymbolName(AMessage);
   end;
   FCaptures.Add(LDiag);
@@ -1198,6 +1306,7 @@ begin
   FTranslator := nil;
   FFrontendCheck := nil;
   FDuplicateSymbolCheck := nil;
+  FSourceFileLocator := nil;
   FErrorsReported := 0;
 end;
 
@@ -1307,6 +1416,24 @@ begin
   if not Assigned(FLocator) then
     Exit;
   if not FLocator(ALibrary, LOutFilename, LOutLine, LOutColumn) then
+    Exit;
+
+  AFilename := LOutFilename;
+  ALine := LOutLine;
+  AColumn := LOutColumn;
+end;
+
+procedure TPCBuildOutputCommit.DoLocateSourceFile(const ASourceFile: string;
+  var AFilename: string; var ALine: UInt64; var AColumn: UInt64);
+var
+  LOutFilename: string;
+  LOutLine: UInt64;
+  LOutColumn: UInt64;
+begin
+  // No locator, or a TU no module names: left without a location
+  if not Assigned(FSourceFileLocator) then
+    Exit;
+  if not FSourceFileLocator(ASourceFile, LOutFilename, LOutLine, LOutColumn) then
     Exit;
 
   AFilename := LOutFilename;
@@ -1437,6 +1564,11 @@ begin
   Result := True;
 end;
 
+procedure TPCBuildOutputCommit.SetSourceFileLocator(const ALocator: TPCSourceFileLocator);
+begin
+  FSourceFileLocator := ALocator;
+end;
+
 procedure TPCBuildOutputCommit.SetDuplicateSymbolCheck(const ACheck: TPCDuplicateSymbolCheck);
 begin
   FDuplicateSymbolCheck := ACheck;
@@ -1539,7 +1671,10 @@ begin
       DoTranslate(LKey.Filename, LKey.Line, LKey.Column)
     else if ADiag.LibraryName <> '' then
       // A library no search folder holds: where the source names it
-      DoLocateLibrary(ADiag.LibraryName, LKey.Filename, LKey.Line, LKey.Column);
+      DoLocateLibrary(ADiag.LibraryName, LKey.Filename, LKey.Line, LKey.Column)
+    else if ADiag.UnitSource <> '' then
+      // A TU's own diagnostic with no location: where the source names the TU
+      DoLocateSourceFile(ADiag.UnitSource, LKey.Filename, LKey.Line, LKey.Column);
   end;
 
   // One report per diagnostic per build: a header's diagnostic arrives once
@@ -1600,12 +1735,25 @@ begin
     LRange.StartColumn := LColumn;
     LRange.EndLine := LLine;
     LRange.EndColumn := LColumn;
-    FErrors.AddRelated(LRange, ADiag.Notes[LI].MessageText);
+    FErrors.AddRelated(LRange, DoNoteText(ADiag.Notes[LI], LFilename, LLine));
   end;
 end;
 
+class function TPCBuildOutputCommit.DoNoteText(const ANote: TPCBuildNote;
+  const AFilename: string; const ALine: UInt64): string;
+begin
+  // An include-chain step names its file in its text as clang spelled it
+  // (a separator mixed, or a generated C++ file the location maps to its
+  // .pcpp): its text is written from the step's reported location, so text
+  // and location name one place one way. Every other note is clang's text
+  Result := ANote.MessageText;
+  if (AFilename = '') or (not ANote.MessageText.StartsWith(PC_CLANG_INCLUDED_FROM_NOTE)) then
+    Exit;
+  Result := PC_CLANG_INCLUDED_FROM_NOTE + AFilename + ':' + UIntToStr(ALine) + ':';
+end;
+
 procedure TPCBuildOutputCommit.Commit(const AFilter: TPCBuildOutputFilter;
-  const ADiagFiles: TArray<string>; const ABuildRoot: string;
+  const AUnits: TArray<TPCDiagUnit>; const ABuildRoot: string;
   const ATranslator: TPCLocationTranslator; const ALocator: TPCLibraryLocator;
   const AGeneratedFileTest: TPCGeneratedFileTest; const AFrontendCheck: TPCFrontendCheck);
 var
@@ -1613,6 +1761,7 @@ var
   LJ: Integer;
   LReason: string;
   LEntries: TList<TPCBuildDiag>;
+  LEntry: TPCBuildDiag;
   LClaimed: TArray<Boolean>;
 begin
   FCommitted.Clear();
@@ -1633,22 +1782,25 @@ begin
   // zig printed for its TU (the raw block) stay unclaimed below.
   LEntries := TList<TPCBuildDiag>.Create();
   try
-    for LI := 0 to High(ADiagFiles) do
+    for LI := 0 to High(AUnits) do
     begin
-      if not FileExists(ADiagFiles[LI]) then
+      if not FileExists(AUnits[LI].DiagFile) then
         Continue;
 
-      if not DoReadDiagFile(ADiagFiles[LI], ABuildRoot, LEntries, LReason) then
+      if not DoReadDiagFile(AUnits[LI].DiagFile, ABuildRoot, LEntries, LReason) then
       begin
         FErrors.Add(esWarning, PC_ERR_BUILDOUTPUT_WRNDIAGFILE,
-          RSBdoDiagFileUnreadable, [ADiagFiles[LI], LReason]);
+          RSBdoDiagFileUnreadable, [AUnits[LI].DiagFile, LReason]);
         Continue;
       end;
 
       for LJ := 0 to LEntries.Count - 1 do
       begin
-        DoClaim(AFilter, LClaimed, LEntries[LJ]);
-        DoReport(LEntries[LJ]);
+        // Every entry knows its TU: one with no location is about that file
+        LEntry := LEntries[LJ];
+        LEntry.UnitSource := AUnits[LI].SourceFile;
+        DoClaim(AFilter, LClaimed, LEntry);
+        DoReport(LEntry);
       end;
     end;
   finally

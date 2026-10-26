@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_optimize_err_retired.pcpp - Directive: a retired spelling of a level
+
+  Break step of dir_optimize: release_fast is now fast, and the report names
+  the new spelling.
+*******************************************************************************/
+
+module exe dir_optimize_err_retired;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@optimize release_fast; // ERROR SM0100@11: 'release_fast' is no longer a value of @optimize: write 'fast'
+
+begin
+end.

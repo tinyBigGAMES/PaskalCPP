@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_array_err_index_choices.pcpp - Type: array, index choices
+
+  Break step of type_array: an array bounded by choice values is indexed by a
+  value of that type (SM0261).
+*******************************************************************************/
+
+module exe type_array_err_index_choices;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TColor = choices(cRed, cGreen, cBlue);
+
+var
+  LA: array[TColor.cRed..TColor.cBlue] of int32;
+  LI: int32;
+
+begin
+  LI := LA[1]; // ERROR SM0261@12: an index of 'array[TColor.cRed..TColor.cBlue] of int32' is a 'TColor' value, got 'int32'
+end.

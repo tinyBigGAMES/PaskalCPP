@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_for_err_float.pcpp - Stmt: for, float
+
+  Break step of stmt_for: a float64 iterator: an integer, char, wchar or
+  choice (SM0601).
+*******************************************************************************/
+
+module exe stmt_for_err_float;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LF: float64;
+
+begin
+  for LF := 1 to 3 do // ERROR SM0601@3: a for iterator is an integer
+  end;
+end.

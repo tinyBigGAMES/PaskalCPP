@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_set_literal_err_low_high.pcpp - Expr: set literal, low high
+
+  Break step of expr_set_literal: a range whose low bound exceeds its high
+  bound (SM0267).
+*******************************************************************************/
+
+module exe expr_set_literal_err_low_high;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TDigits = set of 0..9;
+
+var
+  LD: TDigits;
+
+begin
+  LD := [5..1]; // ERROR SM0267@10: low bound 5 exceeds high bound 1
+end.

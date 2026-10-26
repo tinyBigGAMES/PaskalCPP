@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_guard_err_exccode.pcpp - Stmt: guard, exccode
+
+  Break step of stmt_guard: exccode outside an except body (SM0615).
+*******************************************************************************/
+
+module exe stmt_guard_err_exccode;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int32;
+
+begin
+  LN := exccode(); // ERROR SM0615@9: outside an except body
+end.

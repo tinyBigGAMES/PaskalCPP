@@ -1,0 +1,48 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_repeat.pcpp - Statement: repeat
+
+  repeat ... until C; (BNF.md sec 5): the body runs first and the loop
+  ends when the bool C is true, so the body runs at least once.
+*******************************************************************************/
+
+module exe stmt_repeat;
+
+/*
+  @@test
+    kind run
+    expect
+    | count 4
+    | once 1
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+var
+  LI: int32;
+
+begin
+  LI := 0;
+  repeat
+    LI += 1;
+  until LI = 4;
+  println("count {}", LI);
+  LI := 0;
+  repeat
+    LI += 1;
+  until true;
+  println("once {}", LI);
+end.

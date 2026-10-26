@@ -1,0 +1,43 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_virtual_err_overrides_nothing.pcpp - Type: object virtual, overrides nothing
+
+  Break step of type_object_virtual: override of a plain method: only a
+  virtual one is overridden (SM0333).
+*******************************************************************************/
+
+module exe type_object_virtual_err_overrides_nothing;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    method M();
+    begin
+    end;
+  end;
+  TB = object(TA)
+    override method M(); // ERROR SM0333@5: 'M' overrides nothing
+    begin
+    end;
+  end;
+
+begin
+end.

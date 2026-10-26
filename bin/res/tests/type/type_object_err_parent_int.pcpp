@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_err_parent_int.pcpp - Type: object, parent int
+
+  Break step of type_object: an alias of int32 as an object's parent (SM0308).
+*******************************************************************************/
+
+module exe type_object_err_parent_int;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TCount = int32;
+  TO = object(TCount) // ERROR SM0308@15: 'TCount' cannot be the parent of an object
+    X: int32;
+  end;
+
+begin
+end.

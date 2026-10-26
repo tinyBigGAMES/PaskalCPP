@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addresdata_err_shape.pcpp - Directive: @addresdata without its path
+
+  Break step of dir_addresdata.
+*******************************************************************************/
+
+module exe dir_addresdata_err_shape;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addresdata "hello"; // ERROR PR0006@20
+
+begin
+end.

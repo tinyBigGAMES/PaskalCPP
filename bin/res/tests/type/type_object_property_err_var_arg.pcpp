@@ -1,0 +1,45 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property_err_var_arg.pcpp - Type: object property, var arg
+
+  Break step of type_object_property: a property is no variable for a var
+  parameter (SM0405).
+*******************************************************************************/
+
+module exe type_object_property_err_var_arg;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBox = object
+    FN: int32;
+    property N: int32 read FN; write FN;
+  end;
+
+routine Bump(var AN: int32);
+begin
+  AN := AN + 1;
+end;
+
+var
+  LB: TBox;
+begin
+  Bump(LB.N); // ERROR SM0405@8
+end.

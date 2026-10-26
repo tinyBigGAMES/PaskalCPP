@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addresdata_err_duplicate.pcpp - Directive: a key an imported unit already adds
+
+  Break step of dir_addresdata: the unit fixtures\dir_addresdata_err_duplicate_unit
+  adds "hello" too (a note points at its directive). One program has one key
+  space: every module's entries are linked into the same binary. The unit is
+  checked first (it is imported), so the report is here.
+*******************************************************************************/
+
+module exe dir_addresdata_err_duplicate;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addresdata "hello" "$P:res/tests/dir/fixtures/dir_addresdata_hello.txt"; // ERROR SM0121@13
+@addmodulepath "$P:res/tests/dir/fixtures";
+import dir_addresdata_err_duplicate_unit;
+
+begin
+end.

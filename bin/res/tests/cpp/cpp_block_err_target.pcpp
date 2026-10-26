@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  cpp_block_err_target.pcpp - Cpp: block, target
+
+  Break step of cpp_block: cppstart takes header or source (PR0015).
+*******************************************************************************/
+
+module exe cpp_block_err_target;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+cppstart middle // ERROR PR0015@10: expected header or source after 'cppstart', found 'middle'
+int GX = 1;
+cppend;
+
+begin
+end.

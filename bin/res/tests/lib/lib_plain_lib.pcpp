@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lib_plain_lib.pcpp - Build kind: a lib that does not use the runtime (dep)
+
+  A `module lib` is a static library. This one's code never calls into the
+  PaskalCPP runtime (no div / mod, guard, raise, sets, ...), so its build
+  is the lib alone: no startup hook, no pcpp_runtime beside it from this
+  build. lib_plain links it from PaskalCPP; a C program built by another
+  toolchain links it with a plain C driver (the lib area's code test).
+  lib_runtime_lib is the other case.
+*******************************************************************************/
+
+module lib lib_plain_lib;
+
+/*
+  @@test
+    kind dep
+  @@end
+*/
+
+exported routine clink lib_plain_lib_add(AA: int32; AB: int32): int32;
+begin
+  return AA + AB;
+end;
+
+end.

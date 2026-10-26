@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_exceptions_unhandled.pcpp - Intrinsic: an unguarded raise
+
+  A raise no guard catches ends the program: the runtime prints
+  "unhandled exception <code>: <text>" to stderr, after what the program had
+  printed, and exits with 1 (research\runtime\api.md "Unhandled"). Nothing
+  after the raise runs, so no heap report is printed either.
+*******************************************************************************/
+
+module exe intr_exceptions_unhandled;
+
+/*
+  @@test
+    kind run
+    exitcode 1
+    expect
+    | before
+    | unhandled exception 7: seven
+  @@end
+*/
+
+begin
+  println("before");
+  raisecode(7, "seven");
+end.

@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addincludepath_byunit_unit.pcpp - Directive fixture: the unit
+  dir_addincludepath_byunit imports; its @addincludepath adds fixtures\ to
+  the one build, and it includes dir_addincludepath.h in its own translation
+  unit.
+*******************************************************************************/
+
+module unit dir_addincludepath_byunit_unit;
+@addincludepath "$P:res/tests/dir/fixtures";
+
+#include "dir_addincludepath.h"
+
+exported routine FromUnit(): int32;
+begin
+  return cpp("dir_addincludepath_value() + 1");
+end;
+
+end.

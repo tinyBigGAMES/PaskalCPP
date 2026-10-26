@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_scope_err_dup_module.pcpp - Decl: scope, dup module
+
+  Break step of decl_scope: two module variables with one name.
+*******************************************************************************/
+
+module exe decl_scope_err_dup_module;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  GTwice: int32 = 1;
+  GTwice: int32 = 2; // ERROR SM0004@3
+
+begin
+  println("{}", GTwice);
+end.

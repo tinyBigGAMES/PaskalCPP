@@ -69,8 +69,8 @@ const
   PC_ERR_CMP_002 = 'CMP0002';   // auto-run skipped (not an exe)
   { PC_ERR_CMP_003 }
   PC_ERR_CMP_003 = 'CMP0003';   // internal error (an invariant)
-  { PC_ERR_CMP_004 }
-  PC_ERR_CMP_004 = 'CMP0004';   // warning: a stale published runtime library could not be removed
+  // CMP0004 is retired (a stale published runtime library: the runtime is
+  // the lib build's own companion library now); never reused
   { PC_ERR_CMP_005 }
   PC_ERR_CMP_005 = 'CMP0005';   // warning: the output record could not be written
   { PC_ERR_CMP_006 }
@@ -122,14 +122,21 @@ const
   PC_CMP_DEFINE_DLL = 'PCPP_BUILD_DLL';
   { PC_CMP_DEFINE_DEBUG }
   PC_CMP_DEFINE_DEBUG = 'PCPP_DEBUG';
+  { PC_CMP_UNDEF_FORTIFY }
+  // zig defines it at safe; undefined there (-U), see Build
+  PC_CMP_UNDEF_FORTIFY = '_FORTIFY_SOURCE';
+  { PC_CMP_DEFINE_NO_INLINE }
+  // Defined for a glibc target at fast / safe, see Build
+  PC_CMP_DEFINE_NO_INLINE = '__NO_INLINE__';
+  { PC_CMP_GLIBC_OS }
+  PC_CMP_GLIBC_OS = 'linux';
+  { PC_CMP_GLIBC_ENV }
+  PC_CMP_GLIBC_ENV = 'gnu';
   { PC_CMP_RUNTIME_NAME }
   // The runtime library a lib that uses the runtime ships beside it (r5
   // D-R5-3): its project name, so the artifact is pcpp_runtime.lib /
   // libpcpp_runtime.a by ZigBuild's naming
   PC_CMP_RUNTIME_NAME = 'pcpp_runtime';
-  { PC_CMP_RUNTIME_DIR }
-  // That library's own build folder under the output path
-  PC_CMP_RUNTIME_DIR = 'runtime';
 
   { PC_CMP_KEY_OPTIMIZE }
   // Option keys: overrides (SetKeyValue) are applied after the directives,
@@ -203,6 +210,9 @@ type
     FSourceFile: string;
     FOutputPath: string;
     FOutputGiven: Boolean;        // Prepare got an explicit folder (-o): @outputpath does not apply
+    // SetDefaultOutputPath: the folder used when neither Prepare's folder nor
+    // @outputpath names one; '' = PC_CMP_DEFAULT_OUTPUT in the current folder
+    FDefaultOutputPath: string;
     FGeneratedPath: string;
     FProjectName: string;
     FLastExitCode: Cardinal;
@@ -215,8 +225,6 @@ type
     procedure DoAddSetup(const ASetup: TPCZigSetup);
     procedure DoAddToolSetup(const ASetup: TPCZigSetup);
     procedure DoApplyToolSetup(const AZig: TPCZigBuild);
-    function DoBuildRuntimeLib(): Boolean;
-    procedure DoRemoveStaleRuntimeLib();
     function DoDisplayColumn(const AFilename: string; const ALine: UInt64;
       const AColumn: UInt64): UInt64;
     function DoIsGeneratedFile(const AFilename: string): Boolean;
@@ -253,8 +261,13 @@ type
     // PLAN-RESDATA A5b (1), SEM's TPCLinkedResDataKeys: the data keys of the
     // static libraries this build links, read from their symbol indexes
     function DoLinkedResDataKeys(): TArray<string>;
-    // PLAN-RESDATA A6: a non-Windows exe's icon decoded into its entry file
+    // An exe's icon, checked the same on every target before the build: built
+    // in as an entry file (not Windows) or decoded before the stamp (Windows)
     function DoWriteExeIcon(): Boolean;
+    procedure DoReportExeIcon(const ADirective: TPCDirective; const AIconPath: string;
+      const AFailure: string);
+    function DoBuildInExeIcon(): Boolean;
+    function DoCheckStampedExeIcon(): Boolean;
     procedure DoApplyApiExeIcon();
     function DoApplyKeys(const AKeys: TDictionary<string, string>): Boolean;
     function DoKeyTarget(const AKeys: TDictionary<string, string>;
@@ -296,6 +309,13 @@ type
     // the editor, --defaults); an override for the same key wins over both
     procedure SetKeyDefault(const AKey: string; const AValue: string);
     function GetKeyDefault(const AKey: string): string;
+
+    // The output folder a build uses when neither Prepare's AOutputPath nor
+    // the main module's @outputpath names one ('' = PC_CMP_DEFAULT_OUTPUT
+    // against the current folder, the CLI's rule). An in-process host (the
+    // test suite) sets it, so its builds never depend on the current folder;
+    // unlike an explicit AOutputPath it leaves @outputpath in force
+    procedure SetDefaultOutputPath(const APath: string);
 
     // Prepare + Build
     procedure Compile(const ASourceFile: string; const AOutputPath: string;
@@ -436,6 +456,7 @@ begin
   FSourceFile := '';
   FOutputPath := '';
   FOutputGiven := False;
+  FDefaultOutputPath := '';
   FGeneratedPath := '';
   FProjectName := '';
   FLastExitCode := 0;
@@ -982,6 +1003,12 @@ begin
     Result := '';
 end;
 
+procedure TPCCompiler.SetDefaultOutputPath(const APath: string);
+begin
+  // Taken as given: DoPrepare resolves it with the other output forms
+  FDefaultOutputPath := APath;
+end;
+
 function TPCCompiler.HasErrors(): Boolean;
 begin
   Result := FErrors.HasErrors();
@@ -1440,12 +1467,18 @@ begin
     Exit;
 
   // An explicit folder (-o) wins over the main module's @outputpath, as -t
-  // over @target; without one the directive decides, else 'output'
-  // (DoApplyOutputPath, once the source is read)
+  // over @target; without one the directive decides (DoApplyOutputPath,
+  // once the source is read), else the host's default folder
+  // (SetDefaultOutputPath), else 'output' in the current folder
   LOutput := AOutputPath;
   FOutputGiven := LOutput.Trim() <> '';
   if not FOutputGiven then
-    LOutput := PC_CMP_DEFAULT_OUTPUT;
+  begin
+    if FDefaultOutputPath.Trim() <> '' then
+      LOutput := FDefaultOutputPath
+    else
+      LOutput := PC_CMP_DEFAULT_OUTPUT;
+  end;
   try
     FOutputPath := TUtils.ResolvePath(LOutput);
     FGeneratedPath := TUtils.JoinResolvedPath(FOutputPath, PC_CMP_GENERATED_DIR);
@@ -1572,29 +1605,86 @@ begin
 end;
 
 function TPCCompiler.DoWriteExeIcon(): Boolean;
+begin
+  // An exe's icon is checked the same way on every target before anything
+  // is built: a target that is not Windows builds it in (DoBuildInExeIcon),
+  // Windows stamps it into the exe after the link (the driver). Either way a
+  // file that is no icon is CMP0008 at the @exeicon value, so one mistake
+  // gets one report on every target
+  if FMainModule.BuildsExeIcon() then
+    Result := DoBuildInExeIcon()
+  else
+    Result := DoCheckStampedExeIcon();
+end;
+
+procedure TPCCompiler.DoReportExeIcon(const ADirective: TPCDirective; const AIconPath: string;
+  const AFailure: string);
+begin
+  // The icon's report: at the @exeicon value, or without a location for an
+  // icon the API set (SetExeIcon: there is no source line for it)
+  if ADirective <> nil then
+    FErrors.Add(ADirective.Args[0].Range, esError, PC_ERR_CMP_008, RSCmpExeIconFailed,
+      [AIconPath, AFailure])
+  else
+    FErrors.Add(esError, PC_ERR_CMP_008, RSCmpExeIconFailed, [AIconPath, AFailure]);
+end;
+
+function TPCCompiler.DoBuildInExeIcon(): Boolean;
 var
-  LDirective: TPCDirective;
   LIconPath: string;
   LEntryPath: string;
   LFailure: string;
 begin
-  // PLAN-RESDATA A6: the entry the emitter's #embed names beside the
-  // generated sources (PC_RESDATA_EXEICON_FILE): the icon's largest frame
-  // as RGBA, decoded here at build time (TPCIconImage). A failure is an
-  // error at the icon's path (A8: an API icon has no location); nothing is
-  // built
+  // The entry the emitter's #embed names beside the generated sources
+  // (PC_RESDATA_EXEICON_FILE): the icon's largest frame as RGBA, decoded
+  // here at build time (TPCIconImage); a failure builds nothing
   Result := True;
   LIconPath := FMainModule.ExeIconPath();
-  if LIconPath = '' then
-    Exit;
   LEntryPath := TUtils.JoinResolvedPath(FGeneratedPath, PC_RESDATA_EXEICON_FILE);
   if not TPCIconImage.WriteEntryFile(LIconPath, LEntryPath, LFailure) then
   begin
-    LDirective := FMainModule.ExeIconEntry();
-    if LDirective <> nil then
-      FErrors.Add(LDirective.Args[0].Range, esError, PC_ERR_CMP_008, RSCmpExeIconFailed, [LIconPath, LFailure])
-    else
-      FErrors.Add(esError, PC_ERR_CMP_008, RSCmpExeIconFailed, [LIconPath, LFailure]);
+    DoReportExeIcon(FMainModule.ExeIconEntry(), LIconPath, LFailure);
+    Result := False;
+  end;
+end;
+
+function TPCCompiler.DoCheckStampedExeIcon(): Boolean;
+var
+  LDirective: TPCDirective;
+  LCandidate: TPCDirective;
+  LIconPath: string;
+  LWidth: Cardinal;
+  LHeight: Cardinal;
+  LPixels: TBytes;
+  LFailure: string;
+begin
+  // Windows: the driver stamps the icon after the link, so it is decoded
+  // here first, as DoBuildInExeIcon does; a file that is no icon fails
+  // before the build, at its directive. Only an exe takes an icon (on a dll
+  // or a lib @exeicon is SEM's SM0103 warning and is not used)
+  Result := True;
+  if (FMainModule.ModuleKind <> mkExe) or FMainModule.ResolvedTarget.IsEmpty() then
+    Exit;
+  LDirective := nil;
+  for LCandidate in FMainModule.Directives do
+  begin
+    // The parser keeps an argument it reported with HasValue False
+    if (LCandidate.DirectiveKind = bdExeIcon) and (LCandidate.Args.Count >= 1) and
+      LCandidate.Args[0].HasValue then
+    begin
+      LDirective := LCandidate;
+      Break;
+    end;
+  end;
+  if LDirective <> nil then
+    LIconPath := LDirective.Args[0].ResolvedText
+  else
+    LIconPath := FMainModule.ApiExeIcon;
+  if LIconPath = '' then
+    Exit;
+  if not TPCIconImage.DecodeLargest(LIconPath, LWidth, LHeight, LPixels, LFailure) then
+  begin
+    DoReportExeIcon(LDirective, LIconPath, LFailure);
     Result := False;
   end;
 end;
@@ -1760,6 +1850,9 @@ var
   LSymbol: string;
   LKey: string;
   LFailure: string;
+  LNamedIn: string;
+  LNamedLine: UInt64;
+  LNamedColumn: UInt64;
 begin
   // The paths and libraries the driver will link with, in its order: the
   // program's API settings (already on the driver, DoCreatePhases), then each
@@ -1812,10 +1905,17 @@ begin
       LFiles.Add(LFile, True);
 
       // A file that cannot be read: its keys are unknown, so a key only it
-      // holds would warn wrongly; said once, the build goes on
+      // holds would warn wrongly; said once, the build goes on. Reported
+      // where the source names the library (the first @linklibrary value
+      // or external clause, TPCAst.LocateLibrary), as zig's missing-library
+      // error is; only a library the API added has no source location
       if not TPCArchiveIndex.ReadFileSymbols(LFile, LSymbols, LFailure) then
       begin
-        FErrors.Add(esWarning, PC_ERR_CMP_007, RSCmpLibraryUnreadable, [LFile, LFailure]);
+        if FAst.LocateLibrary(LLibrary, LNamedIn, LNamedLine, LNamedColumn) then
+          FErrors.Add(LNamedIn, LNamedLine, LNamedColumn, esWarning, PC_ERR_CMP_007,
+            RSCmpLibraryUnreadable, [LFile, LFailure])
+        else
+          FErrors.Add(esWarning, PC_ERR_CMP_007, RSCmpLibraryUnreadable, [LFile, LFailure]);
         Continue;
       end;
       for LSymbol in LSymbols do
@@ -1892,6 +1992,7 @@ var
   LKind: TPCModuleKind;
   LTarget: TPCTargetTriple;
   LIndex: Integer;
+  LRuntimeDefines: TArray<string>;
 begin
   // What the AST and the final settings decide (research\compiler\
   // r5-runtime-wiring.md 1-7)
@@ -1915,8 +2016,7 @@ begin
       DoQuoteIncludePaths(FAst.ModuleAt(LIndex)));
 
   // The runtime: its headers for every build, its TU for an exe or dll (a
-  // lib carries none: the exe / dll that links it supplies the one copy; a
-  // lib that uses the runtime ships pcpp_runtime beside it, DoBuildRuntimeLib)
+  // lib carries none: the exe / dll that links it supplies the one copy)
   FZigBuild.AddIncludePath(FZigBuild.GetRuntimePath());
   if LKind <> mkLib then
     FZigBuild.AddSourceFile(FZigBuild.GetRuntimePath(PC_CMP_RUNTIME_SOURCE));
@@ -1925,11 +2025,50 @@ begin
   // The debug runtime (heap report) follows the final level: directive, then override
   if FZigBuild.GetOptimizeLevel() = olDebug then
     FZigBuild.SetDefine(PC_CMP_DEFINE_DEBUG);
+  // zig defines _FORTIFY_SOURCE at safe, and the C library's headers then
+  // give fread / fgets / ... extern inline bodies: a module that defines one
+  // of them (std HookIO hooks the C library's file I/O) is a C++
+  // redefinition error. Its first <stdio.h> comes in through pcpp_runtime.h,
+  // so no module can undefine it in time: the build does (user 2026-10-25).
+  // zig's own safe checks stay; a program that @cppdefines it keeps its own
+  if (FZigBuild.GetOptimizeLevel() = olSafe) and
+    (not FZigBuild.HasDefine(PC_CMP_UNDEF_FORTIFY)) then
+    FZigBuild.UnsetDefine(PC_CMP_UNDEF_FORTIFY);
+  // The same clash from glibc's own extern inlines: with __OPTIMIZE__ and no
+  // __OPTIMIZE_SIZE__ (fast, safe) its <stdio.h> gives getc_unlocked /
+  // fputc_unlocked / ... bodies (features.h __USE_EXTERN_INLINES), which a
+  // module defining them (std HookIO) collides with. __NO_INLINE__ is the
+  // switch glibc reads to leave them out: they become plain calls (user
+  // 2026-10-25); a program that @cppdefines it keeps its own
+  if (LTarget.OS = PC_CMP_GLIBC_OS) and (LTarget.Env = PC_CMP_GLIBC_ENV) and
+    (FZigBuild.GetOptimizeLevel() in [olFast, olSafe]) and
+    (not FZigBuild.HasDefine(PC_CMP_DEFINE_NO_INLINE)) then
+    FZigBuild.SetDefine(PC_CMP_DEFINE_NO_INLINE);
+
+  // Q2 / r5 D-R5-3: a lib whose program uses the runtime (TPCAst.UsesRuntime,
+  // the emitter's lib hook rule) ships pcpp_runtime beside it in lib\, for a
+  // consumer built by another toolchain. A PaskalCPP exe / dll that links the
+  // lib compiles its own runtime TU and never links this one (pcpp:: twice).
+  // It is the companion library of the lib's own build.zig (one zig project,
+  // one cache, no second build folder): the lib's target and level, the
+  // runtime's include path and the debug rule, none of the user's defines
+  if (LKind = mkLib) and FAst.UsesRuntime() then
+  begin
+    if FZigBuild.GetOptimizeLevel() = olDebug then
+      LRuntimeDefines := [PC_CMP_DEFINE_DEBUG]
+    else
+      LRuntimeDefines := nil;
+    FZigBuild.SetCompanionLib(PC_CMP_RUNTIME_NAME,
+      FZigBuild.GetRuntimePath(PC_CMP_RUNTIME_SOURCE),
+      FZigBuild.GetRuntimePath(), LRuntimeDefines);
+  end;
 
   // clang's locations back to .pcpp columns through the AST's EmitSpans
   FZigBuild.SetLocationTranslator(FAst.TranslateLocation);
   // A library zig cannot find, at the @linklibrary / external clause naming it
   FZigBuild.SetLibraryLocator(FAst.LocateLibrary);
+  // A TU's own diagnostic with no location, at the @addsourcefile naming it
+  FZigBuild.SetSourceFileLocator(FAst.LocateSourceFile);
   // The compiler's own include steps through the files it generated: not shown
   FZigBuild.SetGeneratedFileTest(DoIsGeneratedFile);
   // The emitter's own checks clang judges: reported in PaskalCPP words
@@ -2108,75 +2247,6 @@ begin
   FSourceProvider := AProvider;
 end;
 
-function TPCCompiler.DoBuildRuntimeLib(): Boolean;
-var
-  LRuntime: TPCZigBuild;
-begin
-  // Q2 / r5 D-R5-3: a lib whose program uses the runtime (TPCAst.UsesRuntime,
-  // the emitter's lib hook rule) ships pcpp_runtime beside it, for a consumer
-  // built by another toolchain. A PaskalCPP exe / dll that links the lib
-  // compiles its own runtime TU and never links this one (pcpp:: twice).
-  // Its own fresh driver: the session's settings only, the lib's target,
-  // optimize level and debug rule; zig's cache makes a rebuild free
-  LRuntime := TPCZigBuild.Create();
-  try
-    LRuntime.SetErrors(FErrors);
-    DoApplyToolSetup(LRuntime);
-    LRuntime.SetOutputPath(TUtils.JoinResolvedPath(FOutputPath, PC_CMP_RUNTIME_DIR));
-    LRuntime.SetProjectName(PC_CMP_RUNTIME_NAME);
-    LRuntime.SetBuildMode(bmLib);
-    LRuntime.SetTarget(FZigBuild.GetTarget());
-    LRuntime.SetOptimizeLevel(FZigBuild.GetOptimizeLevel());
-    if FZigBuild.GetOptimizeLevel() = olDebug then
-      LRuntime.SetDefine(PC_CMP_DEFINE_DEBUG);
-    LRuntime.AddIncludePath(LRuntime.GetRuntimePath());
-    LRuntime.AddSourceFile(LRuntime.GetRuntimePath(PC_CMP_RUNTIME_SOURCE));
-    // Beside the lib's artifact, through ZigBuild's checked copy
-    LRuntime.AddPublishArtifact(FZigBuild.GetArtifactDir());
-    // A setting the driver refused (an output path too long, ZB0021) is reported
-    if FErrors.HasErrors() then
-      Exit(False);
-    Result := LRuntime.Process(False);
-  finally
-    LRuntime.Free();
-  end;
-end;
-
-procedure TPCCompiler.DoRemoveStaleRuntimeLib();
-var
-  LPath: string;
-begin
-  // TODO: Stale-runtime removal is turned off for now and will be reworked
-  // with TPCZigBuild.DoRemoveStaleInstalled, in the same future update. The
-  // runtime library's name is shared by every lib in an output folder, so
-  // this cannot tell whose it is: a lib that never used the runtime deleted
-  // the one another lib (lib_runtime) had published beside it for its
-  // consumers.
-  Exit;
-
-  // A lib that does not use the runtime: the pcpp_runtime an earlier build of
-  // it published beside it (that exact file, named by the layout rule) goes,
-  // so no consumer finds a stale runtime beside a lib that needs none. The
-  // <output>\runtime build folder stays: a cache, and -o may name a folder of
-  // the user's where a 'runtime' folder is theirs
-  LPath := TUtils.JoinResolvedPath(FZigBuild.GetArtifactDir(),
-    FZigBuild.GetLibPrefix() + PC_CMP_RUNTIME_NAME + FZigBuild.GetLibExtension());
-  try
-    if not TFile.Exists(LPath) then
-      Exit;
-    TFile.Delete(LPath);
-  except
-    on E: Exception do
-    begin
-      // The lib itself built: a warning, the stale file named
-      FErrors.Add(esWarning, PC_ERR_CMP_004, RSCmpStaleRuntime,
-        [TUtils.StripLongPathPrefix(LPath), E.Message]);
-      Exit;
-    end;
-  end;
-  Status(RSCmpRemovedStaleRuntime, [TUtils.StripLongPathPrefix(LPath)]);
-end;
-
 function TPCCompiler.Build(const AAutoRun: Boolean): Boolean;
 begin
   Result := False;
@@ -2188,15 +2258,10 @@ begin
       // pcpp's record of the folder before zig writes into it, so every
       // build leaves one (pcpp --clean proves the folder with it)
       DoWriteOutputRecord();
+      // A lib that uses the runtime builds pcpp_runtime in the same zig
+      // build, as the companion library DoApplyDerived set
       if not FZigBuild.Process(False) then
         Exit;
-      if (FMainModule.ModuleKind = mkLib) and FAst.UsesRuntime() then
-      begin
-        if not DoBuildRuntimeLib() then
-          Exit;
-      end
-      else if FMainModule.ModuleKind = mkLib then
-        DoRemoveStaleRuntimeLib();
       Result := True;
 
       if DoValidateAutoRun(AAutoRun) then

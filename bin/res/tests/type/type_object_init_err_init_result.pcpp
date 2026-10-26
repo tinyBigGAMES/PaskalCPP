@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_init_err_init_result.pcpp - Type: object init, init result
+
+  Break step of type_object_init: an init with a result type (PR0059).
+*******************************************************************************/
+
+module exe type_object_init_err_init_result;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    init(): int32; // ERROR PR0059@13: an init has no result type
+    begin
+    end;
+  end;
+
+begin
+end.

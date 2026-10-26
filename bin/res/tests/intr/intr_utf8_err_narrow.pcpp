@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_utf8_err_narrow.pcpp - Intr: utf8, narrow
+
+  Break step of intr_utf8: utf8 of a narrow string literal (SM0409).
+*******************************************************************************/
+
+module exe intr_utf8_err_narrow;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LS: string;
+
+begin
+  LS := utf8("narrow"); // ERROR SM0409@14: 'utf8' takes
+end.

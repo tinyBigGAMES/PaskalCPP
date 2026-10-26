@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_set_err_order.pcpp - Type: set, order
+
+  Break step of type_set: the low bound is not above the high bound (SM0328).
+*******************************************************************************/
+
+module exe type_set_err_order;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = set of 9..1; // ERROR SM0328@15: low bound 9 is above high bound 1
+
+begin
+end.

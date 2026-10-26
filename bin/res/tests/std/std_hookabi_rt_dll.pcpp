@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_hookabi_rt_dll.pcpp - std compliance: the library std_hookabi_rt loads
+
+  A shared library (Windows std_hookabi_rt_dll.dll, Linux
+  libstd_hookabi_rt_dll.so) whose one routine reads the environment variable
+  STD_HOOKABI_RT with the C runtime's getenv, through the library's own
+  import slot for it. std_hookabi_rt loads it at run time (never linked)
+  and hooks that slot with HookInstall. Built first, into repo\bin\output.
+*******************************************************************************/
+
+module dll std_hookabi_rt_dll;
+
+/*
+  @@test
+    kind dep
+  @@end
+*/
+
+#include <cstdlib>
+
+// STD_HOOKABI_RT as this library's getenv gives it: nil when it is not set
+exported routine clink std_hookabi_rt_env(): ptr to const char;
+begin
+  return getenv("STD_HOOKABI_RT");
+end;
+
+end.

@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_overload_err_not_routine.pcpp - Decl: overload, not routine
+
+  Break step of decl_overload: a var and a routine of one name (no overload: a
+  duplicate).
+*******************************************************************************/
+
+module exe decl_overload_err_not_routine;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  Show: int32 = 0;
+
+routine Show(AN: int32); // ERROR SM0004@1
+begin
+end;
+
+begin
+end.

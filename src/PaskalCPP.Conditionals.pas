@@ -138,6 +138,12 @@ type
       const ADefaultTarget: TPCTargetTriple): Boolean;
     function Target(): TPCTargetTriple;
     function IsDefined(const ASymbol: string): Boolean;
+    // How a directive token's spelling changes the conditional nesting: +1
+    // opens a region (@ifdef / @ifndef), -1 closes one (@endif), 0 for any
+    // other spelling (@elseif / @else stay inside the open region). The one
+    // place outside the filter that asks (PaskalCPP.TestSuite.Spec: no test
+    // spec inside a conditional region)
+    class function NestingOf(const ASpelling: string): Integer; static;
   end;
 
 implementation
@@ -197,6 +203,16 @@ begin
     (ASpelling = PC_CND_IFDEF) or (ASpelling = PC_CND_IFNDEF) or
     (ASpelling = PC_CND_ELSEIF) or (ASpelling = PC_CND_ELSE) or
     (ASpelling = PC_CND_ENDIF);
+end;
+
+class function TPCConditionalFilter.NestingOf(const ASpelling: string): Integer;
+begin
+  if (ASpelling = PC_CND_IFDEF) or (ASpelling = PC_CND_IFNDEF) then
+    Result := 1
+  else if ASpelling = PC_CND_ENDIF then
+    Result := -1
+  else
+    Result := 0;
 end;
 
 procedure TPCConditionalFilter.DoError(const AToken: TPCToken; const ACode: string;

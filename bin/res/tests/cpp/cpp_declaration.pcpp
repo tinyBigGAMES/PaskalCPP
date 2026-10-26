@@ -1,0 +1,65 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  cpp_declaration.pcpp - C++ integration compliance: C++ declarations at
+  module level
+
+  At module level a token that starts no PaskalCPP declaration begins a C++
+  declaration, copied as written up to its end (BNF.md sec 10): a struct, a
+  function, a template, an enum class, a using, a global. const, var and
+  type start a PaskalCPP block only in PaskalCPP shape: `const int KC = 3;`
+  is C++, `const KP: int32 = 4;` PaskalCPP. PaskalCPP code uses them all.
+*******************************************************************************/
+
+module exe cpp_declaration;
+
+/*
+  @@test
+    kind run
+    expect
+    | point 3 4
+    | sum 7
+    | twice 10
+    | color 2
+    | alias 11
+    | consts 3 4
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+struct CPoint { int X; int Y; };
+int Sum(CPoint AP) { return AP.X + AP.Y; }
+template <typename T> T Twice(T AValue) { return AValue * 2; }
+enum class CColor { Red, Green, Blue };
+using CCount = long long;
+CCount GEleven = 11;
+const int KC = 3;
+
+const
+  KP: int32 = 4;
+
+var
+  LP: CPoint;
+
+begin
+  LP.X := 3;
+  LP.Y := 4;
+  println("point {} {}", LP.X, LP.Y);
+  println("sum {}", Sum(LP));
+  println("twice {}", Twice(5));
+  println("color {}", cpp("static_cast<int>(CColor::Blue)"));
+  println("alias {}", GEleven);
+  println("consts {} {}", KC, KP);
+end.

@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_err_field_field.pcpp - Type: object, field field
+
+  Break step of type_object: a field named like a parent field (SM0309).
+*******************************************************************************/
+
+module exe type_object_err_field_field;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    X: int32;
+  end;
+  TB = object(TA)
+    X: int32; // ERROR SM0309@5: 'X' reuses a name of the parent chain
+  end;
+
+begin
+end.

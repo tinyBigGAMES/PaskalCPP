@@ -1,0 +1,108 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_verinfo_dll.pcpp - Directive: @addverinfo on in a dll
+
+  The dep dir_verinfo_dll_dll stamps version info: on a dll it applies as on
+  an exe, and its file type is a dll's (VFT_DLL), not a program's. This
+  program reads the dll's version info from the file (beside it in
+  output\bin) through the Windows version API (Windows only).
+*******************************************************************************/
+
+module exe dir_verinfo_dll;
+
+/*
+  @@test
+    kind run
+    targets x86_64-windows-gnu
+    deps dir_verinfo_dll_dll
+    expect
+    | file type: dll
+    | fixed file version: 4.5.6.0
+    | ProductName: PaskalCPP Compliance dll
+    | OriginalFilename: dir_verinfo_dll_dll.dll
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@linklibrary "version";
+
+#include <windows.h>
+#include <string>
+
+// The version info block of the dll beside this program ("" when none)
+static std::string dir_verinfo_dll_block()
+{
+  char LPath[MAX_PATH];
+  DWORD LLen = GetModuleFileNameA(nullptr, LPath, MAX_PATH);
+  if ((LLen == 0) || (LLen == MAX_PATH))
+    return "";
+  std::string LFile(LPath);
+  LFile = LFile.substr(0, LFile.find_last_of("\\/") + 1) + "dir_verinfo_dll_dll.dll";
+  DWORD LHandle = 0;
+  DWORD LSize = GetFileVersionInfoSizeA(LFile.c_str(), &LHandle);
+  if (LSize == 0)
+    return "";
+  std::string LData(LSize, '\0');
+  if (!GetFileVersionInfoA(LFile.c_str(), 0, LSize, LData.data()))
+    return "";
+  return LData;
+}
+
+// The fixed part: "dll" / "app" / the number, then the file version
+static std::string dir_verinfo_dll_fixed(int APart)
+{
+  std::string LData = dir_verinfo_dll_block();
+  VS_FIXEDFILEINFO* LFixed = nullptr;
+  UINT LFixedLen = 0;
+  if (LData.empty() ||
+      !VerQueryValueA(LData.data(), "\\", reinterpret_cast<LPVOID*>(&LFixed), &LFixedLen) ||
+      (LFixedLen < sizeof(VS_FIXEDFILEINFO)))
+    return "(none)";
+  if (APart == 0)
+  {
+    if (LFixed->dwFileType == VFT_DLL)
+      return "dll";
+    if (LFixed->dwFileType == VFT_APP)
+      return "app";
+    return std::to_string(LFixed->dwFileType);
+  }
+  return std::to_string(HIWORD(LFixed->dwFileVersionMS)) + "." +
+    std::to_string(LOWORD(LFixed->dwFileVersionMS)) + "." +
+    std::to_string(HIWORD(LFixed->dwFileVersionLS)) + "." +
+    std::to_string(LOWORD(LFixed->dwFileVersionLS));
+}
+
+// "<key>: <value>" for row AIndex of the dll's string table
+static std::string dir_verinfo_dll_line(int AIndex)
+{
+  static const char* const LKeys[] = {"ProductName", "OriginalFilename"};
+  std::string LData = dir_verinfo_dll_block();
+  std::string LQuery = std::string("\\StringFileInfo\\040904B0\\") + LKeys[AIndex];
+  char* LValue = nullptr;
+  UINT LValueLen = 0;
+  if (LData.empty() ||
+      !VerQueryValueA(LData.data(), LQuery.c_str(), reinterpret_cast<LPVOID*>(&LValue), &LValueLen) ||
+      (LValueLen == 0))
+    return std::string(LKeys[AIndex]) + ": (none)";
+  return std::string(LKeys[AIndex]) + ": " + LValue;
+}
+
+begin
+  println("file type: {}", cpp("dir_verinfo_dll_fixed(0)"));
+  println("fixed file version: {}", cpp("dir_verinfo_dll_fixed(1)"));
+  println("{}", cpp("dir_verinfo_dll_line(0)"));
+  println("{}", cpp("dir_verinfo_dll_line(1)"));
+end.

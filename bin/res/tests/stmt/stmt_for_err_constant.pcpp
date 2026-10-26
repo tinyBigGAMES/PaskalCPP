@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_for_err_constant.pcpp - Stmt: for, constant
+
+  Break step of stmt_for: a constant as the iterator: for needs a variable
+  (SM0600).
+*******************************************************************************/
+
+module exe stmt_for_err_constant;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+const
+  KC: int32 = 1;
+
+begin
+  for KC := 1 to 3 do // ERROR SM0600@3: for needs a variable
+  end;
+end.

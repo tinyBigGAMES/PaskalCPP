@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_splices_err_cppstart_comment.pcpp - Lexical: a spliced comment in a block
+
+  Break step of lex_splices: a // comment ending in a splice goes on to the
+  next line, so in a cppstart block it swallows the cppend there: the block
+  never closes, LX0013 at the cppstart (not LX0014: the splice ends a
+  comment, not the block's C++).
+*******************************************************************************/
+
+module exe lex_splices_err_cppstart_comment;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+cppstart source /* // ERROR LX0013@1 // */
+int GX = 1; // a comment that goes on \
+cppend;
+
+begin
+  println("{}", GX);
+end.

@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dll_raise_dll.pcpp - Build kind: a dll routine that raises (dep)
+
+  The dll dll_raise links: its routine raises, unguarded inside the dll.
+*******************************************************************************/
+
+module dll dll_raise_dll;
+
+/*
+  @@test
+    kind dep
+  @@end
+*/
+
+exported routine clink dll_raise_fail();
+begin
+  raise("raised inside the dll");
+end;
+
+end.

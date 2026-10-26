@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_choices_err_choices_to_int.pcpp - Type: a value into an integer variable
+
+  Break step of type_choices: a value does not convert to a number
+  implicitly, write int32(...) (SM0200).
+*******************************************************************************/
+
+module exe type_choices_err_choices_to_int;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TColor = choices(cRed, cGreen, cBlue);
+
+var
+  LI: int32;
+
+begin
+  LI := TColor.cBlue; // ERROR SM0200@9: 'TColor' does not convert implicitly to 'int32'
+end.

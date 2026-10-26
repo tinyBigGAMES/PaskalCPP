@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_err_compare_overlay.pcpp - Type: record, compare overlay
+
+  Break step of type_record: an overlay has no comparison either (SM0252).
+*******************************************************************************/
+
+module exe type_record_err_compare_overlay;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBits = overlay
+    Whole: uint32;
+    Low: uint16;
+  end;
+
+var
+  LA: TBits;
+  LB: TBits;
+
+begin
+  if LA <> LB then // ERROR SM0252@6: cannot compare 'TBits'
+  end;
+end.

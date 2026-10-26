@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_err_bit_store.pcpp - Type: record, bit store
+
+  Break step of type_record: a constant stored into a bitfield is held by its
+  width: int32 : 3 holds -4 .. 3 (SM0200).
+*******************************************************************************/
+
+module exe type_record_err_bit_store;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TR = record
+    B: int32 : 3;
+    U: uint8 : 2;
+  end;
+
+var
+  LR: TR;
+
+begin
+  LR.B := 100; // ERROR SM0200@11: 100 does not fit in 'int32 : 3' (-4..3)
+end.

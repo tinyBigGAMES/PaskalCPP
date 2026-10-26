@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_local_decls_err_no_type.pcpp - Stmt: local decls, no type
+
+  Break step of stmt_local_decls: a local var with no type (PR0001).
+*******************************************************************************/
+
+module exe stmt_local_decls_err_no_type;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  var LQ: ; // ERROR PR0001@11: expected a type
+end.

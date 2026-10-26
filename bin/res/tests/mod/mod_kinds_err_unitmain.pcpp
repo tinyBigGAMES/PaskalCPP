@@ -1,0 +1,30 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_kinds_err_unitmain.pcpp - Module: a unit as the main module
+
+  Break step of mod_kinds: a unit is only ever imported, so handing one to
+  the compiler as the main module is an error.
+*******************************************************************************/
+
+module unit mod_kinds_err_unitmain; // ERROR PR0004@8
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+end.

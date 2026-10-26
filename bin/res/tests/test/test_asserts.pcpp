@@ -1,0 +1,115 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  test_asserts.pcpp - Unit testing compliance: every assert
+
+  Inside a test every assert (BNF.md sec 8) that does not hold records a
+  failure line, <file>:<line>: <message>, and the test goes on: the first
+  test holds every assert, the second fails every one, so 1 test failed and
+  the exit code is 1. testAssertEqualFloat allows a relative difference of
+  1e-9; a pointer prints as its address (nil 0x0). An assert outside a test:
+  test_asserts_outside. Break steps: test_asserts_err_type (a test block is
+  checked even without @unitTestMode), test_asserts_err_count.
+*******************************************************************************/
+
+module exe test_asserts;
+
+/*
+  @@test
+    kind run
+    exitcode 1
+    expect
+    | asserts
+    | 
+    | ╔══════════════════════════════════════════════════════════════╗
+    | ║                     Unit Test Runner                         ║
+    | ╚══════════════════════════════════════════════════════════════╝
+    | 
+    | Running 2 test(s)...
+    | 
+    | ✅ PASS: every assert holds
+    | ❌ FAIL: every assert fails
+    |   🔴 <DIR>/test_asserts.pcpp:103: testAssert failed
+    |   🔴 <DIR>/test_asserts.pcpp:104: testAssertTrue failed: expected true, got false
+    |   🔴 <DIR>/test_asserts.pcpp:105: testAssertFalse failed: expected false, got true
+    |   🔴 <DIR>/test_asserts.pcpp:106: testAssertNil failed: expected nil, got 0x20
+    |   🔴 <DIR>/test_asserts.pcpp:107: testAssertNotNil failed: expected not nil, got nil
+    |   🔴 <DIR>/test_asserts.pcpp:108: testFail: on purpose
+    |   🔴 <DIR>/test_asserts.pcpp:109: testAssertEqualInt failed: expected 3, got -4
+    |   🔴 <DIR>/test_asserts.pcpp:110: testAssertEqualUInt failed: expected 18446744073709551615, got 5
+    |   🔴 <DIR>/test_asserts.pcpp:111: testAssertEqualFloat failed: expected 1.5, got 1.5000001
+    |   🔴 <DIR>/test_asserts.pcpp:112: testAssertEqualStr failed: expected "a", got "b"
+    |   🔴 <DIR>/test_asserts.pcpp:113: testAssertEqualBool failed: expected true, got false
+    |   🔴 <DIR>/test_asserts.pcpp:114: testAssertEqualPtr failed: expected 0x20, got 0x0
+    | 
+    | ════════════════════════════════════════════════════════════════
+    | Results: 1 passed, 1 failed, 2 total
+    | ════════════════════════════════════════════════════════════════
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@unitTestMode on;
+
+var
+  GValue: int32 = 5;
+  GText: string = "a";
+
+initialize
+begin
+  println("asserts");
+end;
+
+begin
+end.
+
+test "every assert holds"
+var
+  LP: ptr to int32;
+begin
+  LP := address of GValue;
+  testAssert(GValue = 5);
+  testAssertTrue(GValue > 0);
+  testAssertFalse(GValue < 0);
+  testAssertNil(nil);
+  testAssertNotNil(LP);
+  testAssertEqualInt(-5, -GValue);
+  testAssertEqualUInt(5, uint64(GValue));
+  testAssertEqualFloat(1.5, 3.0 / 2.0);
+  testAssertEqualStr("ab", GText + "b");
+  testAssertEqualBool(true, GValue = 5);
+  testAssertEqualPtr(LP, address of GValue);
+end;
+
+test "every assert fails"
+var
+  LP: ptr to int32;
+  LU: uint64;
+begin
+  LU := 32;
+  LP := ptr to int32(LU);
+  testAssert(GValue = 6);
+  testAssertTrue(false);
+  testAssertFalse(true);
+  testAssertNil(LP);
+  testAssertNotNil(nil);
+  testFail("on purpose");
+  testAssertEqualInt(3, -4);
+  testAssertEqualUInt(18446744073709551615u, 5);
+  testAssertEqualFloat(1.5, 1.5000001);
+  testAssertEqualStr("a", "b");
+  testAssertEqualBool(true, false);
+  testAssertEqualPtr(LP, nil);
+end;

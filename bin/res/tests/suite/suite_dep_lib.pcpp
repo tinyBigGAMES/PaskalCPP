@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  suite_dep_lib.pcpp - Test suite: a dependency (static library)
+
+  kind dep: a lib or dll another test needs. It is never a result of its
+  own: the suite builds it first, in the consumer's cell, every time a test
+  that names it in `deps` runs (here suite_dep). A dep no test names is
+  reported at discovery.
+*******************************************************************************/
+
+module lib suite_dep_lib;
+
+/*
+  @@test
+    kind dep
+  @@end
+*/
+
+exported routine clink suite_dep_lib_scale(AValue: int32; AFactor: int32): int32;
+begin
+  return AValue * AFactor;
+end;
+
+end.

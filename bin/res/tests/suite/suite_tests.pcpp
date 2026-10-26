@@ -1,0 +1,62 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  suite_tests.pcpp - Test suite: a unit-test program
+
+  kind tests: the module turns on @unitTestMode, so the program runs its
+  `test` blocks instead of its main body. The suite builds and runs it in
+  every cell and reads the program's own Results: line: every test must
+  pass, and a program with no tests at all fails (a vacuous pass hides a
+  broken file).
+*******************************************************************************/
+
+module exe suite_tests;
+
+/*
+  @@test
+    kind tests
+  @@end
+*/
+
+@unitTestMode on;
+
+routine Clamp(const AValue: int32; const ALow: int32; const AHigh: int32): int32;
+begin
+  if AValue < ALow then
+    return ALow;
+  end;
+  if AValue > AHigh then
+    return AHigh;
+  end;
+  return AValue;
+end;
+
+begin
+end.
+
+test "clamp keeps a value inside the range"
+begin
+  testAssertEqualInt(5, Clamp(5, 0, 10));
+end;
+
+test "clamp raises a value below the range"
+begin
+  testAssertEqualInt(0, Clamp(-3, 0, 10));
+end;
+
+test "clamp lowers a value above the range"
+begin
+  testAssertEqualInt(10, Clamp(42, 0, 10));
+end;

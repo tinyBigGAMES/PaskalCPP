@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_array_err_bound_variable.pcpp - Type: array, bound variable
+
+  Break step of type_array: a static bound is a constant (SM0202).
+*******************************************************************************/
+
+module exe type_array_err_bound_variable;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LV: int32;
+
+type
+  TA = array[0..LV] of int32; // ERROR SM0202@17: a static array bound must be a constant
+
+begin
+end.

@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_integers_err_shape.pcpp - Lexical: a digit its base does not have
+
+  Break step of lex_integers: a 2 in a binary literal leaves no valid
+  number, LX0005.
+*******************************************************************************/
+
+module exe lex_integers_err_shape;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int64;
+
+begin
+  LN := 0;
+  LN := 0b12; // ERROR LX0005@9: Malformed numeric literal: 0b12
+end.

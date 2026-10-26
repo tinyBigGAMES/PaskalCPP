@@ -1,0 +1,112 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_exported_unit.pcpp - Fixture: a unit decl_exported.pcpp imports: an
+  exported const block, var block, type block (one of its types forward-
+  declared first), exported routines (one of them forward-declared first), and
+  a var block and a type block right after exported ones that are NOT
+  exported.
+
+  Nothing to check here: decl_exported.pcpp and its break steps check it.
+*******************************************************************************/
+
+module unit decl_exported_unit;
+
+// The unit's own constants: exported declarations below are built from them
+const
+  CBase: int32 = 2;
+  CWide: int32 = CBase * 3;
+  CTag: string = "u";
+
+// One 'exported' covers the whole block after it: every constant
+exported const
+  CSize: int32 = 4;
+  CName: string = "units";
+  CDouble: int32 = CWide + 1;
+  CTagged: string = CTag + "nits";
+
+exported var
+  GCount: int32 = 0;
+  GLimit: int64 = 10;
+
+// The unit's own: 'exported' covered only the block before this one
+var
+  GStep: int32 = 7;
+
+exported forward type TNode;
+
+exported type
+  TPoint = record
+    X: int32;
+    Y: int32;
+  end;
+  TNodeRef = ptr to TNode;
+  TNode = record
+    Value: int32;
+    Next: TNodeRef;
+  end;
+  TRow = array[0..CWide] of int32;
+  TAligned = record align(CBase * 8)
+    V: int32;
+  end;
+
+// The unit's own type
+type
+  TSecret = record
+    Value: int32;
+  end;
+
+exported forward routine Twice(AN: int32): int32;
+
+exported routine Bump();
+begin
+  GCount := GCount + GStep;
+end;
+
+exported routine MakePoint(AX: int32; AY: int32): TPoint;
+var
+  LP: TPoint;
+begin
+  LP.X := AX;
+  LP.Y := AY;
+  return LP;
+end;
+
+exported routine SumNodes(AFirst: TNodeRef): int32;
+var
+  LP: TNodeRef;
+  LSum: int32;
+begin
+  LSum := 0;
+  LP := AFirst;
+  while LP <> nil do
+    LSum := LSum + LP^.Value;
+    LP := LP^.Next;
+  end;
+  return LSum;
+end;
+
+exported routine Twice(AN: int32): int32;
+begin
+  return AN * 2;
+end;
+
+// Its signature is built from the unit's own constants
+exported routine RowEnds(const ARow: TRow; AExtra: array[0..CBase] of int32): int32;
+begin
+  return ARow[0] + ARow[CWide] + AExtra[CBase];
+end;
+
+end.

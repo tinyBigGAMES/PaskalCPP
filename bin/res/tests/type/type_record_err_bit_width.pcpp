@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_err_bit_width.pcpp - Type: record, bit width
+
+  Break step of type_record: int32 : 33: a width is 1 .. the type's bits
+  (SM0315).
+*******************************************************************************/
+
+module exe type_record_err_bit_width;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TR = record
+    B: int32 : 33; // ERROR SM0315@16: bitfield width 33 outside 1..32
+  end;
+
+begin
+end.

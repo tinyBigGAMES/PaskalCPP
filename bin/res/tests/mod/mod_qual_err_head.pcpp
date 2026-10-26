@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_qual_err_head.pcpp - Module: a qualified name whose head is no imported module
+
+  Break step of mod_qual.
+*******************************************************************************/
+
+module exe mod_qual_err_head;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_qual_unit;
+
+var
+  GF: Zed.TPt; // ERROR SM0007@7
+
+begin
+end.

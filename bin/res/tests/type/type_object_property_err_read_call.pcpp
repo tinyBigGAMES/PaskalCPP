@@ -1,0 +1,45 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property_err_read_call.pcpp - Type: object property, read call
+
+  Break step of type_object_property: a read calls no method through self
+  (SM0373).
+*******************************************************************************/
+
+module exe type_object_property_err_read_call;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBox = object
+    FN: int32;
+    method Bump();
+    begin
+      self.FN := self.FN + 1;
+    end;
+    property N: int32 read
+      begin
+        self.Bump(); // ERROR SM0373@9: the read of 'N' cannot call method 'Bump' through self
+        return self.FN;
+      end;
+  end;
+
+begin
+end.

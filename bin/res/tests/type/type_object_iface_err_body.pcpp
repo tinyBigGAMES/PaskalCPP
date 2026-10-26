@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_iface_err_body.pcpp - Type: object iface, body
+
+  Break step of type_object_iface: an interface method with a body: the
+  objects implement it (PR0060).
+*******************************************************************************/
+
+module exe type_object_iface_err_body;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  IShape = interface
+    method Area(): int32;
+    begin // ERROR PR0060@5: an interface method has no body
+      return 1;
+    end;
+  end;
+
+begin
+end.

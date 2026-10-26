@@ -1,0 +1,56 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_cppdefine.pcpp - Directive: @cppdefine / @cppundef
+
+  @cppdefine "NAME"; / @cppdefine "NAME" "VALUE"; / @cppundef "NAME"; set a C
+  preprocessor macro (clang's -DNAME, -DNAME=VALUE, -UNAME) for every
+  translation unit of the build: the emitted C++, the runtime and every
+  @addsourcefile file (BNF.md sec 2). C/C++ #if / #ifdef see them;
+  PaskalCPP's own @define / @ifdef do not (dir_conditional).
+  fixtures\dir_cppdefine_c.c #errors unless DIR_CPPDEF_ON is defined and
+  returns DIR_CPPDEF_V; the second line reads DIR_CPPDEF_V in the emitted
+  C++. The same macro given twice with the same value is one macro (no
+  report). A value holding '"' and '\' reaches clang as written:
+  DIR_CPPDEF_Q is the C string "a\\b" (3 characters).
+*******************************************************************************/
+
+module exe dir_cppdefine;
+
+/*
+  @@test
+    kind run
+    expect
+    | from C: DIR_CPPDEF_V = 7
+    | from the emitted C++: DIR_CPPDEF_V = 7
+    | a quoted macro: a\b (3 characters)
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@cppdefine "DIR_CPPDEF_ON";
+@cppdefine "DIR_CPPDEF_V" "7";
+@cppdefine "DIR_CPPDEF_V" "7";
+@cppundef "DIR_CPPDEF_GONE";
+@cppdefine "DIR_CPPDEF_Q" "\"a\\\\b\"";
+@addsourcefile "$P:res/tests/dir/fixtures/dir_cppdefine_c.c";
+
+routine clink dir_cppdef_value(): int32; external;
+
+begin
+  println("from C: DIR_CPPDEF_V = {}", dir_cppdef_value());
+  println("from the emitted C++: DIR_CPPDEF_V = {}", cpp("DIR_CPPDEF_V"));
+  println("a quoted macro: {} ({} characters)", cpp("DIR_CPPDEF_Q"), cpp("sizeof(DIR_CPPDEF_Q) - 1"));
+end.

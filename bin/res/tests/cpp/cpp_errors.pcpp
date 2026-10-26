@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  cpp_errors.pcpp - C++ integration compliance: C++ mistakes are clang's
+
+  A mistake in mixed C++ is reported by clang (ZB0016), at the .pcpp line
+  and column it is written on (BNF.md sec 10, DESIGN.md sec 5): in a C++
+  declaration and inside a cpp("...") expression alike. Both are in one
+  translation unit, so one build reports both.
+*******************************************************************************/
+
+module exe cpp_errors;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+int Broken() { return GMissing; } // ERROR ZB0016@23: use of undeclared identifier 'GMissing'
+
+begin
+  println("{}", cpp("GAlsoMissing + 1")); // ERROR ZB0016@22: use of undeclared identifier 'GAlsoMissing'
+end.

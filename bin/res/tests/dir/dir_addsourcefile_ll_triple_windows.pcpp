@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addsourcefile_ll_triple_windows.pcpp - Directive: @addsourcefile of LLVM IR for another target
+
+  On Windows, fixtures\dir_addsourcefile_ll_linux.ll names the Linux triple: clang
+  overrides it and warns. The warning has no location of its own; it is
+  reported at the @addsourcefile naming the file (the marked line).
+*******************************************************************************/
+
+module exe dir_addsourcefile_ll_triple_windows;
+
+/*
+  @@test
+    kind build
+    targets x86_64-windows-gnu
+  @@end
+*/
+
+@addsourcefile "$P:res/tests/dir/fixtures/dir_addsourcefile_ll_linux.ll"; // WARN ZB0016@16
+
+begin
+end.

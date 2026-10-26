@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_splices_err_space.pcpp - Lexical: a blank after a splice's backslash
+
+  Break step of lex_splices: blanks between a backslash and its newline
+  still make a splice (as clang does), LX0201, a warning after the
+  backslash: LVa + lue still joins and the module builds. The marked line
+  ends in the splice, so its marker is a block-comment marker.
+  Its bytes are part of the test (see above): edit it with an editor
+  that keeps them as they are.
+*******************************************************************************/
+
+module exe lex_splices_err_space;
+
+/*
+  @@test
+    kind build
+  @@end
+*/
+
+var
+  LN: int32;
+  LValue: int32 = 2;
+
+begin
+  LN := /* // WARN LX0201@44 // */ 1 + LVa\ 
+lue;
+end.

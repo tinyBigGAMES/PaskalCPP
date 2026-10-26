@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_alias_err_module.pcpp - Type: an alias of an imported module
+
+  Break step of type_alias: a module is not a type (SM0013).
+*******************************************************************************/
+
+module exe type_alias_err_module;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/type/fixtures";
+
+import type_alias_unit;
+
+type
+  TA = type_alias_unit; // ERROR SM0013@8: 'type_alias_unit' is not a type
+
+begin
+end.

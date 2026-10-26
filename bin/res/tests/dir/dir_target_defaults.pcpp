@@ -1,0 +1,44 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_target_defaults.pcpp - pcpp: --defaults: the source's @target wins
+
+  A cli test: pcpp runs itself with the args (in the suite's output root,
+  -o "$P:output" so the build lands there), on the fixture named; its
+  output and exit code are the check. A default -t never replaces a @target: the build stays Windows.
+*******************************************************************************/
+
+module exe dir_target_defaults;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner <DIR>/fixtures/dir_cli_target.pcpp --defaults -t x86_64-linux-gnu -o $P:output"
+    exitcode 0
+    expect
+    | Compiling <DIR>/fixtures/dir_cli_target.pcpp
+    | [HINT] <DIR>/fixtures/dir_cli_target.pcpp(27,1) SM0108: dir_cli_target: built for Windows
+    | Target platform: x86_64-windows-gnu
+    | Optimize level: debug
+    | Subsystem: Console
+    | Saving build file...
+    | Building dir_cli_target...
+    | Build succeeded.
+    | Output: <OUT>/bin/dir_cli_target.exe
+  @@end
+*/
+
+begin
+end.

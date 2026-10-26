@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addincludepath_err_nopath.pcpp - Directive: a header included with no folder for it
+
+  Break step of dir_addincludepath: dir_addincludepath.h (only in fixtures\)
+  included without @addincludepath: no folder searched holds it (clang's
+  error, ZB0016, at the #include line).
+*******************************************************************************/
+
+module exe dir_addincludepath_err_nopath;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+#include "dir_addincludepath.h" /* // ERROR ZB0016@10: file not found */
+
+begin
+end.

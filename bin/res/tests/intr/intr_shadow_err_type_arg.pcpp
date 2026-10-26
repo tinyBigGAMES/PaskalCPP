@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_shadow_err_type_arg.pcpp - Intr: shadow, type arg
+
+  Break step of intr_shadow: a routine named size called with a type (SM0411).
+*******************************************************************************/
+
+module exe intr_shadow_err_type_arg;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine size(AN: int32): int32;
+begin
+  return AN;
+end;
+
+var
+  LN: int32;
+
+begin
+  LN := size(int32); // ERROR SM0411@14: 'size' takes no type argument
+end.

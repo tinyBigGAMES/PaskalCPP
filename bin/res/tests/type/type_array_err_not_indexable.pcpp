@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_array_err_not_indexable.pcpp - Type: array, not indexable
+
+  Break step of type_array: only an array, a string or a typed pointer is
+  indexed (SM0260).
+*******************************************************************************/
+
+module exe type_array_err_not_indexable;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int32;
+  LI: int32;
+
+begin
+  LI := LN[0]; // ERROR SM0260@9: 'int32' cannot be indexed
+end.

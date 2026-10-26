@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_exported_err_var_block.pcpp - Decl: exported, var block
+
+  Break step of decl_exported: a var of the block right after
+  decl_exported_unit's exported one: not exported.
+*******************************************************************************/
+
+module exe decl_exported_err_var_block;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/decl/fixtures";
+
+import decl_exported_unit;
+
+begin
+  println("{}", decl_exported_unit.GStep); // ERROR SM0006@17
+end.

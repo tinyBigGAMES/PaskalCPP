@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_kinds_dll.pcpp - Module: the dll kind
+
+  module dll emits a shared library (BNF.md sec 1): no begin body, the
+  module ends with end. alone. Loading and calling a dll is the dll area's.
+*******************************************************************************/
+
+module dll mod_kinds_dll;
+
+/*
+  @@test
+    kind build
+  @@end
+*/
+
+exported routine clink mod_kinds_dll_twice(AX: int32): int32;
+begin
+  return AX * 2;
+end;
+
+end.

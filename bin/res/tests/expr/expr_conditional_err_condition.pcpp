@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_conditional_err_condition.pcpp - Expr: conditional, condition
+
+  Break step of expr_conditional: an int32 condition (SM0263).
+*******************************************************************************/
+
+module exe expr_conditional_err_condition;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int32;
+
+begin
+  LN := 1;
+  LN := LN ? 1 : 2; // ERROR SM0263@9: a condition is bool
+end.

@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_copy_err_record.pcpp - Type: object copy, record
+
+  Break step of type_object_copy: a record holding an object: a record is
+  plain data (SM0357).
+*******************************************************************************/
+
+module exe type_object_copy_err_record;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    N: int32;
+  end;
+  TR = record
+    A: TA; // ERROR SM0357@8: field 'A': a record or an overlay holds no object
+  end;
+
+begin
+end.

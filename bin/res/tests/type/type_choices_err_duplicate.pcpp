@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_choices_err_duplicate.pcpp - Type: one value name twice in a list
+
+  Break step of type_choices: a value name is used once in its list
+  (SM0004).
+*******************************************************************************/
+
+module exe type_choices_err_duplicate;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TC = choices(cA, cB, cA); // ERROR SM0004@24: 'cA' is already declared in this scope
+
+begin
+end.

@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addlibrarypath_err_nopath.pcpp - Directive: a library linked by name with no folder for it
+
+  Break step of dir_addlibrarypath: no @addlibrarypath names a folder that
+  holds dir_linklibrary_lib, so the linker cannot find it; the report points
+  at the @linklibrary naming it.
+*******************************************************************************/
+
+module exe dir_addlibrarypath_err_nopath;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@linklibrary "dir_linklibrary_lib"; // ERROR ZB0016@14: unable to find
+
+routine clink dir_linklibrary_add(AA: int32; AB: int32): int32; external;
+
+begin
+  println("dir_linklibrary_add(2, 3) = {}", dir_linklibrary_add(2, 3));
+end.

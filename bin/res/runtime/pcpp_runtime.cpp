@@ -56,6 +56,24 @@ namespace pcpp {
 void detail_report_leaks() noexcept;
 #endif
 
+// The runtime's C++ exception: a raise. It owns its text, which travels with
+// the throw (R21). It is ONE type across every module of a program, so a
+// raise inside a dll / shared object reaches a guard in the exe: outside the
+// anonymous namespace (a type there is a different type in each module), and
+// on ELF with default visibility (a dll's TUs build with -fvisibility=hidden)
+// so the exe and every shared object share one typeinfo. Windows matches a
+// catch by the typeinfo's name and needs no attribute
+#if defined(_WIN32)
+    #define PCPP_SHARED_TYPE
+#else
+    #define PCPP_SHARED_TYPE __attribute__((visibility("default")))
+#endif
+struct PCPP_SHARED_TYPE RuntimeException {
+    std::int32_t Code;
+    std::string Text;
+};
+#undef PCPP_SHARED_TYPE
+
 namespace {
 
 #if defined(PCPP_DEBUG) && !defined(PCPP_BUILD_DLL)
@@ -81,12 +99,8 @@ struct LeakReporter {
  * Exception state
  ******************************************************************************/
 
-// The runtime's C++ exception: a raise. It owns its text, which travels with
-// the throw (R21)
-struct RuntimeException {
-    std::int32_t Code;
-    std::string Text;
-};
+// RuntimeException (the raise's C++ type) is declared above the anonymous
+// namespace: it is one type across modules
 
 // The last exception a guard of this thread caught (its code; the text and
 // the C++ exception object itself, nullptr for a hardware fault, so

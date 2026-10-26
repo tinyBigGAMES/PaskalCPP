@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_import_err_case_lookup.pcpp - Module: an import in the wrong case
+
+  Break step of mod_import: PaskalCPP is case-sensitive, so a unit is found
+  only by its file's exact name. The module path holds mod_kinds_unit.pcpp;
+  Mod_kinds_unit is another name, and no folder holds Mod_kinds_unit.pcpp.
+  The same on both targets (Windows finds files whatever their case; the
+  import lookup does not).
+*******************************************************************************/
+
+module exe mod_import_err_case_lookup;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import Mod_kinds_unit; // ERROR PR0012@8
+
+begin
+end.

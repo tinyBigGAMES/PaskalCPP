@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_size_err_value.pcpp - Intr: size, value
+
+  Break step of intr_size: size of a variable (SM0410).
+*******************************************************************************/
+
+module exe intr_size_err_value;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int64;
+
+begin
+  LN := 1;
+  LN := size(LN); // ERROR SM0410@14: size needs a type, got the value 'LN'
+end.

@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_return_err_finally.pcpp - Stmt: return, finally
+
+  Break step of stmt_return: return inside finally (SM0609).
+*******************************************************************************/
+
+module exe stmt_return_err_finally;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine F(): int32;
+begin
+  guard
+    println("body");
+  finally
+    return 1; // ERROR SM0609@5: return cannot jump out of finally
+  end;
+  return 0;
+end;
+
+begin
+end.

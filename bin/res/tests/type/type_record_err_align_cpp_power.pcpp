@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_err_align_cpp_power.pcpp - Type: record, align cpp power
+
+  Break step of type_record: align(cpp("3")): a value written in C++ is a
+  power of two too (SM0310).
+*******************************************************************************/
+
+module exe type_record_err_align_cpp_power;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TR = record align(cpp("3")) // ERROR SM0310@21: align 3 is not a power of two
+    G: int32;
+  end;
+
+var
+  V: TR;
+
+begin
+  V.G := 1;
+end.

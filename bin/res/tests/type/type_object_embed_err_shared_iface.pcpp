@@ -1,0 +1,52 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_embed_err_shared_iface.pcpp - Type: object embed, shared iface
+
+  Break step of type_object_embed: an interface method two embeds have:
+  declare it (SM0370).
+*******************************************************************************/
+
+module exe type_object_embed_err_shared_iface;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  INamed = interface
+    method Name(): string;
+  end;
+  TA = object
+    method Name(): string;
+    begin
+      return "a";
+    end;
+  end;
+  TB = object
+    method Name(): string;
+    begin
+      return "b";
+    end;
+  end;
+  TBoth = object implements INamed // ERROR SM0370@29: two embeds, 'A' and 'B', have it
+    embed A: TA;
+    embed B: TB;
+  end;
+
+begin
+end.

@@ -1,0 +1,66 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_linklibrary.pcpp - Directive: @linklibrary (Windows)
+
+  @linklibrary "<name>"; links a library by its NAME (m, user32), as the
+  system linker finds it; it is never a path (BNF.md sec 2). A path
+  separator, a drive colon or a library file's suffix (.a .lib .so .dll) is
+  an error. @linklibrary may be given more than once, the same name twice is
+  harmless, and an imported unit's @linklibrary adds to the one build. On
+  Windows this program links winmm (a system library zig does not link by
+  default: without it timeGetTime fails to link) twice and calls it. Its unit
+  fixtures\dir_linklibrary_unit names the dep dir_linklibrary_lib with its own
+  @linklibrary and @addlibrarypath; the program calls it through the unit.
+  Linux has no system library to show here (glibc's m, dl, pthread, rt and
+  util are part of libc, linked with or without their name), so each target
+  has its own file: this one is Windows, dir_linklibrary_linux is Linux.
+*******************************************************************************/
+
+module exe dir_linklibrary;
+
+/*
+  @@test
+    kind run
+    targets x86_64-windows-gnu
+    deps dir_linklibrary_lib
+    expect
+    | winmm: timeGetTime() linked and called
+    | dir_linklibrary_add(2, 3) through the unit = 5
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@ifndef TARGET_X86_64_LINUX_GNU
+@linklibrary "winmm";
+@linklibrary "winmm";
+@endif
+@addmodulepath "$P:res/tests/dir/fixtures";
+import dir_linklibrary_unit;
+
+@ifndef TARGET_X86_64_LINUX_GNU
+routine clink timeGetTime(): uint32; external;
+
+var
+  GTicks: uint32;
+@endif
+
+begin
+@ifndef TARGET_X86_64_LINUX_GNU
+  GTicks := timeGetTime();
+  println("winmm: timeGetTime() linked and called");
+@endif
+  println("dir_linklibrary_add(2, 3) through the unit = {}", dir_linklibrary_unit.Add(2, 3));
+end.

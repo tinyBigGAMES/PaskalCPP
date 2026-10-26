@@ -1,0 +1,44 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_record_literal_err_cpp_parent.pcpp - Expr: record literal, cpp parent
+
+  Break step of expr_record_literal: a record literal of a record with a C++
+  parent (SM0413).
+*******************************************************************************/
+
+module exe expr_record_literal_err_cpp_parent;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+struct CPoint {
+  int x;
+};
+
+type
+  TC = record(CPoint)
+    Y: int32;
+  end;
+
+var
+  LC: TC;
+
+begin
+  LC := TC(Y: 1); // ERROR SM0413@9: 'TC' is not one
+end.

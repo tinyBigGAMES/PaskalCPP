@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_verinfo_err_range.pcpp - Directive: @vimajor past 65535
+
+  Break step of dir_verinfo: a version part is 16 bits. Windows only: on
+  Linux @addverinfo on is a warning of its own (dir_verinfo_err_linux).
+*******************************************************************************/
+
+module exe dir_verinfo_err_range;
+
+/*
+  @@test
+    kind error
+    targets x86_64-windows-gnu
+  @@end
+*/
+
+@addverinfo on;
+@vimajor 70000; // ERROR SM0101@10: @vimajor takes 0..65535, got 70000
+
+begin
+end.

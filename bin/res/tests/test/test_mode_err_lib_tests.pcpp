@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  test_mode_err_lib_tests.pcpp - Test: mode, lib tests
+
+  Break step of test_mode: a test block in a lib module never runs (SM0113,
+  a warning: the lib still builds).
+*******************************************************************************/
+
+module lib test_mode_err_lib_tests;
+
+/*
+  @@test
+    kind build
+  @@end
+*/
+
+exported routine Half(AN: int32): int32;
+begin
+  return AN div 2;
+end;
+
+end.
+
+test "never runs" // WARN SM0113@1: test blocks of a dll or lib module never run
+begin
+  testAssertEqualInt(2, Half(4));
+end;

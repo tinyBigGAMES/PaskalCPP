@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  suite_cli_unknown.pcpp - Test suite: a cli test (pcpp run itself)
+
+  A cli test runs pcpp with its args, in the suite's output root, once, checks
+  pcpp's output and exit code (its colours taken out). --no-banner leaves out
+  the banner, whose version changes every release; it is read anywhere on
+  the line, here after the mistake. An unknown option is a usage error:
+  exit 2 and the hint to run pcpp -h. This file itself is never compiled.
+*******************************************************************************/
+
+module exe suite_cli_unknown;
+
+/*
+  @@test
+    kind cli
+    args "--bogus --no-banner"
+    exitcode 2
+    expect
+    | Error: Unknown flag: --bogus
+    |
+    | Run pcpp -h to see available options
+  @@end
+*/
+
+begin
+end.

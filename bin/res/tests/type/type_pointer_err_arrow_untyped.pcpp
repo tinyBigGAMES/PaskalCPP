@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_pointer_err_arrow_untyped.pcpp - Type: -> on the untyped ptr
+
+  Break step of type_pointer: nor is the untyped ptr a way to a field, it
+  points at no record (SM0250).
+*******************************************************************************/
+
+module exe type_pointer_err_arrow_untyped;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LU: ptr;
+  LX: int32;
+
+begin
+  LX := LU->X; // ERROR SM0250@9: operator '->' does not take 'ptr'
+end.

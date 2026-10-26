@@ -1,0 +1,166 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_pointer.pcpp - Type: pointer types
+
+  A pointer type (BNF.md sec 4: pointer type) is ptr to T, ptr to const T
+  (what it points to is read only through it) or the untyped ptr:
+  - address of gives a pointer to a variable, ^ reads and writes what it
+    points to; Swap takes two pointers and writes through both;
+  - a ptr to T converts to a ptr to const T and to the untyped ptr; a pointer
+    cast, ptr to T(x), goes back from ptr, from an integer of pointer width
+    (uint64) and to one (uint64(P)); a typed pointer is cast to another
+    typed pointer, by ptr to T(x) and through a pointer type's name
+    (TByteRef(LP)): both read LA's first byte (7, both targets are
+    little-endian);
+  - a ptr to ptr to int32 (LPP^^), a ptr to an array (LAQ^[3]), a ptr to a
+    record (LR^.X and LR->Y), a pointer alias (TPointRef) returned by a
+    routine, nil compared;
+  - a typed pointer is indexed (AP[LI], LE[1]) and moved by + (Advance,
+    through a var parameter); a ptr to const int32 parameter reads only;
+  - a ptr to const char holds a string literal and prints its text (one is
+    also cast to it: ptr to const char("cast"));
+  - size gives a pointer's bytes.
+  A forward type behind ptr to is the decl area's; a record extension's
+  pointer converting to its base's, type_record_ext's; int32*,
+  type_builtin_err_star's.
+*******************************************************************************/
+
+module exe type_pointer;
+
+/*
+  @@test
+    kind run
+    expect
+    | deref 10 10
+    | swap 2 10
+    | const 2
+    | untyped same true
+    | ptr to ptr 7 7
+    | array total 10
+    | array next 2 3 step 4
+    | round trip 2 same true
+    | ptr to array 4 4
+    | record 5 6 11
+    | nil true false
+    | text pointer cast
+    | cast back 7
+    | bytes 7 7
+    | size 8 8
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+type
+  TPoint = record
+    X: int32;
+    Y: int32;
+  end;
+  TPointRef = ptr to TPoint;
+  TByteRef = ptr to uint8;
+  TQuad = array[0..3] of int32;
+
+routine Swap(AA: ptr to int32; AB: ptr to int32);
+var
+  LT: int32;
+begin
+  LT := AA^;
+  AA^ := AB^;
+  AB^ := LT;
+end;
+
+routine Total(AP: ptr to const int32; const AN: int32): int32;
+var
+  LI: int32;
+  LS: int32 = 0;
+begin
+  for LI := 0 to AN - 1 do
+    LS := LS + AP[LI];
+  end;
+  return LS;
+end;
+
+routine Advance(var AP: ptr to int32);
+begin
+  AP := AP + 1;
+end;
+
+routine Origin(): TPointRef;
+begin
+  return nil;
+end;
+
+var
+  LA: int32 = 1;
+  LB: int32 = 2;
+  LP: ptr to int32;
+  LC: ptr to const int32;
+  LU: ptr;
+  LPP: ptr to ptr to int32;
+  LQ: TQuad;
+  LE: ptr to int32;
+  LAddr: uint64;
+  LBack: ptr to int32;
+  LAQ: ptr to TQuad;
+  LPt: TPoint;
+  LR: TPointRef;
+  LText: ptr to const char;
+  LBytes: ptr to uint8;
+  LByteRef: TByteRef;
+
+begin
+  LP := address of LA;
+  LP^ := 10;
+  println("deref {} {}", LP^, LA);
+  Swap(address of LA, address of LB);
+  println("swap {} {}", LA, LB);
+  LC := LP;
+  println("const {}", LC^);
+  LU := LP;
+  println("untyped same {}", LU = LP);
+  LPP := address of LP;
+  LPP^^ := 7;
+  println("ptr to ptr {} {}", LPP^^, LA);
+  LQ[0] := 1;
+  LQ[1] := 2;
+  LQ[2] := 3;
+  LQ[3] := 4;
+  LE := address of LQ[0];
+  println("array total {}", Total(LE, 4));
+  Advance(LE);
+  println("array next {} {} step {}", LE^, LE[1], uint64(LE) - uint64(address of LQ[0]));
+  LAddr := uint64(LE);
+  LBack := ptr to int32(LAddr);
+  println("round trip {} same {}", LBack^, LBack = LE);
+  LAQ := address of LQ;
+  println("ptr to array {} {}", LAQ^[3], len(LAQ^));
+  LPt.X := 3;
+  LPt.Y := 4;
+  LR := address of LPt;
+  LR^.X := 5;
+  LR->Y := 6;
+  println("record {} {} {}", LPt.X, LPt.Y, LR^.X + LR->Y);
+  LR := Origin();
+  println("nil {} {}", LR = nil, LR <> nil);
+  LText := "pointer";
+  println("text {} {}", LText, ptr to const char("cast"));
+  LP := ptr to int32(LU);
+  println("cast back {}", LP^);
+  // A typed pointer to another typed pointer, by either spelling of the cast
+  LBytes := ptr to uint8(LP);
+  LByteRef := TByteRef(LP);
+  println("bytes {} {}", LBytes^, LByteRef^);
+  println("size {} {}", size(ptr to int32), size(ptr));
+end.

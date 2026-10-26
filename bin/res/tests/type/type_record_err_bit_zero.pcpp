@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_err_bit_zero.pcpp - Type: record, bit zero
+
+  Break step of type_record: uint8 : 0: a width is at least 1 (SM0315).
+*******************************************************************************/
+
+module exe type_record_err_bit_zero;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TR = record
+    B: uint8 : 0; // ERROR SM0315@16: bitfield width 0 outside 1..8
+  end;
+
+begin
+end.

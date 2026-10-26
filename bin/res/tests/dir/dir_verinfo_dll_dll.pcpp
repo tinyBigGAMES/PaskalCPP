@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_verinfo_dll_dll.pcpp - Directive fixture: the dll dir_verinfo_dll
+  reads: it stamps version info (a dep test: built in each consumer cell
+  before it, never tallied).
+*******************************************************************************/
+
+module dll dir_verinfo_dll_dll;
+
+/*
+  @@test
+    kind dep
+    targets x86_64-windows-gnu
+  @@end
+*/
+
+@addverinfo on;
+@vimajor 4;
+@viminor 5;
+@vipatch 6;
+@viproductname "PaskalCPP Compliance dll";
+@vifilename "dir_verinfo_dll_dll.dll";
+
+exported routine clink dir_verinfo_dll_value(): int32;
+begin
+  return 7;
+end;
+
+end.

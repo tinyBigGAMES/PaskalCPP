@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_target_err_mismatch.pcpp - Directive: a unit naming another target
+
+  Break step of dir_target: the imported unit
+  fixtures\dir_target_err_mismatch_unit names Linux while this main module
+  names Windows. Only the main module's @target applies; the unit's is
+  reported, at its marked line.
+*******************************************************************************/
+
+module exe dir_target_err_mismatch;
+
+/*
+  @@test
+    kind error
+    targets x86_64-windows-gnu
+  @@end
+*/
+
+@target "x86_64-pc-windows-gnu";
+@addmodulepath "$P:res/tests/dir/fixtures";
+import dir_target_err_mismatch_unit;
+
+begin
+end.

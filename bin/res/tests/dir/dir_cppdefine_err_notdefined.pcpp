@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_cppdefine_err_notdefined.pcpp - Directive: a C file's #error when a macro is missing
+
+  Break step of dir_cppdefine: DIR_CPPDEF_ON is not set, so
+  fixtures\dir_cppdefine_err_notdefined_c.c's #error fires (clang's error,
+  at the C file's own line and column: its marked line).
+*******************************************************************************/
+
+module exe dir_cppdefine_err_notdefined;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@cppdefine "DIR_CPPDEF_V" "7";
+@addsourcefile "$P:res/tests/dir/fixtures/dir_cppdefine_err_notdefined_c.c";
+
+begin
+end.

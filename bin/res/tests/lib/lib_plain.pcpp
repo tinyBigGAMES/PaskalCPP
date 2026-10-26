@@ -1,0 +1,95 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lib_plain.pcpp - Build kind: a program that links a lib that does not use the runtime
+
+  Links its dep lib_plain_lib by name (@linklibrary) from the folder the dep
+  is built in (@addlibrarypath), calls its routine, then looks from its own
+  folder (output\bin) at what the dep's build left: the library in
+  output\lib under the target's file name.
+*******************************************************************************/
+
+module exe lib_plain;
+
+/*
+  @@test
+    kind run
+    deps lib_plain_lib
+    expect
+    | lib_plain_lib_add(2, 3) = 5
+    | lib_plain_lib in output/lib: yes
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addlibrarypath "$P:output/lib";
+@linklibrary "lib_plain_lib";
+
+#include <filesystem>
+#include <string>
+#include <system_error>
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+// The output root: the parent of the folder this program's own file is in
+// (output\bin); empty when the program's path cannot be read
+static std::filesystem::path lib_test_root()
+{
+  std::error_code LError;
+  std::filesystem::path LSelf;
+#ifdef _WIN32
+  wchar_t LPath[MAX_PATH];
+  DWORD LLen = GetModuleFileNameW(nullptr, LPath, MAX_PATH);
+  if ((LLen == 0) || (LLen == MAX_PATH))
+    return {};
+  LSelf = std::filesystem::path(std::wstring(LPath, LLen));
+#else
+  LSelf = std::filesystem::read_symlink("/proc/self/exe", LError);
+  if (LError)
+    return {};
+#endif
+  return LSelf.parent_path().parent_path();
+}
+
+// 1 = the static library named AName is in <root>/lib under the target's
+// file name (AName.lib on Windows, libAName.a on Linux)
+static int lib_test_in_lib(const char* AName)
+{
+  std::error_code LError;
+#ifdef _WIN32
+  std::string LFile = std::string(AName) + ".lib";
+#else
+  std::string LFile = std::string("lib") + AName + ".a";
+#endif
+  return std::filesystem::is_regular_file(lib_test_root() / "lib" / LFile, LError) ? 1 : 0;
+}
+
+// 1 = the dep's library is in output\lib
+static int lib_plain_present()
+{
+  return lib_test_in_lib("lib_plain_lib");
+}
+
+routine clink lib_plain_lib_add(AA: int32; AB: int32): int32; external;
+
+begin
+  println("lib_plain_lib_add(2, 3) = {}", lib_plain_lib_add(2, 3));
+  if cpp("lib_plain_present()") = 1 then
+    println("lib_plain_lib in output/lib: yes");
+  else
+    println("lib_plain_lib in output/lib: no");
+  end;
+end.

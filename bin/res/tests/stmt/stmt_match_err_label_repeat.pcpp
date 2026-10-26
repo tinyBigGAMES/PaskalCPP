@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_match_err_label_repeat.pcpp - Stmt: match, label repeat
+
+  Break step of stmt_match: a label two arms hold (SM0605).
+*******************************************************************************/
+
+module exe stmt_match_err_label_repeat;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int32;
+
+begin
+  LN := 1;
+  match LN of
+    1: println("a");
+    2, 1: println("b"); // ERROR SM0605@8: repeats a label of the arm at line
+  end;
+end.

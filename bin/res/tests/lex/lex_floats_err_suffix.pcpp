@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_floats_err_suffix.pcpp - Lexical: a float suffix the bundled clang lacks
+
+  Break step of lex_floats: the C++23 float suffixes f32, f64, f128, their
+  capitals, bf16 and BF16 are not taken by the bundled clang, so they are
+  LX0005 (one stands for all here: 1.5f32).
+*******************************************************************************/
+
+module exe lex_floats_err_suffix;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LF: float64;
+
+begin
+  LF := 0.0;
+  LF := 1.5f32; // ERROR LX0005@9: Malformed numeric literal: 1.5f32
+end.

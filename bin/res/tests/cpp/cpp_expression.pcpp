@@ -1,0 +1,45 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  cpp_expression.pcpp - C++ integration compliance: cpp("...")
+
+  cpp("...") is a C++ expression written as a plain string (BNF.md sec 10),
+  emitted in place; a raw string, cpp(R"(...)"), may span lines and hold
+  quotes unescaped.
+*******************************************************************************/
+
+module exe cpp_expression;
+
+/*
+  @@test
+    kind run
+    expect
+    | abs 5
+    | raw 3
+    | lines 6
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+#include <cstdlib>
+#include <cstring>
+
+begin
+  println("abs {}", cpp("std::abs(-5)"));
+  println("raw {}", cpp(R"(std::strlen("abc"))"));
+  println("lines {}", cpp(R"(1 +
+    2 +
+    3)"));
+end.

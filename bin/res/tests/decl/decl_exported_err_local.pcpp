@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_exported_err_local.pcpp - Decl: exported, local
+
+  Break step of decl_exported: 'exported' among a routine's own declarations
+  (module level only; the block stays the routine's).
+*******************************************************************************/
+
+module exe decl_exported_err_local;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine Count();
+exported var // ERROR PR0057@1
+  LN: int32;
+begin
+end;
+
+begin
+end.

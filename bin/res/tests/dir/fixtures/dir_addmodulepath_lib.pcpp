@@ -1,0 +1,28 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addmodulepath_lib.pcpp - Directive fixture: a unit only fixtures\ holds,
+  found through @addmodulepath (dir_addmodulepath and dir_addmodulepath_unit
+  import it).
+*******************************************************************************/
+
+module unit dir_addmodulepath_lib;
+
+exported routine Value(): int32;
+begin
+  return 40;
+end;
+
+end.

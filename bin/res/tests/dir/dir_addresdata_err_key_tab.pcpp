@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addresdata_err_key_tab.pcpp - Directive: an @addresdata key holding a tab
+
+  Break step of dir_addresdata: a key holds no control characters.
+*******************************************************************************/
+
+module exe dir_addresdata_err_key_tab;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addresdata "a\tb" "$P:res/tests/dir/fixtures/dir_addresdata_hello.txt"; // ERROR SM0119@13
+
+begin
+end.

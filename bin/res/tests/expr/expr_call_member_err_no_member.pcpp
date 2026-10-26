@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_call_member_err_no_member.pcpp - Expr: call member, no member
+
+  Break step of expr_call_member: a member the record does not have (SM0009).
+*******************************************************************************/
+
+module exe expr_call_member_err_no_member;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TQ = record
+    N: int32;
+  end;
+
+var
+  LQ: TQ;
+
+begin
+  LQ.Z := 1; // ERROR SM0009@3: 'TQ' has no member 'Z'
+end.

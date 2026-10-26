@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_setlength_err_unsigned.pcpp - Intr: setlength, unsigned
+
+  Break step of intr_setlength: setlength given a uint64 length (SM0409).
+*******************************************************************************/
+
+module exe intr_setlength_err_unsigned;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LA: array of int32;
+  LN: uint64 = 3;
+
+begin
+  setlength(LA, LN); // ERROR SM0409@17: 'setlength' takes (dynamic array or string variable, int64)
+end.

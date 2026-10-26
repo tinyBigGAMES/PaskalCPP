@@ -1,0 +1,50 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_copy_err_parent.pcpp - Type: object copy, parent
+
+  Break step of type_object_copy: an object whose parent cannot be copied,
+  assigned: it cannot be copied either (SM0427).
+*******************************************************************************/
+
+module exe type_object_copy_err_parent;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TRes = object
+    Id: int32;
+    done;
+    begin
+    end;
+  end;
+  TKid = object(TRes)
+    K: int32;
+  end;
+
+routine Use();
+var
+  LA: TKid;
+  LB: TKid;
+begin
+  LA := LB; // ERROR SM0427@9: 'LB' would be copied here, and 'TKid' cannot be copied: pass it var / const, return it from a local
+end;
+
+begin
+end.

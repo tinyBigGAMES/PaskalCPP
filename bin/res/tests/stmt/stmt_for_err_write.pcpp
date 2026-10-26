@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_for_err_write.pcpp - Stmt: for, write
+
+  Break step of stmt_for: the body writes the iterator (SM0602).
+*******************************************************************************/
+
+module exe stmt_for_err_write;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LI: int32;
+
+begin
+  for LI := 1 to 3 do
+    LI := 5; // ERROR SM0602@5: the loop body cannot write it
+  end;
+end.

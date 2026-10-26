@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_array_err_length.pcpp - Type: array, length
+
+  Break step of type_array: two static arrays of other bounds are other types
+  (SM0200).
+*******************************************************************************/
+
+module exe type_array_err_length;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LS: array[0..2] of int32;
+  LT: array[0..3] of int32;
+
+begin
+  LS := LT; // ERROR SM0200@9: does not convert implicitly to
+end.

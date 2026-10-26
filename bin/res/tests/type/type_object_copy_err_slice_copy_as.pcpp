@@ -1,0 +1,48 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_copy_err_slice_copy_as.pcpp - Type: object copy, slice copy as
+
+  Break step of type_object_copy: the object an as gives copied by value: it
+  may be a descendant of the target (SM0428).
+*******************************************************************************/
+
+module exe type_object_copy_err_slice_copy_as;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    N: int32;
+    virtual method M();
+    begin
+    end;
+  end;
+  TB = object(TA)
+  end;
+
+routine Keep(var AA: TA);
+var
+  LB: TB;
+begin
+  LB := AA as TB; // ERROR SM0428@9: 'AA as TB' may hold a descendant of 'TB' (it is polymorphic): a copy keeps only its 'TB' part
+end;
+
+begin
+end.

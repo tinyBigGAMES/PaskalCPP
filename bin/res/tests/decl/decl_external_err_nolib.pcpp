@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_external_err_nolib.pcpp - Decl: external, nolib
+
+  Break step of decl_external: a library the linker cannot find (no such
+  library anywhere).
+*******************************************************************************/
+
+module exe decl_external_err_nolib;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine clink decl_external_none(): int32; external "decl_external_nolib"; // ERROR ZB0016@53: decl_external_nolib
+
+begin
+  println("{}", decl_external_none());
+end.

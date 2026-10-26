@@ -1,0 +1,48 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_cpp_err_virtual_override.pcpp - Type: object cpp, virtual override
+
+  Break step of type_object_cpp: virtual (not override) on a method matching a
+  C++ virtual (SM0332).
+*******************************************************************************/
+
+module exe type_object_cpp_err_virtual_override;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+struct CShape {
+  virtual ~CShape() = default;
+  virtual int area() { return 0; }
+};
+
+type
+  TSquare = object(CShape)
+    S: int32;
+    virtual method area(): int32; // ERROR SM0332
+    begin
+      return self.S;
+    end;
+  end;
+
+var
+  LS: TSquare;
+begin
+  println("{}", LS.area());
+end.

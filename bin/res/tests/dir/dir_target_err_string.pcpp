@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_target_err_string.pcpp - Directive: @target with a word
+
+  Break step of dir_target: a plain string literal stands there; it is not
+  applied.
+*******************************************************************************/
+
+module exe dir_target_err_string;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@target windows; // ERROR CD0009@1: needs a plain string literal
+
+begin
+end.

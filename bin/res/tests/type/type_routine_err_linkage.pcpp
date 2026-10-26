@@ -1,0 +1,49 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_routine_err_linkage.pcpp - Type: a cpplink routine into a routine clink variable
+
+  Break step of type_routine: clink is its own type (SM0200).
+*******************************************************************************/
+
+module exe type_routine_err_linkage;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TOps = record
+    F: routine(AN: int32): int32;
+  end;
+
+routine Double(AN: int32): int32;
+begin
+  return AN * 2;
+end;
+
+routine Wrong(AN: int64): int32;
+begin
+  return 0;
+end;
+
+var
+  LC: routine clink(AN: int32): int32;
+
+begin
+  LC := Double; // ERROR SM0200@9: does not convert implicitly
+end.

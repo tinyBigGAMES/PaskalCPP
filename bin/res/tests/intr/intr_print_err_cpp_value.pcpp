@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_print_err_cpp_value.pcpp - Intr: print, cpp value
+
+  Break step of intr_print: a C++ value with no formatter printed (SM0425, the
+  emitted check).
+*******************************************************************************/
+
+module exe intr_print_err_cpp_value;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+struct CNo {
+  int x;
+};
+
+var
+  LV: CNo;
+
+begin
+  println("{}", LV); // ERROR SM0425@17
+end.

@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_builtin_err_ref.pcpp - Type: int32& is a C++ reference
+
+  Break step of type_builtin: pass it as a var or const parameter.
+*******************************************************************************/
+
+module exe type_builtin_err_ref;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine Show(AN: int32&); // ERROR PR0027@23
+begin
+end;
+
+begin
+end.

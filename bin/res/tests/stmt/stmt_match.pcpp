@@ -1,0 +1,111 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_match.pcpp - Statement: match
+
+  match S of label[, label]: ...; [else ...] end; (BNF.md sec 5): S is an
+  integer, char, wchar or a choice; a label is a constant or a range a..b,
+  an arm holds a list of labels; else takes every other value. A match on a
+  choice that names every value needs no else. leave ends the match.
+*******************************************************************************/
+
+module exe stmt_match;
+
+/*
+  @@test
+    kind run
+    expect
+    | 1 one
+    | 3 two or three
+    | 5 four to six
+    | 9 other
+    | q letter
+    | 7 digit
+    | k wide letter
+    | green
+    | left before after
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+type
+  TColor = choices(cRed, cGreen, cBlue);
+
+routine Name(AN: int32): string;
+var
+  LR: string;
+begin
+  match AN of
+    1: LR := "one";
+    2, 3: LR := "two or three";
+    4..6: LR := "four to six";
+  else
+    LR := "other";
+  end;
+  return LR;
+end;
+
+routine Kind(AC: char): string;
+var
+  LR: string;
+begin
+  match AC of
+    'a'..'z': LR := "letter";
+    '0'..'9': LR := "digit";
+  else
+    LR := "other";
+  end;
+  return LR;
+end;
+
+routine WideKind(AW: wchar): string;
+var
+  LR: string;
+begin
+  match AW of
+    L'a'..L'z': LR := "wide letter";
+  else
+    LR := "wide other";
+  end;
+  return LR;
+end;
+
+var
+  LK: TColor;
+  LN: int32;
+
+begin
+  println("1 {}", Name(1));
+  println("3 {}", Name(3));
+  println("5 {}", Name(5));
+  println("9 {}", Name(9));
+  println("q {}", Kind('q'));
+  println("7 {}", Kind('7'));
+  println("k {}", WideKind(L'k'));
+  LK := TColor.cGreen;
+  match LK of
+    TColor.cRed: println("red");
+    TColor.cGreen: println("green");
+    TColor.cBlue: println("blue");
+  end;
+  LN := 1;
+  print("left before");
+  match LN of
+    1:
+      leave;
+      println(" never");
+  end;
+  println(" after");
+end.

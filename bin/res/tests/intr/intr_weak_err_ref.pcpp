@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_weak_err_ref.pcpp - Intr: weak, ref
+
+  Break step of intr_weak: alive of a ref, not a weak (SM0409).
+*******************************************************************************/
+
+module exe intr_weak_err_ref;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TThing = object
+    N: int32;
+  end;
+
+var
+  LR: ref TThing;
+
+begin
+  println("{}", alive(LR)); // ERROR SM0409@23: 'alive' takes
+end.

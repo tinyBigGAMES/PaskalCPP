@@ -1,0 +1,120 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_var.pcpp - Declaration: var blocks and var declarations
+
+  var name: type [= value]; [external;] (BNF.md sec 3). A var block holds any
+  number of declarations; a module, a routine body and the main block may
+  hold several. An initializer is any expression of names declared before
+  it (decl_scope), converted only when no value can be lost (BNF.md sec 6:
+  integer widening, float32 -> float64, a constant that fits). A variable
+  without an initializer starts as its type's zero: 0, false, an empty
+  string, every record field and array element zero, nil for a pointer.
+  A routine's locals start over on every call; a module variable keeps its
+  value. An external variable binds the C symbol of its name, at module
+  level only, with no initializer: decl\fixtures\decl_var_c.c defines
+  decl_var_counter, and a change made here is what C reads back.
+*******************************************************************************/
+
+module exe decl_var;
+
+/*
+  @@test
+    kind run
+    expect
+    | GCount = 3, GDouble = 6
+    | GSmall = 100, GByte = 255, GWide = 3
+    | GHalf = 1.5, GReal = 1.5
+    | GName = PaskalCPP, len(GName) = 9
+    | GZero = 0, GZeroReal = 0, GFlag = false, len(GText) = 0
+    | GPoint = (0, 0), GList = [0, 0, 0]
+    | GPtr = nil: true
+    | Fresh() = 1, Fresh() = 1
+    | GCount = 5
+    | Locals(4) = 9
+    | GCount = 6
+    | decl_var_counter = 41
+    | decl_var_read() = 42
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addsourcefile "$P:res/tests/decl/fixtures/decl_var_c.c";
+
+type
+  TPoint = record
+    X: int32;
+    Y: int32;
+  end;
+
+var
+  GCount: int32 = 3;
+  GDouble: int32 = GCount * 2;
+  GSmall: int8 = 100;
+  GByte: uint8 = 255;
+  GWide: int64 = GCount;
+  GHalf: float32 = 1.5;
+  GReal: float64 = GHalf;
+  GName: string = "PaskalCPP";
+
+var
+  GZero: int32;
+  GZeroReal: float64;
+  GFlag: bool;
+  GText: string;
+  GPoint: TPoint;
+  GList: array[0..2] of int32;
+  GPtr: ptr to int32;
+
+var
+  decl_var_counter: int32; external;
+
+routine clink decl_var_read(): int32; external;
+
+routine Fresh(): int32;
+var
+  LCalls: int32;
+begin
+  // A local starts at zero on every call; the module's GCount keeps counting
+  LCalls := LCalls + 1;
+  GCount := GCount + 1;
+  return LCalls;
+end;
+
+routine Locals(AN: int32): int32;
+var
+  LTwice: int32 = AN * 2;
+var
+  LMore: int32 = LTwice + Fresh();
+begin
+  return LMore;
+end;
+
+begin
+  println("GCount = {}, GDouble = {}", GCount, GDouble);
+  println("GSmall = {}, GByte = {}, GWide = {}", GSmall, GByte, GWide);
+  println("GHalf = {}, GReal = {}", GHalf, GReal);
+  println("GName = {}, len(GName) = {}", GName, len(GName));
+  println("GZero = {}, GZeroReal = {}, GFlag = {}, len(GText) = {}", GZero, GZeroReal, GFlag, len(GText));
+  println("GPoint = ({}, {}), GList = [{}, {}, {}]", GPoint.X, GPoint.Y, GList[0], GList[1], GList[2]);
+  println("GPtr = nil: {}", GPtr = nil);
+  println("Fresh() = {}, Fresh() = {}", Fresh(), Fresh());
+  println("GCount = {}", GCount);
+  println("Locals(4) = {}", Locals(4));
+  println("GCount = {}", GCount);
+  println("decl_var_counter = {}", decl_var_counter);
+  decl_var_counter := decl_var_counter + 1;
+  println("decl_var_read() = {}", decl_var_read());
+end.

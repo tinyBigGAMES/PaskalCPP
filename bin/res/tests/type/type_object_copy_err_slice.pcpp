@@ -1,0 +1,54 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_copy_err_slice.pcpp - Type: object copy, slice
+
+  Break step of type_object_copy: a polymorphic object passed by value as its
+  parent: it would be cut down (SM0428).
+*******************************************************************************/
+
+module exe type_object_copy_err_slice;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    virtual method M();
+    begin
+    end;
+  end;
+  TB = object(TA)
+    override method M();
+    begin
+    end;
+  end;
+
+routine Take(AA: TA);
+begin
+end;
+
+routine Use();
+var
+  LB: TB;
+begin
+  Take(LB); // ERROR SM0428@8: 'TB' would be cut down to its 'TA' part here
+end;
+
+begin
+end.

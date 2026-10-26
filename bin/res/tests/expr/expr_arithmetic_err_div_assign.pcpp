@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_arithmetic_err_div_assign.pcpp - Expr: arithmetic, div assign
+
+  Break step of expr_arithmetic: /= on an int32 (SM0250): / is real division,
+  and its float64 result never goes back into an integer; write LA := LA div
+  2.
+*******************************************************************************/
+
+module exe expr_arithmetic_err_div_assign;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LA: int32 = 7;
+
+begin
+  LA /= 2; // ERROR SM0250@3: operator '/=' does not take 'int32' and 'int32'
+end.

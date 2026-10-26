@@ -1,0 +1,44 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_copy_err_copy_parent.pcpp - Type: object copy, copy parent
+
+  Break step of type_object_copy: a copy whose parent cannot be copied: the
+  parent part is copied by the parent's copy (SM0355).
+*******************************************************************************/
+
+module exe type_object_copy_err_copy_parent;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TRes = object
+    Id: int32;
+    done;
+    begin
+    end;
+  end;
+  TKid = object(TRes) // ERROR SM0355@17: 'TKid' cannot copy its parent part: 'TRes' cannot be copied
+    copy(const ASource: TKid);
+    begin
+    end;
+  end;
+
+begin
+end.

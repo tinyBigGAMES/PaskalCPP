@@ -1,0 +1,44 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_splices_blanks.pcpp - Lexical: blanks after a backslash where no splice is read
+
+  lex_splices_err_space's warning has two places it does not go: inside
+  a block comment's body (a splice there changes nothing) and inside a
+  raw string (never spliced: the backslash, the blank and the newline
+  stay its text). So this module has a backslash and a blank before a
+  newline in both and builds with no report.
+  Its bytes are part of the test (see above): edit it with an editor
+  that keeps them as they are.
+*******************************************************************************/
+
+module exe lex_splices_blanks;
+
+/*
+  @@test
+    kind run
+    expect
+    | a\
+    | b
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+begin
+  /* a block comment \  
+     goes on */
+  println("{}", R"(a\ 
+b)");
+end.

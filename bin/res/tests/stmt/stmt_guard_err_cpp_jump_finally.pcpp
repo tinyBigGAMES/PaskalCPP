@@ -1,0 +1,44 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_guard_err_cpp_jump_finally.pcpp - Stmt: guard, cpp jump finally
+
+  Break step of stmt_guard: a C++ break inside a finally body leaves only its
+  hidden function (SM0614).
+*******************************************************************************/
+
+module exe stmt_guard_err_cpp_jump_finally;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int32;
+
+begin
+  LN := 0;
+  while LN < 3 do
+    guard
+      LN += 1;
+    finally
+      cppstart source
+      break; // ERROR SM0614@7: leaves only the finally
+      cppend;
+    end;
+  end;
+end.

@@ -1,0 +1,58 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_gui.pcpp - Build kind: a gui exe (Windows)
+
+  @subsystem gui builds a Windows program with no console window (BNF.md
+  sec 2): the subsystem field of the exe's PE header says so. This program
+  reads that field from its own header and prints it, so the suite checks
+  the build without a person looking for a window (dir_subsystem_gui is the
+  one a person runs: it shows a message box).
+*******************************************************************************/
+
+module exe exe_gui;
+
+/*
+  @@test
+    kind run
+    targets x86_64-windows-gnu
+    subsystem gui
+    expect
+    | subsystem: gui
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@subsystem gui;
+
+#include <windows.h>
+
+// 2 = gui, 3 = console, as the subsystem field of this program's own PE
+// header holds it
+static int exe_gui_subsystem()
+{
+  const unsigned char* LBase = reinterpret_cast<const unsigned char*>(GetModuleHandleW(nullptr));
+  const IMAGE_DOS_HEADER* LDos = reinterpret_cast<const IMAGE_DOS_HEADER*>(LBase);
+  const IMAGE_NT_HEADERS* LNt = reinterpret_cast<const IMAGE_NT_HEADERS*>(LBase + LDos->e_lfanew);
+  return LNt->OptionalHeader.Subsystem;
+}
+
+begin
+  if cpp("exe_gui_subsystem()") = cpp("IMAGE_SUBSYSTEM_WINDOWS_GUI") then
+    println("subsystem: gui");
+  else
+    println("subsystem: not gui ({})", cpp("exe_gui_subsystem()"));
+  end;
+end.

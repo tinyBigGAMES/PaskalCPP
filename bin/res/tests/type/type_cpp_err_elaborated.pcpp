@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_cpp_err_elaborated.pcpp - Type: struct with no name after it
+
+  Break step of type_cpp: an elaborated key names a type (PR0036).
+*******************************************************************************/
+
+module exe type_cpp_err_elaborated;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+#include <vector>
+
+var
+  LT: struct; // ERROR PR0036@13: must be followed by a name
+
+begin
+end.

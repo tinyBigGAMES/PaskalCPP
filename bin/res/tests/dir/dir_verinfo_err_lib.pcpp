@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_verinfo_err_lib.pcpp - Directive: @addverinfo on in a lib
+
+  Break step of dir_verinfo: a static library takes no resources: a
+  warning, not used; the @vimajor after it is not reported a second time.
+*******************************************************************************/
+
+module lib dir_verinfo_err_lib;
+
+/*
+  @@test
+    kind build
+  @@end
+*/
+
+@addverinfo on; // WARN SM0103@1: does not apply to
+@vimajor 1;
+
+end.

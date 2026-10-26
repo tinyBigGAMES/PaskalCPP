@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  cpp_block_err_no_end.pcpp - Cpp: block, no end
+
+  Break step of cpp_block: a cppstart block that never ends (LX0013).
+*******************************************************************************/
+
+module exe cpp_block_err_no_end;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+cppstart source // ERROR LX0013@1: 'cppstart' block has no matching 'cppend'
+int GLost = 1;
+
+begin
+end.

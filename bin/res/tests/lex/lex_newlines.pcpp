@@ -1,0 +1,65 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_newlines.pcpp - Lexical: newlines
+
+  A newline is LF, CR LF or a lone CR (BNF.md sec 9), each one line: the
+  first three printlns stand on lines that end in CR LF, CR and LF, a splice
+  works over a CR LF and over a lone CR, a backslash before a CR LF inside
+  a string is a splice too (str + ing), CR CR LF is two newlines, a lone CR
+  ends a // comment, and a # line after a lone CR is first on its line and
+  ends at the next lone CR (LX_CR is 9, the CR not in it). C++'s __LINE__
+  (through cpp("...")) shows that each kind of newline counted as exactly
+  one line, so every later line keeps its number in diagnostics and the
+  emitted #line.
+  Its bytes are part of the test (see above): edit it with an editor
+  that keeps them as they are.
+*******************************************************************************/
+
+module exe lex_newlines;
+
+/*
+  @@test
+    kind run
+    expect
+    | crlf
+    | cr
+    | lf
+    | spliced over crlf 7
+    | spliced over cr 7
+    | string
+    | crcrlf
+    | after the comment
+    | hash 9
+    | line 70
+    | line 71
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+var
+  LValue: int32 = 7;#define LX_CR 9begin
+  println("crlf");
+  println("cr");  println("lf");
+  println("spliced over crlf {}", LVa\
+lue);
+  println("spliced over cr {}", LVa\lue);
+  println("str\
+ing");
+  println("crcrlf");
+  // a comment a lone CR ends  println("after the comment");
+  println("hash {}", LX_CR);
+  println("line {}", cpp("__LINE__"));  println("line {}", cpp("__LINE__"));
+end.

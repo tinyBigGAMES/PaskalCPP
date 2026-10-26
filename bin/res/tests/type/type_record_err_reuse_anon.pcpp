@@ -1,0 +1,45 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_err_reuse_anon.pcpp - Type: record, reuse anon
+
+  Break step of type_record: a field of an anonymous overlay reuses a
+  grandparent's field name (SM0309).
+*******************************************************************************/
+
+module exe type_record_err_reuse_anon;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBase = record
+    A: int32;
+  end;
+  TMid = record(TBase)
+    B: int32;
+  end;
+  TR = record(TMid)
+    overlay
+      A: int32; // ERROR SM0309@7: 'A' reuses a name of the parent chain
+      F: float32;
+    end;
+  end;
+
+begin
+end.

@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_builtin_err_rref.pcpp - Type: string&& is a C++ rvalue reference
+
+  Break step of type_builtin: pass it as a var or const parameter.
+*******************************************************************************/
+
+module exe type_builtin_err_rref;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine Show(AS: string&&); // ERROR PR0027@24
+begin
+end;
+
+begin
+end.

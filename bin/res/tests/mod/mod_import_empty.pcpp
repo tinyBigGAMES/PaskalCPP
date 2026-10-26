@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_import_empty.pcpp - Module: importing an empty unit
+
+  A unit may declare nothing; importing it builds (its emitted header and
+  source are empty modules).
+*******************************************************************************/
+
+module exe mod_import_empty;
+
+/*
+  @@test
+    kind run
+    expect
+    | imports an empty unit
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_import_empty_unit;
+
+begin
+  println("imports an empty unit");
+end.

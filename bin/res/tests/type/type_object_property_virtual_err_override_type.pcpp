@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property_virtual_err_override_type.pcpp - Type: object property virtual, override type
+
+  Break step of type_object_property_virtual: an override has its base's type
+  (SM0334).
+*******************************************************************************/
+
+module exe type_object_property_virtual_err_override_type;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBase = object
+    FA: int32;
+    virtual property A: int32 read FA; write FA;
+  end;
+  TKid = object(TBase)
+    FB: int64;
+    override property A: int64 read FB; // ERROR SM0334@23: must have the type and index of 'TBase.A'
+  end;
+
+begin
+end.

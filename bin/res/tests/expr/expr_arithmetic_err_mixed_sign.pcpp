@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_arithmetic_err_mixed_sign.pcpp - Expr: arithmetic, mixed sign
+
+  Break step of expr_arithmetic: an int32 added to a uint32 (SM0251 at the
+  int32): the sum is computed in uint32, so -1 would become 4294967295; write
+  int64(LA) + LU or uint32(LA) + LU.
+*******************************************************************************/
+
+module exe expr_arithmetic_err_mixed_sign;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LA: int32 = -1;
+  LU: uint32 = 1;
+  LR: int64;
+
+begin
+  LR := LA + LU; // ERROR SM0251@9: '+' would convert signed 'int32' to unsigned 'uint32'
+end.

@@ -1,0 +1,60 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_logical.pcpp - Expression: logical operators
+
+  and or not (and the C++ spellings && || !) take bool and give bool
+  (BNF.md sec 6); and / or evaluate their right side only when it decides
+  the value (short circuit). The C++ word operators (bitand, bitor, compl,
+  not_eq, and_eq, or_eq, xor_eq) are errors with the PaskalCPP form.
+*******************************************************************************/
+
+module exe expr_logical;
+
+/*
+  @@test
+    kind run
+    expect
+    | and false true
+    | or true false
+    | not false true
+    | symbols false true false
+    | short circuit done
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+routine Side(): bool;
+begin
+  println("never");
+  return true;
+end;
+
+var
+  LT: bool = true;
+  LF: bool = false;
+
+begin
+  println("and {} {}", LT and LF, LT and LT);
+  println("or {} {}", LT or LF, LF or LF);
+  println("not {} {}", not LT, not LF);
+  println("symbols {} {} {}", LT && LF, LT || LF, !LT);
+  if LF and Side() then
+    println("never");
+  end;
+  if LT or Side() then
+    println("short circuit done");
+  end;
+end.

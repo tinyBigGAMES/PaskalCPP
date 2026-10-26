@@ -1,0 +1,47 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_ext_err_self.pcpp - Type: record ext, self
+
+  Break step of type_record_ext: TShape names itself in its own field with no
+  forward: one report, the uses of the field report nothing more (SM0003).
+*******************************************************************************/
+
+module exe type_record_ext_err_self;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TShape = record
+    Sides: int32;
+    Area: routine(AS: ptr to TShape): int32; // ERROR SM0003@30: names itself
+  end;
+
+routine SquareArea(AS: ptr to TShape): int32;
+begin
+  return AS->Sides;
+end;
+
+var
+  LS: TShape;
+
+begin
+  LS.Area := SquareArea;
+  LS.Sides := LS.Area(address of LS);
+end.

@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_routine_err_method_blocks.pcpp - Decl: routine, method blocks
+
+  Break step of decl_routine: a const block before a method's begin: a method
+  body takes only var blocks.
+*******************************************************************************/
+
+module exe decl_routine_err_method_blocks;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    method M();
+    const // ERROR PR0025@5
+      CBad: int32 = 1;
+    begin
+    end;
+  end;
+
+begin
+end.

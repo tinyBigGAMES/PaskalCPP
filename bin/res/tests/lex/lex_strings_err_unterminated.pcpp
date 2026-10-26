@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_strings_err_unterminated.pcpp - Lexical: a string with no closing quote
+
+  Break step of lex_strings: a string literal ends at its line's end at the
+  latest, so one with no closing quote is LX0001, where it starts.
+*******************************************************************************/
+
+module exe lex_strings_err_unterminated;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  println("never closed); // ERROR LX0001@11: Unterminated string or character literal
+end.

@@ -1,0 +1,44 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dll_cli_run.pcpp - Build-kind compliance: pcpp -r on a dll
+
+  Only an exe runs: pcpp -r on a dll builds it, then the run is skipped
+  with a warning (CMP0002), exit 0. A cli test (pcpp itself, in the suite's
+  output root); this file itself is never compiled.
+*******************************************************************************/
+
+module exe dll_cli_run;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner <DIR>/dll_build_dll.pcpp -r -o $P:output"
+    exitcode 0
+    expect
+    | Compiling <DIR>/dll_build_dll.pcpp
+    | Target platform: x86_64-windows-gnu
+    | Optimize level: debug
+    | Subsystem: Console
+    | Saving build file...
+    | Building dll_build_dll...
+    | Build succeeded.
+    | Output: <OUT>/bin/dll_build_dll.dll
+    | [WARN] CMP0002: a dll cannot be run: auto-run skipped
+  @@end
+*/
+
+begin
+end.

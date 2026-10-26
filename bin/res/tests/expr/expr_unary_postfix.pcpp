@@ -1,0 +1,81 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_unary_postfix.pcpp - Expression: prefix and postfix operators
+
+  Prefix not - + address of and the C++ forms ! ~ * & ++ -- (BNF.md sec 6
+  prefix op), postfix ^ (the deref) ++ -- and member access through a
+  deref or ->; prefix operators chain (not not LB, **LPP, LPP^^). The
+  address of a value that is not stored (a call result, a sum) does not
+  exist: only a variable, a field, an element or a deref has one.
+*******************************************************************************/
+
+module exe expr_unary_postfix;
+
+/*
+  @@test
+    kind run
+    expect
+    | not false true
+    | minus plus -5 5
+    | deref 5
+    | through 6
+    | chain 6 6
+    | cpp forms 6 false
+    | compl -7
+    | inc 8
+    | dec 6
+    | member 5
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+type
+  TP = record
+    X: int32;
+  end;
+
+var
+  LN: int32 = 5;
+  LB: bool = true;
+  LP: ptr to int32;
+  LPP: ptr to ptr to int32;
+  LR: TP;
+  LQ: ptr to TP;
+
+begin
+  println("not {} {}", not LB, not not LB);
+  println("minus plus {} {}", -LN, +LN);
+  LP := address of LN;
+  println("deref {}", LP^);
+  LP^ := 6;
+  println("through {}", LN);
+  LPP := address of LP;
+  println("chain {} {}", LPP^^, **LPP);
+  LP := &LN;
+  println("cpp forms {} {}", *LP, !LB);
+  println("compl {}", ~LN);
+  ++LN;
+  LN++;
+  println("inc {}", LN);
+  --LN;
+  LN--;
+  println("dec {}", LN);
+  LR.X := 3;
+  LQ := address of LR;
+  LQ^.X += 1;
+  LQ->X += 1;
+  println("member {}", LR.X);
+end.

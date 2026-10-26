@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  test_block_err_const.pcpp - Test: block, const
+
+  Break step of test_block: a const block before a test's begin (PR0025).
+*******************************************************************************/
+
+module exe test_block_err_const;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+end.
+
+test "constants"
+const // ERROR PR0025@1: a test takes at most one var block before its begin, found 'const'
+  KN: int32 = 1;
+begin
+  testAssertEqualInt(1, KN);
+end;

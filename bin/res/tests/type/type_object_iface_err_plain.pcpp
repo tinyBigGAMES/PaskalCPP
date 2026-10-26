@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_iface_err_plain.pcpp - Type: object iface, plain
+
+  Break step of type_object_iface: a plain method fulfilling an interface
+  method: write virtual (SM0365).
+*******************************************************************************/
+
+module exe type_object_iface_err_plain;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  IShape = interface
+    method Area(): int32;
+  end;
+  TBox = object implements IShape // ERROR SM0365@28: write 'virtual method Area'
+    method Area(): int32;
+    begin
+      return 1;
+    end;
+  end;
+
+begin
+end.

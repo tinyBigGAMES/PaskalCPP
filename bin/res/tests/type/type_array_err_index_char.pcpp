@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_array_err_index_char.pcpp - Type: array, index char
+
+  Break step of type_array: an array bounded by chars is indexed by a char:
+  LA['B'], not LA[1] (SM0261).
+*******************************************************************************/
+
+module exe type_array_err_index_char;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LA: array['A'..'E'] of int32;
+  LI: int32;
+
+begin
+  LI := LA[1]; // ERROR SM0261@12: an index of 'array['A'..'E'] of int32' is a 'char' value, got 'int32'
+end.

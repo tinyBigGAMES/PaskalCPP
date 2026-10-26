@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_alias_err_choice_value.pcpp - Type: an alias of a choice value
+
+  Break step of type_alias: cRed is a value of TColor, not a type (SM0013),
+  and a visible choice value is never taken as a C/C++ name.
+*******************************************************************************/
+
+module exe type_alias_err_choice_value;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TColor = choices(cRed, cGreen);
+  TA = cRed; // ERROR SM0013@8: 'cRed' is not a type
+
+begin
+end.

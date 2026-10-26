@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_qual_unit.pcpp - Module fixture: the unit the mod_qual tests
+  import: an exported record, var, routine and choices type, and a var it
+  does not export.
+*******************************************************************************/
+
+module unit mod_qual_unit;
+
+exported type
+  TPt = record
+    X: int32;
+  end;
+
+exported var
+  G: int32 = 1;
+
+var
+  H: int32 = 2;
+
+exported routine F(const AX: int32): int32;
+begin
+  return AX;
+end;
+
+exported type
+  TCol = choices(Red, Green);
+
+end.

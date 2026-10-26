@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_strings_err_raw.pcpp - Lexical: a raw string with no closing )"
+
+  Break step of lex_strings: a raw string runs over lines until its )"
+  (with its delimiter), so one that never meets it is LX0002, where it
+  starts.
+*******************************************************************************/
+
+module exe lex_strings_err_raw;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  println(R"(never closed); // ERROR LX0002@11: Unterminated raw string literal
+end.

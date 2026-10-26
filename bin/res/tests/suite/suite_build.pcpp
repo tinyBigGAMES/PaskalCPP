@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  suite_build.pcpp - Test suite: a build test
+
+  kind build: the module is built in every cell and must build cleanly; it is
+  never run. For a module whose run output is not the point (a library, a
+  program that opens a window or waits for input), or one that only has to
+  compile and link.
+*******************************************************************************/
+
+module exe suite_build;
+
+/*
+  @@test
+    kind build
+  @@end
+*/
+
+routine Square(const AValue: int32): int32;
+begin
+  return AValue * AValue;
+end;
+
+begin
+  println("{}", Square(4));
+end.

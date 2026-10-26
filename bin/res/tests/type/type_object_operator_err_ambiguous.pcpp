@@ -1,0 +1,49 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_operator_err_ambiguous.pcpp - Type: object operator, ambiguous
+
+  Break step of type_object_operator: operands two declared operators take
+  alike (SM0431).
+*******************************************************************************/
+
+module exe type_object_operator_err_ambiguous;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TVec = record
+    X: int32;
+    Y: int32;
+    operator +(const A: TVec; const AN: int16): TVec;
+    begin
+      return A;
+    end;
+    operator +(const A: TVec; const AN: int32): TVec;
+    begin
+      return A;
+    end;
+  end;
+
+var
+  LA: TVec;
+  LN: int8;
+begin
+  LA := LA + LN; // ERROR SM0431
+end.

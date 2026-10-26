@@ -1,0 +1,130 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_choices.pcpp - Type: choices types
+
+  A choices type (BNF.md sec 4: choices type, choice value) names a list of
+  values, each reached through its type (TColor.cRed):
+  - values numbered from 0 (TColor), an explicit value and the implicit ones
+    after it counting on (TLevel: -1, then 0; a const, then 11), values
+    computed from earlier values of the same list, named bare there (TFlag),
+    two values with one number (TAlias: the first one prints), a value past
+    int32 (TBig: 8 bytes);
+  - print shows a value by name, a number outside the list as TColor(7);
+  - int32(V) / int64(V) give a value's number, (TColor)N makes one from a
+    number; = compares two values of one type;
+  - a choices type as a parameter (var and const), a bitfield wide enough
+    for every number as a signed value (TSlots: a negative one stored, read
+    back, set by a record literal, compared), a routine's own local choices
+    type, an exported choices type of an imported unit, qualified
+    (type_choices_unit.TMode).
+  A choices type as a parent is the record tests'; a choice value used as a
+  type is type_alias_err_choice_value.
+*******************************************************************************/
+
+module exe type_choices;
+
+/*
+  @@test
+    kind run
+    expect
+    | colors cRed cGreen cBlue
+    | ordinals 0 1 2
+    | level -1 0 10 11
+    | flags 1 2 4
+    | alias aOne true 2
+    | big bHuge 4294967296 size 8 4
+    | cast cBlue TColor(7)
+    | next cGreen cool
+    | slots cBlue lLow size 4
+    | literal cGreen lTop true 11
+    | unit mFast true
+    | local dSouth 5
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/type/fixtures";
+
+import type_choices_unit;
+
+const
+  KBase: int32 = 10;
+
+type
+  TColor = choices(cRed, cGreen, cBlue);
+  TLevel = choices(lLow = -1, lMid, lHigh = KBase, lTop);
+  TFlag = choices(fA = 1, fB = fA + 1, fC = fB * 2);
+  TAlias = choices(aOne = 1, aUno = 1, aTwo);
+  TBig = choices(bSmall, bHuge = 4294967296);
+  TSlots = record
+    Col: TColor : 3;
+    Lev: TLevel : 5;
+  end;
+
+routine Describe(const AC: TColor): string;
+begin
+  if AC = TColor.cRed then
+    return "warm";
+  end;
+  return "cool";
+end;
+
+routine NextColor(var AC: TColor);
+var
+  LN: int32;
+begin
+  LN := int32(AC) + 1;
+  AC := (TColor)LN;
+end;
+
+routine Local();
+type
+  TDir = choices(dNorth, dSouth = 5);
+var
+  LD: TDir;
+begin
+  LD := TDir.dSouth;
+  println("local {} {}", LD, int32(LD));
+end;
+
+var
+  LC: TColor = TColor.cGreen;
+  LS: TSlots;
+  LN: int32 = 7;
+  LU: type_choices_unit.TMode;
+
+begin
+  println("colors {} {} {}", TColor.cRed, LC, TColor.cBlue);
+  println("ordinals {} {} {}", int32(TColor.cRed), int32(LC), int32(TColor.cBlue));
+  println("level {} {} {} {}", int32(TLevel.lLow), int32(TLevel.lMid), int32(TLevel.lHigh), int32(TLevel.lTop));
+  println("flags {} {} {}", int32(TFlag.fA), int32(TFlag.fB), int32(TFlag.fC));
+  println("alias {} {} {}", TAlias.aUno, TAlias.aOne = TAlias.aUno, int32(TAlias.aTwo));
+  println("big {} {} size {} {}", TBig.bHuge, int64(TBig.bHuge), size(TBig), size(TColor));
+  LC := (TColor)2;
+  println("cast {} {}", LC, (TColor)LN);
+  LC := TColor.cRed;
+  NextColor(LC);
+  println("next {} {}", LC, Describe(LC));
+  LS.Col := TColor.cBlue;
+  LS.Lev := TLevel.lLow;
+  println("slots {} {} size {}", LS.Col, LS.Lev, size(TSlots));
+  LS := TSlots(Col: TColor.cGreen, Lev: TLevel.lTop);
+  LC := LS.Col;
+  println("literal {} {} {} {}", LC, LS.Lev, LS.Col = TColor.cGreen, int32(LS.Lev));
+  LU := type_choices_unit.TMode.mFast;
+  println("unit {} {}", LU, LU <> type_choices_unit.TMode.mSlow);
+  Local();
+end.

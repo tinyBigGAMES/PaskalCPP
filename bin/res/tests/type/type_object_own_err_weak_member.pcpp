@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_own_err_weak_member.pcpp - Type: object own, weak member
+
+  Break step of type_object_own: a member read through a weak: read it through
+  lock(W) (SM0360).
+*******************************************************************************/
+
+module exe type_object_own_err_weak_member;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TPlain = object
+    X: int32;
+  end;
+
+routine Use(const AW: weak TPlain): int32;
+begin
+  return AW.X; // ERROR SM0360@10: read it through lock(AW)
+end;
+
+begin
+end.

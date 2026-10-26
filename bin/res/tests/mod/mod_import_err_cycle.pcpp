@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_import_err_cycle.pcpp - Module: an import cycle
+
+  Break step of mod_import: this exe imports fixtures\mod_import_err_cycle_a,
+  which imports mod_import_err_cycle_b, which imports mod_import_err_cycle_a
+  again. The cycle is reported at that name, in mod_import_err_cycle_b
+  (its marker is there).
+*******************************************************************************/
+
+module exe mod_import_err_cycle;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_import_err_cycle_a;
+
+begin
+end.

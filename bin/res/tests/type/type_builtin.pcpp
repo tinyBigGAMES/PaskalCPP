@@ -1,0 +1,111 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_builtin.pcpp - Type: the builtin types (Windows)
+
+  Every builtin type of BNF.md sec 4: int8 int16 int32 int64, uint8 uint16
+  uint32 uint64, float32 float64, bool char wchar, string wstring, ptr.
+  Each variable holds a value at an edge of its type (the lowest signed, the
+  highest unsigned) and prints it with its size(T).
+  - bool and char are also C++ fundamentals: both spellings are one C++
+    type, so plain C++ functions at module level take them as is, and a C++
+    type spells bool (const bool*).
+  - pointer and boolean are no keywords: here they name two variables (a C
+    typedef such as Windows' boolean is a plain identifier).
+  - wchar is the target's wchar_t: 2 bytes on Windows, 4 on Linux (the data
+    model, BNF.md sec 2), so this test has one file per target (type_builtin_linux: Linux).
+  varargs, the last builtin, is only the type of a variadic routine's local
+  (the decl and expr areas). A builtin takes no C++ suffix or qualifier (the
+  type_builtin_err_* break steps): ptr to T, var / const parameters, or the
+  C++ type (int32_t) say it.
+*******************************************************************************/
+
+module exe type_builtin;
+
+/*
+  @@test
+    kind run
+    targets x86_64-windows-gnu
+    expect
+    | int8 -128 size 1
+    | int16 -32768 size 2
+    | int32 -2147483648 size 4
+    | int64 -9223372036854775807 size 8
+    | uint8 255 size 1
+    | uint16 65535 size 2
+    | uint32 4294967295 size 4
+    | uint64 18446744073709551615 size 8
+    | float32 1.5 size 4
+    | float64 0.1 size 8
+    | bool true size 1
+    | char A size 1
+    | wchar 90 size 2
+    | string text len 4
+    | wstring len 4
+    | ptr nil true size 8
+    | C++ bool true -> false
+    | C++ char A -> B
+    | C++ const bool* nil true
+    | boolean 1 pointer 2
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+static bool cpp_flip(bool b) { return !b; }
+static char cpp_next(char c) { return static_cast<char>(c + 1); }
+
+var
+  LI8: int8 = -128;
+  LI16: int16 = -32768;
+  LI32: int32 = -2147483648;
+  LI64: int64 = -9223372036854775807;
+  LU8: uint8 = 255;
+  LU16: uint16 = 65535;
+  LU32: uint32 = 4294967295;
+  LU64: uint64 = 18446744073709551615u;
+  LF32: float32 = 1.5;
+  LF64: float64 = 0.1;
+  LB: bool = true;
+  LC: char = 'A';
+  LW: wchar = L'Z';
+  LS: string = "text";
+  LWS: wstring = L"wide";
+  LP: ptr = nil;
+  LBP: const bool* = nil;
+  boolean: int32 = 1;
+  pointer: int32 = 2;
+
+begin
+  println("int8 {} size {}", LI8, size(int8));
+  println("int16 {} size {}", LI16, size(int16));
+  println("int32 {} size {}", LI32, size(int32));
+  println("int64 {} size {}", LI64, size(int64));
+  println("uint8 {} size {}", LU8, size(uint8));
+  println("uint16 {} size {}", LU16, size(uint16));
+  println("uint32 {} size {}", LU32, size(uint32));
+  println("uint64 {} size {}", LU64, size(uint64));
+  println("float32 {} size {}", LF32, size(float32));
+  println("float64 {} size {}", LF64, size(float64));
+  println("bool {} size {}", LB, size(bool));
+  println("char {} size {}", LC, size(char));
+  println("wchar {} size {}", int32(LW), size(wchar));
+  println("string {} len {}", LS, len(LS));
+  println("wstring len {}", len(LWS));
+  println("ptr nil {} size {}", LP = nil, size(ptr));
+  println("C++ bool {} -> {}", LB, cpp_flip(LB));
+  println("C++ char {} -> {}", LC, cpp_next(LC));
+  println("C++ const bool* nil {}", LBP = nil);
+  println("boolean {} pointer {}", boolean, pointer);
+end.

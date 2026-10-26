@@ -1,0 +1,158 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_copy.pcpp - Type: copy, move and slicing
+
+  An object is a value (BNF.md sec 4 object type, copy decl). Shown here:
+  - an object with a done and no copy cannot be copied (TRes): it moves.
+    A local returned from a routine moves out (its done does not run);
+    `LA := Make(4)` takes the new value and the old one ends then
+    (close 3); a call result passed by value ends after the call;
+  - copy(const ASource: T) makes it copyable (TCp): it builds the copy
+    as an init builds an object (the fields start empty, its body fills
+    them); `LB := LA` copies, and the old value of LB ends (end 8);
+  - values end at the end of their scope, in reverse order;
+  - a descendant that is not polymorphic converts to its parent by value
+    (TDer to TBase); a polymorphic one only through var / const or a
+    pointer. A polymorphic object reached through a var parameter, a
+    pointer or self may be a descendant, so it is never assigned whole.
+  Every value with a done ends exactly once.
+*******************************************************************************/
+
+module exe type_object_copy;
+
+/*
+  @@test
+    kind run
+    expect
+    | open 1
+    | open 2
+    | scope
+    | close 2
+    | close 1
+    | open 3
+    | open 4
+    | close 3
+    | show 4
+    | open 5
+    | take 5
+    | close 5
+    | close 4
+    | copy 7 -> 107
+    | end 8
+    | lb 107
+    | end 107
+    | end 7
+    | base 1
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+type
+  TRes = object
+    Id: int32;
+    init(const AId: int32);
+    begin
+      self.Id := AId;
+      println("open {}", self.Id);
+    end;
+    done;
+    begin
+      println("close {}", self.Id);
+    end;
+  end;
+  TCp = object
+    Id: int32;
+    init(const AId: int32);
+    begin
+      self.Id := AId;
+    end;
+    copy(const ASource: TCp);
+    begin
+      self.Id := ASource.Id + 100;
+      println("copy {} -> {}", ASource.Id, self.Id);
+    end;
+    done;
+    begin
+      println("end {}", self.Id);
+    end;
+  end;
+  TBase = object
+    B: int32;
+  end;
+  TDer = object(TBase)
+    D: int32;
+  end;
+
+routine Make(const AId: int32): TRes;
+var
+  LR: TRes(AId);
+begin
+  return LR;
+end;
+
+routine Show(const AR: TRes);
+begin
+  println("show {}", AR.Id);
+end;
+
+routine Take(AR: TRes);
+begin
+  println("take {}", AR.Id);
+end;
+
+routine Scope();
+var
+  LA: TRes(1);
+  LB: TRes(2);
+begin
+  println("scope");
+end;
+
+routine Moves();
+var
+  LA: TRes(3);
+begin
+  LA := Make(4);
+  Show(LA);
+  Take(Make(5));
+end;
+
+routine Copies();
+var
+  LA: TCp(7);
+  LB: TCp(8);
+begin
+  LB := LA;
+  println("lb {}", LB.Id);
+end;
+
+routine Upcast();
+var
+  LD: TDer;
+  LB: TBase;
+begin
+  LD.B := 1;
+  LD.D := 2;
+  LB := LD;
+  println("base {}", LB.B);
+end;
+
+begin
+  Scope();
+  Moves();
+  Copies();
+  Upcast();
+end.

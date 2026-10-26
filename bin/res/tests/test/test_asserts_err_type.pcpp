@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  test_asserts_err_type.pcpp - Test: asserts, type
+
+  Break step of test_asserts: testAssertEqualInt given a string (SM0409); test
+  blocks are checked even without @unitTestMode.
+*******************************************************************************/
+
+module exe test_asserts_err_type;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+end.
+
+test "typed"
+begin
+  testAssertEqualInt("one", 1); // ERROR SM0409@22: 'testAssertEqualInt' takes
+end;

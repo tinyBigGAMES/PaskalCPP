@@ -1,0 +1,250 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_sysutils_linux.pcpp - Std library compliance: the SysUtils unit
+  (res\libs\std\SysUtils.pcpp)
+
+  ResolvePath turns any spelling of a path into one full, normalized path:
+  $P: (the executable's folder, from the OS), $D: (the current directory),
+  $S: or no prefix (the given base, else the current directory), matched at
+  the start only and in either case; leading / trailing blanks trimmed; '.'
+  and '..' folded and repeated separators joined as text; a trailing
+  separator kept. Windows: forward slashes up to 247 UTF-16 units, the
+  long-path spelling past it (\\?\, \\?\UNC\), both slash forms read alike.
+  Linux: the plain /... path at any length. Resolving a result again gives it
+  back. Overloads take a string or a ptr to const char (nil = ""); an empty
+  path gives "". ExeDir is the executable's folder, no trailing separator.
+  FileExists is true for an existing file only (not a folder, a missing
+  path, "" or nil), the string and the ptr to const char overload alike; it
+  resolves its path itself, so "$P:..." works as written. Delay(N) waits at
+  least N milliseconds (steady clock, whole milliseconds); 0 or less returns
+  at once (well under a second).
+  The names are called bare (only SysUtils exports them); the "qualified"
+  row calls SysUtils.ResolvePath / SysUtils.ExeDir and gets the same results.
+  Each row prints "ok <case>", or "FAIL <case>" with what came back and what
+  the rule says; a row on the executable's folder or the current directory
+  compares with ExeDir or another spelling, so the output is the same
+  wherever the program runs.
+
+  The Linux half of std_sysutils: the same program, the Linux
+  expectations.
+*******************************************************************************/
+
+module exe std_sysutils_linux;
+
+/*
+  @@test
+    kind run
+    targets x86_64-linux-gnu
+    expect
+    | ok   fold
+    | ok   slashes
+    | ok   trailing
+    | ok   above root
+    | ok   base
+    | ok   base trailing
+    | ok   S prefix
+    | ok   P overrides base
+    | ok   D prefix
+    | ok   lower case prefix
+    | ok   prefix inside
+    | ok   trim
+    | ok   trim after prefix
+    | ok   empty
+    | ok   blanks
+    | ok   prefix only
+    | ok   again
+    | ok   ptr
+    | ok   ptr base
+    | ok   ptr nil
+    | ok   ptr nil base
+    | ok   exe dir
+    | ok   qualified
+    | ok   sizes
+    | ok   delay
+    | ok   delay none
+    | ok   file exists
+    | ok   folder is no file
+    | ok   missing file
+    | ok   prefix
+    | ok   empty path
+    | ok   ptr file
+    | ok   ptr nil file
+    | ok   utf8
+    | ok   long
+    | ok   relative base
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import SysUtils;
+
+// The steady clock in whole milliseconds, for the Delay rows
+#include <chrono>
+long long NowMs()
+{
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+routine Check(const AName: string; const AGot: string; const AWant: string);
+begin
+  if AGot = AWant then
+    println("ok   {}", AName);
+  else
+    println("FAIL {}: got [{}] want [{}]", AName, AGot, AWant);
+  end;
+end;
+
+// AText ACount times over
+routine Copies(const AText: string; const ACount: int32): string;
+var
+  LI: int32;
+  LText: string;
+begin
+  for LI := 1 to ACount do
+    LText := LText + AText;
+  end;
+  return LText;
+end;
+
+routine CheckBool(const AName: string; const AGot: bool; const AWant: bool);
+begin
+  if AGot = AWant then
+    println("ok   {}", AName);
+  else
+    println("FAIL {}: got [{}] want [{}]", AName, AGot, AWant);
+  end;
+end;
+
+var
+  LExe: string;
+  LBase: string;
+  LCPath: ptr to const char;
+  LCBase: ptr to const char;
+  LLong: string;
+  LFile: string;
+  LStart: int64;
+
+begin
+  LExe := ExeDir();
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  Check("fold", ResolvePath("C:\\a\\.\\b\\..\\c"), "C:/a/c");
+  Check("slashes", ResolvePath("C:/a\\b//c"), "C:/a/b/c");
+  Check("trailing", ResolvePath("C:\\a\\b\\"), "C:/a/b/");
+  Check("above root", ResolvePath("C:\\..\\x"), "C:/x");
+  LBase := "C:\\base\\dir";
+  Check("base", ResolvePath("sub\\f.txt", LBase), "C:/base/dir/sub/f.txt");
+  Check("base trailing", ResolvePath("sub/f.txt", "C:/base/dir/"), "C:/base/dir/sub/f.txt");
+  Check("S prefix", ResolvePath("$S:f.txt", LBase), "C:/base/dir/f.txt");
+  Check("P overrides base", ResolvePath("$P:f.txt", LBase), LExe + "/f.txt");
+  Check("D prefix", ResolvePath("$D:f.txt", LBase), ResolvePath("f.txt"));
+  Check("lower case prefix", ResolvePath("$p:f.txt"), LExe + "/f.txt");
+  Check("prefix inside", ResolvePath("C:\\a\\$P:b"), "C:/a/$P:b");
+  Check("trim", ResolvePath("  C:\\a \t"), "C:/a");
+  Check("trim after prefix", ResolvePath("$P:   f.txt"), LExe + "/f.txt");
+@else
+  Check("fold", ResolvePath("/a/./b/../c"), "/a/c");
+  Check("slashes", ResolvePath("/a//b///c"), "/a/b/c");
+  Check("trailing", ResolvePath("/a/b/"), "/a/b/");
+  Check("above root", ResolvePath("/../x"), "/x");
+  LBase := "/base/dir";
+  Check("base", ResolvePath("sub/f.txt", LBase), "/base/dir/sub/f.txt");
+  Check("base trailing", ResolvePath("sub/f.txt", "/base/dir/"), "/base/dir/sub/f.txt");
+  Check("S prefix", ResolvePath("$S:f.txt", LBase), "/base/dir/f.txt");
+  Check("P overrides base", ResolvePath("$P:f.txt", LBase), LExe + "/f.txt");
+  Check("D prefix", ResolvePath("$D:f.txt", LBase), ResolvePath("f.txt"));
+  Check("lower case prefix", ResolvePath("$p:f.txt"), LExe + "/f.txt");
+  Check("prefix inside", ResolvePath("/a/$P:b"), "/a/$P:b");
+  Check("trim", ResolvePath("  /a \t"), "/a");
+  Check("trim after prefix", ResolvePath("$P:   f.txt"), LExe + "/f.txt");
+@endif
+
+  Check("empty", ResolvePath(""), "");
+  Check("blanks", ResolvePath("   "), "");
+  Check("prefix only", ResolvePath("$P:  "), "");
+  Check("again", ResolvePath(ResolvePath("$P:a/../b")), ResolvePath("$P:a/../b"));
+
+  LCPath := "$P:c.txt";
+  Check("ptr", ResolvePath(LCPath), LExe + "/c.txt");
+  LCPath := "f.txt";
+  LCBase := LBase.c_str();
+  Check("ptr base", ResolvePath(LCPath, LCBase), ResolvePath("f.txt", LBase));
+  LCPath := nil;
+  Check("ptr nil", ResolvePath(LCPath), "");
+  LCPath := "f.txt";
+  LCBase := nil;
+  Check("ptr nil base", ResolvePath(LCPath, LCBase), ResolvePath("f.txt"));
+
+  // No trailing separator, and the same folder $P: names
+  Check("exe dir", LExe, ResolvePath("$P:."));
+
+  // Qualified, the same routines as the bare calls above
+  Check("qualified", SysUtils.ResolvePath("$P:f.txt", SysUtils.ExeDir()), ResolvePath("$P:f.txt"));
+  // The byte sizes are binary (1024 based)
+  Check("sizes", FormatStr("{} {} {}", Kilobyte, Megabyte, Gigabyte), "1024 1048576 1073741824");
+  // Delay waits at least the time asked; 0 or less returns at once
+  LStart := NowMs();
+  Delay(50);
+  CheckBool("delay", NowMs() - LStart >= 50, true);
+  LStart := NowMs();
+  Delay(0);
+  Delay(-1);
+  CheckBool("delay none", NowMs() - LStart < 1000, true);
+
+  // FileExists: the program's own executable is a file, its folder is not
+  // (std_sysutils runs on Windows, std_sysutils_linux on Linux: each its own name)
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  LFile := LExe + "/std_sysutils.exe";
+@else
+  LFile := LExe + "/std_sysutils_linux";
+@endif
+  CheckBool("file exists", FileExists(LFile), true);
+  CheckBool("folder is no file", FileExists(LExe), false);
+  CheckBool("missing file", FileExists("$P:no_such_file.txt"), false);
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  CheckBool("prefix", FileExists("$P:std_sysutils.exe"), true);
+@else
+  CheckBool("prefix", FileExists("$P:std_sysutils_linux"), true);
+@endif
+  CheckBool("empty path", FileExists(""), false);
+  LCPath := LFile.c_str();
+  CheckBool("ptr file", FileExists(LCPath), true);
+  LCPath := nil;
+  CheckBool("ptr nil file", FileExists(LCPath), false);
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  Check("utf8", ResolvePath("C:\\ünï\\..\\ö.txt"), "C:/ö.txt");
+  // "C:/" + 244 = 247 units: the plain spelling; one more: the long one
+  LLong := "C:/" + Copies("x", 244);
+  Check("at 247", ResolvePath(LLong), LLong);
+  LLong := "C:/" + Copies("y", 120) + "/" + Copies("z", 124);
+  Check("past 247", ResolvePath(LLong), "\\\\?\\C:\\" + Copies("y", 120) + "\\" + Copies("z", 124));
+  Check("past 247 again", ResolvePath(ResolvePath(LLong)), ResolvePath(LLong));
+  // 247 UTF-16 units are 491 UTF-8 bytes here: still the plain spelling
+  LLong := "C:/" + Copies("ö", 244);
+  Check("utf16 units", ResolvePath(LLong), LLong);
+  Check("unc", ResolvePath("\\\\srv\\share\\a\\..\\b"), "//srv/share/b");
+  Check("unc long", ResolvePath("\\\\srv\\share\\" + Copies("u", 250)), "\\\\?\\UNC\\srv\\share\\" + Copies("u", 250));
+  Check("long slashes", ResolvePath("//?/C:/a/b"), "\\\\?\\C:\\a\\b");
+@else
+  Check("utf8", ResolvePath("/ünï/../ö.txt"), "/ö.txt");
+  LLong := "/" + Copies("y", 300) + "/" + Copies("z", 300);
+  Check("long", ResolvePath(LLong), LLong);
+  // A relative base is made absolute against the current directory
+  Check("relative base", ResolvePath("f.txt", "rel/dir"), ResolvePath("$D:rel/dir/f.txt"));
+@endif
+end.

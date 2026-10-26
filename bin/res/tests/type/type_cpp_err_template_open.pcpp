@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_cpp_err_template_open.pcpp - Type: template arguments never closed
+
+  Break step of type_cpp: std::vector<int with no > (PR0031).
+*******************************************************************************/
+
+module exe type_cpp_err_template_open;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+#include <vector>
+
+var
+  LV: std::vector<int; // ERROR PR0031@22: template arguments not closed
+
+begin
+end.

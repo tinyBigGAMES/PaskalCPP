@@ -1,0 +1,49 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_cpp_err_poly_slice.pcpp - Type: object cpp, poly slice
+
+  Break step of type_object_cpp: an object polymorphic through its C++ base
+  assigned to an ancestor by value (SM0428).
+*******************************************************************************/
+
+module exe type_object_cpp_err_poly_slice;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+struct CNode {
+  virtual ~CNode() = default;
+  virtual int kind() { return 1; }
+};
+
+type
+  TA = object(CNode)
+    N: int32;
+  end;
+  TB = object(TA)
+    M: int32;
+  end;
+
+var
+  LA: TA;
+  LB: TB;
+begin
+  LA := LB; // ERROR SM0428
+  println("{}", LA.N);
+end.

@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_leave_skip_err_skip.pcpp - Stmt: leave skip, skip
+
+  Break step of stmt_leave_skip: skip outside a loop (SM0608).
+*******************************************************************************/
+
+module exe stmt_leave_skip_err_skip;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  skip; // ERROR SM0608@3: skip outside a loop
+end.

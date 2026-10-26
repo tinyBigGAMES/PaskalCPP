@@ -1,0 +1,163 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_sysutils_format.pcpp - Std library compliance: SysUtils.FormatStr
+
+  FormatStr(F, ...) (res\libs\std\SysUtils.pcpp) formats its arguments into
+  a string with std::format's `{}` specifiers, each argument as println
+  prints it: wide text (a wchar, a wstring, an L"..." literal) as UTF-8, a
+  ptr to char as its text (nil prints nil), any other pointer as its address
+  (nil prints 0x0), an array element by element (text elements quoted),
+  every other value itself. Each line below is printed twice: by println,
+  then by println of FormatStr with the same format and arguments, so every
+  pair of EXPECT lines is the same text. The last line shows the result is
+  a string a program keeps. A string const holding a literal is a format
+  string too, bare or unit-qualified (println's and FormatStr's), a wstring
+  const prints as UTF-8, and a const keeps a \0 inside its text.
+*******************************************************************************/
+
+module exe std_sysutils_format;
+
+/*
+  @@test
+    kind run
+    expect
+    | values 42 2.5 text true
+    | values 42 2.5 text true
+    | width [  42] [42  ] [0042]
+    | width [  42] [42  ] [0042]
+    | char c
+    | char c
+    | wide w wide
+    | wide w wide
+    | wide literal lit
+    | wide literal lit
+    | nil pointer 0x0
+    | nil pointer 0x0
+    | nil text nil
+    | nil text nil
+    | text pointer abc
+    | text pointer abc
+    | array [1, 2, 3]
+    | array [1, 2, 3]
+    | text array ["x", nil]
+    | text array ["x", nil]
+    | wide array ['a', 'b']
+    | wide array ['a', 'b']
+    | dynamic [7, 8]
+    | dynamic [7, 8]
+    | choices cGreen
+    | choices cGreen
+    | set [1, 3]
+    | set [1, 3]
+    | cpp 1.25
+    | cpp 1.25
+    | const 1 of 2
+    | const 1 of 2
+    | unit 3 of 4
+    | unit 3 of 4
+    | wide const wide const
+    | wide const wide const
+    | nul const 3
+    | kept 3 of 4 done, length 11
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/std/fixtures";
+import
+  SysUtils,
+  std_sysutils_format_unit;
+
+type
+  TColor = choices(cRed, cGreen, cBlue);
+  TSmall = set of 0..15;
+
+const
+  KFormat: string = "const {} of {}";
+  KWide: wstring = L"wide const";
+  KNul: string = "a\0b";
+
+var
+  LN: int32 = 42;
+  LF: float64 = 2.5;
+  LS: string = "text";
+  LB: bool = true;
+  LCh: char = 'c';
+  LW: wchar = L'w';
+  LWS: wstring = L"wide";
+  LP: ptr to int32;
+  LC: ptr to const char;
+  LA: array[0..2] of int32;
+  LCS: array[0..1] of ptr to const char;
+  LWA: array[0..1] of wchar;
+  LD: array of int32;
+  LCol: TColor;
+  LSet: TSmall;
+  LText: string;
+
+begin
+  println("values {} {} {} {}", LN, LF, LS, LB);
+  println("{}", FormatStr("values {} {} {} {}", LN, LF, LS, LB));
+  println("width [{:>4}] [{:<4}] [{:04}]", LN, LN, LN);
+  println("{}", FormatStr("width [{:>4}] [{:<4}] [{:04}]", LN, LN, LN));
+  println("char {}", LCh);
+  println("{}", FormatStr("char {}", LCh));
+  println("wide {} {}", LW, LWS);
+  println("{}", FormatStr("wide {} {}", LW, LWS));
+  println("wide literal {}", L"lit");
+  println("{}", FormatStr("wide literal {}", L"lit"));
+  println("nil pointer {}", LP);
+  println("{}", FormatStr("nil pointer {}", LP));
+  println("nil text {}", LC);
+  println("{}", FormatStr("nil text {}", LC));
+  LC := "abc";
+  println("text pointer {}", LC);
+  println("{}", FormatStr("text pointer {}", LC));
+  LA[0] := 1;
+  LA[1] := 2;
+  LA[2] := 3;
+  println("array {}", LA);
+  println("{}", FormatStr("array {}", LA));
+  LCS[0] := "x";
+  println("text array {}", LCS);
+  println("{}", FormatStr("text array {}", LCS));
+  LWA[0] := L'a';
+  LWA[1] := L'b';
+  println("wide array {}", LWA);
+  println("{}", FormatStr("wide array {}", LWA));
+  setlength(LD, 2);
+  LD[0] := 7;
+  LD[1] := 8;
+  println("dynamic {}", LD);
+  println("{}", FormatStr("dynamic {}", LD));
+  LCol := TColor.cGreen;
+  println("choices {}", LCol);
+  println("{}", FormatStr("choices {}", LCol));
+  LSet := [1, 3];
+  println("set {}", LSet);
+  println("{}", FormatStr("set {}", LSet));
+  println("cpp {}", cpp("1.25f"));
+  println("{}", FormatStr("cpp {}", cpp("1.25f")));
+  println(KFormat, 1, 2);
+  println("{}", FormatStr(KFormat, 1, 2));
+  println(std_sysutils_format_unit.UFormat, 3, 4);
+  println("{}", FormatStr(std_sysutils_format_unit.UFormat, 3, 4));
+  println("wide const {}", KWide);
+  println("{}", FormatStr("wide const {}", KWide));
+  println("nul const {}", len(KNul));
+  LText := FormatStr("{} of {} done", 3, 4);
+  println("kept {}, length {}", LText, len(LText));
+end.

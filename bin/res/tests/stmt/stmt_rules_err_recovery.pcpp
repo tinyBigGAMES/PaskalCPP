@@ -1,0 +1,76 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_rules_err_recovery.pcpp - Statement: the statement after a reported one is parsed
+
+  Recovery is the subject (several marks): each mistake is reported once and
+  skipped as one piece (a C++ switch / try through its braces, a break, a
+  stray else); the statement after it is parsed and analyzed, which its own
+  mistake (SM0200, a string into an int32) shows. An if without its
+  condition is reported and kept as a recovered node: SEM is silent inside
+  it, so the same mistake in its then statement gives no second report.
+*******************************************************************************/
+
+module exe stmt_rules_err_recovery;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine RSwitch(const AN: int32);
+var
+  LN: int32;
+begin
+  switch (AN) { case 1: break; } // ERROR PR0049@3
+  LN := "after the switch"; // ERROR SM0200@9
+end;
+
+routine RTry();
+var
+  LN: int32;
+begin
+  try { } catch (...) { } // ERROR PR0049@3
+  LN := "after the try"; // ERROR SM0200@9
+end;
+
+routine RBreak();
+var
+  LN: int32;
+begin
+  break; // ERROR PR0049@3: 'leave'
+  LN := "after the break"; // ERROR SM0200@9
+end;
+
+routine RStray();
+var
+  LN: int32;
+begin
+  else // ERROR PR0001@3
+  LN := "after the else"; // ERROR SM0200@9
+end;
+
+routine RNoCondition();
+var
+  LN: int32;
+begin
+  if then // ERROR PR0001@6
+    LN := "inside the if";
+  end;
+end;
+
+begin
+end.

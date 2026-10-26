@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property_virtual_err_index_shape.pcpp - Type: object property virtual, index shape
+
+  Break step of type_object_property_virtual: an index is one parameter
+  (PR0061).
+*******************************************************************************/
+
+module exe type_object_property_virtual_err_index_shape;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBag = object
+    FI: int32;
+    property Items[const AI: int32; AJ: int32]: int32 read FI; // ERROR PR0061@35: is one parameter
+  end;
+
+begin
+end.

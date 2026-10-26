@@ -1,0 +1,52 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_comments.pcpp - Lexical: comments
+
+  A line comment runs from two slashes to the end of its line; a block
+  comment from slash-star to the first star-slash (BNF.md sec 9), over as
+  many lines as it needs. A comment stands wherever a blank may: before
+  code, after it, between two tokens, inside a call's parentheses. Block
+  comments do not nest (lex_comments_err_nested), and two slashes are only
+  text inside a string or a block comment. This header is a block comment
+  too, so it never spells the two pairs.
+*******************************************************************************/
+
+module exe lex_comments;
+
+/*
+  @@test
+    kind run
+    expect
+    | code
+    | inline
+    | // not a comment
+    | between
+    | after
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+// a line comment
+/* a block comment
+   over two lines */
+
+begin
+  println("code"); // after code
+  println(/* inside */ "inline");
+  println("// not a comment");
+  /* one */ println("between"); /* two */
+  /* a block comment holding // as text */ println("after");
+end.

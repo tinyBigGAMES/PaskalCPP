@@ -1,0 +1,93 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_float_const.pcpp - Expression: float constants. A constant float
+  expression converts implicitly to float32 when float32 holds its value
+  exactly (BNF.md sec 6 "No hidden conversions": a constant that fits),
+  whatever form it is written in: a negated literal, an operator of two
+  constants, / of two integer constants, ?: with a constant condition, as an
+  initializer, an assignment, a const and an argument. The value is computed
+  as C++ computes it. A constant whose value is no finite number is a constant
+  too (IEEE): 0.0 / 0.0 is NaN (the positive one: it prints nan, not -nan), a
+  division by zero or an overflow an infinity, a float32 cast past float32's
+  range an infinity, and an infinite operand folds on.
+*******************************************************************************/
+
+module exe expr_float_const;
+
+/*
+  @@test
+    kind run
+    expect
+    | negate -1 -0.5
+    | operators 1.5 0.25 6 0.75
+    | divide 0.5
+    | pick 2.25
+    | const -1 1.5
+    | argument -1
+    | float64 -10
+    | nan nan true
+    | infinity inf -inf inf
+    | overflow inf inf
+    | infinite operand inf
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+const
+  KNeg: float32 = -1.0;
+  KSum: float32 = 1.0 + 0.5;
+  // No finite number: each is still a constant (IEEE)
+  KNaN: float64 = 0.0 / 0.0;
+  KInf: float64 = 1.0 / 0.0;
+  KNegInf: float64 = -1.0 / 0.0;
+  KInf32: float32 = 1.0f / 0.0f;
+  KOver: float64 = 1.0e308 * 10.0;
+  KCut32: float32 = float32(1.0e300);
+
+routine Show(const AValue: float32);
+begin
+  println("argument {}", AValue);
+end;
+
+var
+  LA: float32 = -1.0;
+  LB: float32;
+  LC: float32;
+  LD: float32;
+  LE: float32;
+  LF: float64 = -2.5 * 4.0;
+  LG: float32 = KInf32 * 2.0f;
+
+begin
+  LB := -0.5;
+  println("negate {} {}", LA, LB);
+  LA := 1.0 + 0.5;
+  LB := 1.0 - 0.75;
+  LC := 1.5 * 4.0;
+  LD := 3.0 / 4.0;
+  println("operators {} {} {} {}", LA, LB, LC, LD);
+  LE := 1 / 2;
+  println("divide {}", LE);
+  LE := true ? 2.25 : 0.1;
+  println("pick {}", LE);
+  println("const {} {}", KNeg, KSum);
+  Show(-1.0);
+  println("float64 {}", LF);
+  println("nan {} {}", KNaN, KNaN <> KNaN);
+  println("infinity {} {} {}", KInf, KNegInf, KInf32);
+  println("overflow {} {}", KOver, KCut32);
+  println("infinite operand {}", LG);
+end.

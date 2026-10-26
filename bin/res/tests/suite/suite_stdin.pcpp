@@ -1,0 +1,54 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  suite_stdin.pcpp - Test suite: a run test with its own standard input
+
+  The spec's stdin key names a file beside the test (here in fixtures\,
+  which discovery never scans): the program reads it as its standard input,
+  as 'prog < file' in a shell, so it sees the end of input where the file
+  ends. Reading is plain C++ (std::getline), as a user mixes it.
+*******************************************************************************/
+
+module exe suite_stdin;
+
+/*
+  @@test
+    kind run
+    stdin "fixtures/suite_stdin.txt"
+    expect
+    | 1: alpha
+    | 2: beta
+    | 2 lines, then the end of input
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+#include <iostream>
+#include <string>
+
+bool ReadInputLine(std::string& ALine) { return static_cast<bool>(std::getline(std::cin, ALine)); }
+
+var
+  LLine: string;
+  LCount: int32;
+
+begin
+  LCount := 0;
+  while ReadInputLine(LLine) do
+    LCount := LCount + 1;
+    println("{}: {}", LCount, LLine);
+  end;
+  println("{} lines, then the end of input", LCount);
+end.

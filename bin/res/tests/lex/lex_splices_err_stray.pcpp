@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_splices_err_stray.pcpp - Lexical: a backslash that is no splice
+
+  Break step of lex_splices: a backslash is a splice only right before a
+  newline (blanks between them allowed), so one in the middle of a line is
+  a stray character, LX0004, the only report: the statement it stands in
+  (the 2 after it included) is one recovered statement, so nothing after
+  the stray character is read as a statement of its own.
+*******************************************************************************/
+
+module exe lex_splices_err_stray;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int32;
+
+begin
+  LN := 1 \ 2; // ERROR LX0004@11: Invalid character in source
+end.

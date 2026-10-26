@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_if_err_condition.pcpp - Stmt: if, condition
+
+  Break step of stmt_if: an int32 condition: a condition is bool (SM0263).
+*******************************************************************************/
+
+module exe stmt_if_err_condition;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int32;
+
+begin
+  LN := 1;
+  if LN then // ERROR SM0263@6: a condition is bool
+    LN := 2;
+  end;
+end.

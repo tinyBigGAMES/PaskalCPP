@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_prologue_err_mainonly.pcpp - Directive: a main-module-only directive in a unit
+
+  Break step of dir_prologue: the unit this exe imports
+  (fixtures\dir_prologue_err_mainonly_unit) sets @optimize, which only the
+  main module sets. The report is in the unit, at its marked line.
+*******************************************************************************/
+
+module exe dir_prologue_err_mainonly;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/dir/fixtures";
+import dir_prologue_err_mainonly_unit;
+
+begin
+end.

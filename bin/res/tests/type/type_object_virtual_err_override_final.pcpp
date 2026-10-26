@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_virtual_err_override_final.pcpp - Type: object virtual, override final
+
+  Break step of type_object_virtual: override of a final method (SM0335).
+*******************************************************************************/
+
+module exe type_object_virtual_err_override_final;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    virtual final method M();
+    begin
+    end;
+  end;
+  TB = object(TA)
+    override method M(); // ERROR SM0335@5: 'TA.M' is final: it cannot be overridden
+    begin
+    end;
+  end;
+
+begin
+end.

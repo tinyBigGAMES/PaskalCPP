@@ -1,0 +1,49 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_param.pcpp - Intrinsic: paramcount and paramstr
+
+  paramcount() is the number of program arguments, paramstr(I) argument I
+  (1-based; 0 is the program itself); out of range it is "" (BNF.md sec 7).
+  The arguments come after -- on the command line.
+*******************************************************************************/
+
+module exe intr_param;
+
+/*
+  @@test
+    kind run
+    args "one two"
+    expect
+    | count 2
+    | param 1 one
+    | param 2 two
+    | out of range ''
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+var
+  LI: int32;
+
+begin
+  println("count {}", paramcount());
+  LI := 1;
+  while LI <= paramcount() do
+    println("param {} {}", LI, paramstr(LI));
+    LI := LI + 1;
+  end;
+  println("out of range '{}'", paramstr(9));
+end.

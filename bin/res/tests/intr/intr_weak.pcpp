@@ -1,0 +1,59 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_weak.pcpp - Intrinsic: alive and lock
+
+  A weak T watches the object a ref T holds without keeping it: alive(W) is
+  true while the object exists, lock(W) gives a ref T holding it, nil once
+  it is gone (BNF.md sec 7). Their argument is a weak.
+*******************************************************************************/
+
+module exe intr_weak;
+
+/*
+  @@test
+    kind run
+    expect
+    | alive true
+    | lock 4
+    | alive after false
+    | lock nil true
+    | [Heap] Allocs: 1, Frees: 1, Leaked: 0
+  @@end
+*/
+
+type
+  TThing = object
+    N: int32;
+  end;
+
+var
+  LR: ref TThing;
+  LW: weak TThing;
+  LL: ref TThing;
+
+begin
+  LR := ref TThing;
+  LR.N := 4;
+  LW := LR;
+  println("alive {}", alive(LW));
+  LL := lock(LW);
+  println("lock {}", LL.N);
+  LL := nil;
+  LR := nil;
+  println("alive after {}", alive(LW));
+  LL := lock(LW);
+  println("lock nil {}", LL = nil);
+end.

@@ -1,0 +1,103 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_exported.pcpp - Declaration: exported declarations
+
+  exported decl = "exported" declaration (BNF.md sec 3). 'exported' covers
+  the one declaration after it, a whole var / const / type block included;
+  an exported declaration goes to the module's header, so a module that
+  imports it can use it (qualified: decl_exported_unit.X, mod_import).
+  - decl_exported_unit exports a const block (CSize, CName), a var block
+    (GCount, GLimit), a type block (TPoint; TNode, forward-declared and
+    exported, behind TNodeRef), and the routines Bump, MakePoint, SumNodes
+    and Twice (Twice forward-declared and exported). Its GStep (a var
+    block right after the exported one) and TSecret stay its own.
+  - Here: the constants are read and CSize is an array bound; GCount is
+    changed by Bump (by GStep, 7, twice) and written here; a TPoint comes
+    back from MakePoint; two TNode values are linked and summed by SumNodes;
+    Twice is called through its forward.
+  - The exported var is in the unit's header: verbatim C++ reads it by its
+    C++ name (::pcpp_m_decl_exported_unit::GCount, BNF.md sec 10).
+  - A main module may export too (Three): its header holds it.
+  - Exported declarations may be built from the unit's own constants (CBase,
+    CWide from CBase, CTag): the constants CDouble = CWide + 1 and
+    CTagged = CTag + "nits", the types TRow = array[0..CWide] and
+    TAligned = record align(CBase * 8), and RowEnds' parameters. The
+    importer uses them all; the unit's own constants stay its own.
+*******************************************************************************/
+
+module exe decl_exported;
+
+/*
+  @@test
+    kind run
+    expect
+    | CSize = 4, CName = units
+    | GCount = 14
+    | GCount = 15, GLimit = 10
+    | GPoint = (3, 4)
+    | GSlots[4] = 42
+    | SumNodes = 11
+    | from C++: 15
+    | Three = 3
+    | CDouble = 7, CTagged = units
+    | TRow = 28, TAligned = 16, RowEnds = 9
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/decl/fixtures";
+
+import decl_exported_unit;
+
+exported routine Three(): int32;
+begin
+  return 3;
+end;
+
+var
+  GPoint: decl_exported_unit.TPoint;
+  GSlots: array[0..decl_exported_unit.CSize] of int32;
+  GA: decl_exported_unit.TNode;
+  GB: decl_exported_unit.TNode;
+  GRow: decl_exported_unit.TRow;
+  GExtra: array[0..2] of int32;
+
+begin
+  println("CSize = {}, CName = {}", decl_exported_unit.CSize, decl_exported_unit.CName);
+  decl_exported_unit.Bump();
+  decl_exported_unit.Bump();
+  println("GCount = {}", decl_exported_unit.GCount);
+  decl_exported_unit.GCount := decl_exported_unit.GCount + 1;
+  println("GCount = {}, GLimit = {}", decl_exported_unit.GCount, decl_exported_unit.GLimit);
+  GPoint := decl_exported_unit.MakePoint(3, 4);
+  println("GPoint = ({}, {})", GPoint.X, GPoint.Y);
+  GSlots[decl_exported_unit.CSize] := decl_exported_unit.Twice(21);
+  println("GSlots[4] = {}", GSlots[4]);
+  GA.Value := 5;
+  GB.Value := 6;
+  GA.Next := address of GB;
+  GB.Next := nil;
+  println("SumNodes = {}", decl_exported_unit.SumNodes(address of GA));
+  // The unit's header holds GCount: C++ names it by its namespace
+  println("from C++: {}", cpp("::pcpp_m_decl_exported_unit::GCount"));
+  println("Three = {}", Three());
+  println("CDouble = {}, CTagged = {}", decl_exported_unit.CDouble, decl_exported_unit.CTagged);
+  GRow[0] := 1;
+  GRow[6] := 5;
+  GExtra[2] := 3;
+  println("TRow = {}, TAligned = {}, RowEnds = {}", size(decl_exported_unit.TRow),
+    size(decl_exported_unit.TAligned), decl_exported_unit.RowEnds(GRow, GExtra));
+end.

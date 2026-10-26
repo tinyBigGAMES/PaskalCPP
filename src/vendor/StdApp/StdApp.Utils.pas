@@ -411,6 +411,16 @@ type
     // One path in two spellings (long-path prefix or not, either slash, a
     // trailing delimiter) is the same path; Windows paths compare without case
     class function  SamePath(const APath1: string; const APath2: string): Boolean; static;
+    // AFilename exists and its on-disk name has exactly the case of
+    // AFilename's name part (the folders are not compared). Windows finds a
+    // file whatever the case asked; a case-sensitive lookup (a module name)
+    // needs this so it resolves as on Linux. Never raises
+    class function  FileExistsExactCase(const AFilename: string): Boolean; static;
+    // A file that exists under AFilename's name in another case gets exactly
+    // that name (a case-only rename; writing over it keeps the old case on a
+    // case-blind file system). True = no such file, or renamed; False = the
+    // rename failed, AError = the OS's reason. Never raises
+    class function  MatchFileNameCase(const AFilename: string; out AError: string): Boolean; static;
     // A name or a relative path (no '.' or '..' segment, no drive or root)
     // under a directory ResolvePath returned, joined as text: no file system
     // access and no exception. ResolvePath's spelling (the long-path spelling
@@ -3029,6 +3039,42 @@ begin
   LPath1 := ExcludeTrailingPathDelimiter(StripLongPathPrefix(APath1).Replace('/', '\'));
   LPath2 := ExcludeTrailingPathDelimiter(StripLongPathPrefix(APath2).Replace('/', '\'));
   Result := SameText(LPath1, LPath2);
+end;
+
+class function TUtils.FileExistsExactCase(const AFilename: string): Boolean;
+var
+  LPath: string;
+  LSearch: TSearchRec;
+begin
+  // Backslashes only: the long-path prefix (\\?\) is valid only with them,
+  // and FindFirst keeps it, so long paths are looked up as given
+  LPath := AFilename.Replace('/', '\');
+  if not FileExists(LPath) then
+    Exit(False);
+  // FindFirst reports the name as the file system stores it; FileExists
+  // above already ignored case. FindFirst returns an error code, never raises
+  if FindFirst(LPath, faAnyFile, LSearch) <> 0 then
+    Exit(False);
+  try
+    Result := LSearch.Name = ExtractFileName(LPath);
+  finally
+    FindClose(LSearch);
+  end;
+end;
+
+class function TUtils.MatchFileNameCase(const AFilename: string; out AError: string): Boolean;
+var
+  LPath: string;
+begin
+  // FileExists ignores case; FileExistsExactCase and MoveFile (a case-only
+  // rename of one file) report by result, so nothing here raises
+  AError := '';
+  LPath := AFilename.Replace('/', '\');
+  if (not FileExists(LPath)) or FileExistsExactCase(LPath) then
+    Exit(True);
+  Result := MoveFile(PChar(LPath), PChar(LPath));
+  if not Result then
+    AError := SysErrorMessage(GetLastError());
 end;
 
 class function TUtils.JoinResolvedPath(const AResolvedDir: string;

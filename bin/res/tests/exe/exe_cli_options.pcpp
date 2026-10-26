@@ -1,0 +1,68 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_cli_options.pcpp - Build-kind compliance: pcpp -h
+
+  pcpp -h lists every option with what it does, then examples (exit 0). This
+  file itself is never compiled.
+*******************************************************************************/
+
+module exe exe_cli_options;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner -h"
+    exitcode 0
+    expect
+    | USAGE:
+    |   pcpp <source> [OPTIONS]
+    |   pcpp --clean [<folder>] [--dry-run]
+    | 
+    | REQUIRED:
+    |   <source>                  Main module (.pcpp)
+    | 
+    | OPTIONS:
+    |   -r, --run                    Run after building (executables only)
+    |   -o, --output    <path>       Set output directory (wins over @outputpath; default: output)
+    |   -t, --target    <triple>     Set target triple: x86_64-windows-gnu (default), x86_64-linux-gnu
+    |   -opt, --optimize <level>     Set optimize level: debug, safe, fast, small
+    |   --defaults                   -opt / -t only apply where the source has no @optimize / @target (the editor passes this)
+    |   --progress                   Draw the build progress in place even when output is piped (the editor passes this)
+    |   --no-banner                  Print no banner (version, copyright): for scripts and tests
+    |   --terminal      <pipe>       With -r: the program's terminal is the named pipe an editor listens on
+    |   editor [files]               Start the PaskalCPP Editor with the files given
+    |   -d, --debug                  Build debug, then debug it in the console debugger (x86_64-windows-gnu)
+    |   --host          <exe>        With -d on a dll: the exe that loads it
+    |   -- <args>                    Everything after -- is passed, as written, to the program -r or -d runs
+    |   --lsp                        Run the language server on stdin/stdout (takes no other argument)
+    |   --dap                        Run the debug adapter (DAP) on stdin/stdout (takes no other argument)
+    |   --clean         [<folder>]   Clear a pcpp output folder (default: the current folder), after checks and a y/N question
+    |   --dry-run                    With --clean: check and list what would be deleted, delete nothing
+    |   -h, --help                   Display this help message
+    | 
+    | EXAMPLES:
+    |   pcpp hello
+    |   pcpp hello -r
+    |   pcpp hello -r -opt fast
+    |   pcpp hello -d
+    |   pcpp hello --target x86_64-linux-gnu --output build
+    |   pcpp editor hello.pcpp
+    |   pcpp --clean output --dry-run
+  @@end
+*/
+
+begin
+end.

@@ -1,0 +1,53 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addlibrarypath.pcpp - Directive: @addlibrarypath
+
+  @addlibrarypath "<folder>"; adds a folder the linker searches for the
+  libraries @linklibrary names (BNF.md sec 2). The folder must exist. The
+  directive may be given more than once: the folders accumulate, and one
+  folder named again (in any spelling) is the same folder. An imported
+  unit's @addlibrarypath adds to the one build (dir_linklibrary's unit shows
+  it). This program adds output\lib, where its deps dir_linklibrary_lib and
+  dir_addlibrarypath_lib are built, twice in two spellings, links both
+  libraries by name and calls one routine from each. Without the folder the
+  linker finds neither library (dir_addlibrarypath_err_nopath).
+*******************************************************************************/
+
+module exe dir_addlibrarypath;
+
+/*
+  @@test
+    kind run
+    deps dir_linklibrary_lib dir_addlibrarypath_lib
+    expect
+    | dir_linklibrary_add(2, 3) = 5
+    | dir_addlibrarypath_div(7, 2) = 3
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addlibrarypath "$P:output/lib";
+@addlibrarypath "$P:output\\lib";
+@linklibrary "dir_linklibrary_lib";
+@linklibrary "dir_addlibrarypath_lib";
+
+routine clink dir_linklibrary_add(AA: int32; AB: int32): int32; external;
+routine clink dir_addlibrarypath_div(AA: int32; AB: int32): int32; external;
+
+begin
+  println("dir_linklibrary_add(2, 3) = {}", dir_linklibrary_add(2, 3));
+  println("dir_addlibrarypath_div(7, 2) = {}", dir_addlibrarypath_div(7, 2));
+end.

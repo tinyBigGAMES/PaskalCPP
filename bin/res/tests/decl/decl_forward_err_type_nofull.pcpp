@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_forward_err_type_nofull.pcpp - Decl: forward, type nofull
+
+  Break step of decl_forward: a forward type whose full declaration never
+  comes.
+*******************************************************************************/
+
+module exe decl_forward_err_type_nofull;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+forward type TNode; // ERROR SM0303@1
+
+type
+  TNodeRef = ptr to TNode;
+
+begin
+end.

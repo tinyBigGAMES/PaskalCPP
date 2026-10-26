@@ -1,0 +1,108 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_conditional.pcpp - Directive: the conditional directives
+  @define @undef @ifdef @ifndef @elseif @else @endif
+
+  BNF.md sec 2: PaskalCPP's own conditional symbols, evaluated by the
+  PaskalCPP compiler. They may stand anywhere (the prologue, module level,
+  inside one statement) and nest. @elseif X is "else, if X is defined". A C/C++
+  #ifdef does not see a PaskalCPP symbol, and @ifdef does not see a C macro set
+  by @cppdefine. Every printed line names the branch it comes from; a line
+  starting "wrong branch" means a branch was taken that must not be.
+*******************************************************************************/
+
+module exe dir_conditional;
+
+/*
+  @@test
+    kind run
+    expect
+    | module level: GWhich = 1
+    | @ifdef DIR_CND_ON: taken
+    | @ifndef DIR_CND_GONE: taken (@undef removed it)
+    | @elseif DIR_CND_ON: taken
+    | @else: taken
+    | nested @else inside a taken @ifdef: taken
+    | inside one statement: 10
+    | #ifdef DIR_CND_ON: not seen by C/C++
+    | @ifdef DIR_CND_C: a @cppdefine macro is not seen by PaskalCPP
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@cppdefine "DIR_CND_C";
+
+@define DIR_CND_ON
+@define DIR_CND_GONE
+@undef DIR_CND_GONE
+
+@ifdef DIR_CND_ON
+const
+  GWhich: int32 = 1;
+@else
+const
+  GWhich: int32 = 2;
+@endif
+
+begin
+  println("module level: GWhich = {}", GWhich);
+@ifdef DIR_CND_ON
+  println("@ifdef DIR_CND_ON: taken");
+@else
+  println("wrong branch: @ifdef DIR_CND_ON not taken");
+@endif
+@ifndef DIR_CND_GONE
+  println("@ifndef DIR_CND_GONE: taken (@undef removed it)");
+@endif
+@ifdef DIR_CND_NONE
+  println("wrong branch: @ifdef DIR_CND_NONE");
+@elseif DIR_CND_ON
+  println("@elseif DIR_CND_ON: taken");
+@else
+  println("wrong branch: @else after a taken @elseif");
+@endif
+@ifdef DIR_CND_NONE
+  println("wrong branch: @ifdef DIR_CND_NONE");
+@elseif DIR_CND_NONE_EITHER
+  println("wrong branch: @elseif DIR_CND_NONE_EITHER");
+@else
+  println("@else: taken");
+@endif
+@ifdef DIR_CND_ON
+@ifdef DIR_CND_NONE
+  println("wrong branch: nested @ifdef DIR_CND_NONE");
+@else
+  println("nested @else inside a taken @ifdef: taken");
+@endif
+@endif
+  println("inside one statement: {}",
+@ifdef DIR_CND_ON
+    10
+@else
+    20
+@endif
+  );
+#ifdef DIR_CND_ON
+  println("wrong branch: #ifdef DIR_CND_ON seen by C/C++");
+#else
+  println("#ifdef DIR_CND_ON: not seen by C/C++");
+#endif
+@ifdef DIR_CND_C
+  println("wrong branch: @ifdef DIR_CND_C seen by PaskalCPP");
+@else
+  println("@ifdef DIR_CND_C: a @cppdefine macro is not seen by PaskalCPP");
+@endif
+end.

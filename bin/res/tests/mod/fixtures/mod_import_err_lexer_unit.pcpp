@@ -1,0 +1,25 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_import_err_lexer_unit.pcpp - Module fixture: a unit with a
+  character no token starts with (mod_import_err_lexer imports it).
+*******************************************************************************/
+
+module unit mod_import_err_lexer_unit;
+
+var
+  GValue: int32 = 1 ` 2; // ERROR LX0004@21
+
+end.

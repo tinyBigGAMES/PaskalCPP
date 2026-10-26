@@ -1,0 +1,54 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lsp_workspace_symbols.pcpp - LSP compliance: Go to Symbol in Workspace
+
+  Ctrl+T (Go > Go to Symbol in Workspace) lists the declarations of every
+  open file, a type's members under the type's name, and narrows the list
+  as you type (any part of the name, any case). Picking an entry opens its
+  file at the name.
+
+  How to check: open this file and lsp_unit.pcpp, press Ctrl+T and type
+  each text a CHECK line gives; compare the list with the text after "->".
+    CHECK: twi -> Twice (lsp_unit.pcpp), Twins (this file)
+    CHECK: shade -> TShade, and its member Shade (in TShade)
+    CHECK: zzz -> nothing (no matching symbols)
+  Needs lsp_unit.pcpp in the same folder.
+*******************************************************************************/
+
+module exe lsp_workspace_symbols;
+
+/*
+  @@test
+    kind manual
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/lsp/fixtures";
+import lsp_unit;
+
+type
+  TShade = record
+    Shade: int32;
+  end;
+
+routine Twins(const AN: int32): int32;
+begin
+  return lsp_unit.Twice(AN);
+end;
+
+begin
+  println("{}", Twins(2));
+end.

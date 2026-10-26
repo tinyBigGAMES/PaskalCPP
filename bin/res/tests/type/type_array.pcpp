@@ -1,0 +1,162 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_array.pcpp - Type: array types
+
+  An array type (BNF.md sec 4: array type) is static, array[lo..hi] of T,
+  or dynamic, array of T (array[] of T is the same). Every part of the
+  production is used here and what it does is printed:
+  - static bounds that are integer constants (a const, a negative low bound,
+    a low bound other than 0), char constants (TLetters, indexed by a char)
+    or values of one choices type (TNames, indexed by a value); len gives
+    the element count, size the bytes; print shows every element;
+  - an array of arrays (TGrid, LG[1][2]), an array field and a dynamic
+    array field of a record (THolder);
+  - a static array is a value: := copies it, a value parameter and a
+    return value are copies, = compares element by element; a var
+    parameter writes the caller's array, a const one reads it;
+  - a dynamic array is sized by setlength (new elements start zeroed),
+    also through a var parameter.
+*******************************************************************************/
+
+module exe type_array;
+
+/*
+  @@test
+    kind run
+    expect
+    | quad [1, 2, 3, 4] sum 10 len 4 size 16
+    | copy 1 9 same false
+    | equal true
+    | doubled [2, 4, 6, 8] kept 4
+    | row [5, 10, 15] first 5 last 15
+    | grid 7 [[0, 0, 0], [0, 0, 7]]
+    | offset 10 20 len 5
+    | letters 3 [0, 0, 3, 0, 0]
+    | names red blue len 3
+    | dynamic [0, 0, 8] len 3
+    | open ["x", "y"]
+    | holder 4 6 len 1
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+const
+  KLast: int32 = 3;
+
+type
+  TColor = choices(cRed, cGreen, cBlue);
+  TQuad = array[0..KLast] of int32;
+  TRow = array[1..3] of int32;
+  TGrid = array[0..1] of array[0..2] of int32;
+  TOffset = array[-2..2] of int32;
+  TLetters = array['A'..'E'] of int32;
+  TNames = array[TColor.cRed..TColor.cBlue] of string;
+  TList = array of int32;
+  TOpen = array[] of string;
+  TPoint = record
+    X: int32;
+    Y: int32;
+  end;
+  THolder = record
+    Cells: array[0..1] of int32;
+    Items: array of TPoint;
+  end;
+
+routine Sum(const AQ: TQuad): int32;
+var
+  LI: int32;
+  LS: int32 = 0;
+begin
+  for LI := 0 to KLast do
+    LS := LS + AQ[LI];
+  end;
+  return LS;
+end;
+
+routine Fill(var AR: TRow; const AV: int32);
+var
+  LI: int32;
+begin
+  for LI := 1 to 3 do
+    AR[LI] := AV * LI;
+  end;
+end;
+
+routine Doubled(AQ: TQuad): TQuad;
+var
+  LI: int32;
+  LOut: TQuad;
+begin
+  LOut := AQ;
+  for LI := 0 to KLast do
+    LOut[LI] := LOut[LI] * 2;
+  end;
+  return LOut;
+end;
+
+routine Grow(var AL: TList; const AN: int64);
+begin
+  setlength(AL, AN);
+end;
+
+var
+  LQ: TQuad;
+  LCopy: TQuad;
+  LR: TRow;
+  LG: TGrid;
+  LO: TOffset;
+  LL: TLetters;
+  LN: TNames;
+  LD: TList;
+  LT: TOpen;
+  LH: THolder;
+
+begin
+  LQ[0] := 1;
+  LQ[1] := 2;
+  LQ[2] := 3;
+  LQ[3] := 4;
+  println("quad {} sum {} len {} size {}", LQ, Sum(LQ), len(LQ), size(TQuad));
+  LCopy := LQ;
+  LCopy[0] := 9;
+  println("copy {} {} same {}", LQ[0], LCopy[0], LQ = LCopy);
+  LCopy[0] := 1;
+  println("equal {}", LQ = LCopy);
+  println("doubled {} kept {}", Doubled(LQ), LQ[3]);
+  Fill(LR, 5);
+  println("row {} first {} last {}", LR, LR[1], LR[3]);
+  LG[1][2] := 7;
+  println("grid {} {}", LG[1][2], LG);
+  LO[-2] := 10;
+  LO[2] := 20;
+  println("offset {} {} len {}", LO[-2], LO[2], len(LO));
+  LL['C'] := 3;
+  println("letters {} {}", LL['C'], LL);
+  LN[TColor.cRed] := "red";
+  LN[TColor.cBlue] := "blue";
+  println("names {} {} len {}", LN[TColor.cRed], LN[TColor.cBlue], len(LN));
+  Grow(LD, 3);
+  LD[2] := 8;
+  println("dynamic {} len {}", LD, len(LD));
+  setlength(LT, 2);
+  LT[0] := "x";
+  LT[1] := "y";
+  println("open {}", LT);
+  LH.Cells[1] := 4;
+  setlength(LH.Items, 1);
+  LH.Items[0].X := 6;
+  println("holder {} {} len {}", LH.Cells[1], LH.Items[0].X, len(LH.Items));
+end.

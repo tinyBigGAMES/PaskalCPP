@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_packed_err_dynarray.pcpp - Type: record packed, dynarray
+
+  Break step of type_record_packed: a dynamic array field in a packed record
+  (SM0331).
+*******************************************************************************/
+
+module exe type_record_packed_err_dynarray;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TP = record packed
+    C: int8;
+    D: array of int32; // ERROR SM0331@5: holds a string or dynamic array
+  end;
+
+begin
+end.

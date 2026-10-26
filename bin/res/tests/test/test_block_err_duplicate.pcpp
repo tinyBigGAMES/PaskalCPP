@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  test_block_err_duplicate.pcpp - Test: block, duplicate
+
+  Break step of test_block: two tests of one module with one name (SM0112).
+*******************************************************************************/
+
+module exe test_block_err_duplicate;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+end.
+
+test "same"
+begin
+end;
+
+test "same" // ERROR SM0112@6: test 'same' is already declared at line
+begin
+end;

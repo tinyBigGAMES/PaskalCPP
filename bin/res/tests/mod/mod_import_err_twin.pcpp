@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_import_err_twin.pcpp - Module: two files that are the same module
+
+  Break step of mod_import: mod_twin_u is found in fixtures\ (this file's
+  import) and, as another file, in fixtures\twin\ (mod_twin_v's own folder,
+  searched first for its imports). One name is one module in a build.
+*******************************************************************************/
+
+module exe mod_import_err_twin;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+@addmodulepath "$P:res/tests/mod/fixtures/twin";
+import mod_twin_u, mod_twin_v;
+
+begin
+end.

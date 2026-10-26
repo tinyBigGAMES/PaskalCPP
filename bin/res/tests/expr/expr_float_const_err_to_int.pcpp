@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_float_const_err_to_int.pcpp - Expr: float const, to int
+
+  Break step of expr_float_const: the constant NaN cast to an int32 (SM0200):
+  an integer holds no NaN, no infinity and no value past its range, so such a
+  cast of a constant is an error, never C++'s undefined conversion.
+*******************************************************************************/
+
+module exe expr_float_const_err_to_int;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+const
+  KNaN: float64 = 0.0 / 0.0;
+
+var
+  LI: int32;
+
+begin
+  LI := int32(KNaN); // ERROR SM0200@9: nan does not fit in 'int32' (-2147483648..2147483647)
+end.

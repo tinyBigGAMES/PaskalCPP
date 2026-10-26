@@ -1,0 +1,58 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_subsystem_gui.pcpp - Directive: @subsystem gui (Windows)
+
+  An exe built with the gui subsystem: Windows starts it without a console
+  window, so what it would print is not shown; this one says what it is in a
+  message box instead. The suite builds it in the gui cell and does not run
+  it: what it shows is a window, a person checks that by running
+  output\bin\dir_subsystem_gui.exe: no console window opens, a message box
+  titled "dir_subsystem_gui" says "subsystem: gui", closing it ends the
+  program (started from Explorer too). On Linux the directive is a warning
+  (dir_subsystem_err_linux).
+*******************************************************************************/
+
+module exe dir_subsystem_gui;
+
+/*
+  @@test
+    kind build
+    targets x86_64-windows-gnu
+    subsystem gui
+  @@end
+*/
+
+@subsystem gui;
+
+#include <windows.h>
+
+// The subsystem field of this program's own PE header, shown in a message box
+static void dir_subsystem_show()
+{
+  const unsigned char* LBase = reinterpret_cast<const unsigned char*>(GetModuleHandleW(nullptr));
+  const IMAGE_DOS_HEADER* LDos = reinterpret_cast<const IMAGE_DOS_HEADER*>(LBase);
+  const IMAGE_NT_HEADERS* LNt = reinterpret_cast<const IMAGE_NT_HEADERS*>(LBase + LDos->e_lfanew);
+  const wchar_t* LText = L"subsystem: other";
+  if (LNt->OptionalHeader.Subsystem == IMAGE_SUBSYSTEM_WINDOWS_CUI)
+    LText = L"subsystem: console";
+  else if (LNt->OptionalHeader.Subsystem == IMAGE_SUBSYSTEM_WINDOWS_GUI)
+    LText = L"subsystem: gui";
+  MessageBoxW(nullptr, LText, L"dir_subsystem_gui", MB_OK);
+}
+
+begin
+  cpp("dir_subsystem_show()");
+end.

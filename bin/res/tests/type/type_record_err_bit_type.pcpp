@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_err_bit_type.pcpp - Type: record, bit type
+
+  Break step of type_record: a float32 field takes no bit width (SM0314).
+*******************************************************************************/
+
+module exe type_record_err_bit_type;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TR = record
+    B: float32 : 3; // ERROR SM0314@5: a bitfield is an integer, bool, char, wchar or choices field
+  end;
+
+begin
+end.

@@ -1,0 +1,93 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_digraphs.pcpp - Lexical: digraphs
+
+  C++'s digraphs work everywhere, PaskalCPP code included (BNF.md sec 9):
+  <: :> are [ ], <% %> are { }, %: and %:%: are # and ## (a %: first on its
+  line starts a preprocessor line). <:: is < then :: (C++11), so
+  std::vector<::std::int32_t> is a vector of int32, not <: then a colon.
+
+  The <:: rule as clang reads it: <::: is <: then :: (GNums<:::GIdx:> is
+  GNums[::GIdx]); <::> is <: :> (an empty lambda capture); <:: then a
+  newline is still < :: ; the look at what follows <:: reads through a
+  splice (<:: + > is <: :>, an unsized array), and <: + : is < :: . A
+  splice inside a digraph joins it (< + : is <:, % + : starts a # line),
+  and blanks and a comment before %: keep it first on its line.
+*******************************************************************************/
+
+module exe lex_digraphs;
+
+/*
+  @@test
+    kind run
+    expect
+    | index 5
+    | vector 3
+    | paste 21
+    | macro 42
+    | picked 2
+    | lambda 7
+    | newline 8
+    | array 5
+    | spliced colon 9
+    | spliced digraph 3
+    | spliced hash 6
+    | lead 11
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+%:include <vector>
+%:define TWICE(x) ((x) * 2)
+%:define CAT(a, b) a%:%:b
+
+std::vector<::std::int32_t> GNums<%1, 2, 3%>;
+int CAT(my, value) = 21;
+
+int GIdx = 1;
+int GPicked = GNums<:::GIdx:>;
+auto GSeven = <::>() <% return 7; %>;
+int GSevenValue = GSeven();
+std::vector<::
+std::int32_t> GEight<%8%>;
+int GArr<::\
+> = <%4, 5%>;
+std::vector<:\
+:std::int32_t> GNine<%9%>;
+%\
+:define LX_SPLIT 6
+  /* blanks and a comment first */ %:define LX_LEAD 11
+
+var
+  LA: array[0..2] of int32;
+
+begin
+  LA<:1:> := 5;
+  println("index {}", LA<:1:>);
+  println("vector {}", GNums<:2:>);
+  println("paste {}", myvalue);
+  println("macro {}", TWICE(myvalue));
+  println("picked {}", GPicked);
+  println("lambda {}", GSevenValue);
+  println("newline {}", GEight<:0:>);
+  println("array {}", GArr<:1:>);
+  println("spliced colon {}", GNine<:0:>);
+  LA<\
+:0:> := 3;
+  println("spliced digraph {}", LA<:0:>);
+  println("spliced hash {}", LX_SPLIT);
+  println("lead {}", LX_LEAD);
+end.

@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_kinds_err_noend.pcpp - Module: a file that ends before end.
+
+  Break step of mod_kinds: the module ends with end.; the end of the file
+  comes first (reported where the file ends: this marker's line).
+*******************************************************************************/
+
+module lib mod_kinds_err_noend;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  GValue: int32 = 1;
+// ERROR PR0001

@@ -1,0 +1,45 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_err_const_method.pcpp - Type: object, const method
+
+  Break step of type_object: a method called through a const parameter: a
+  method may change its object, pass it var (SM0426).
+*******************************************************************************/
+
+module exe type_object_err_const_method;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    N: int32;
+    method Bump();
+    begin
+      self.N := self.N + 1;
+    end;
+  end;
+
+routine Touch(const AA: TA);
+begin
+  AA.Bump(); // ERROR SM0426@3: method 'Bump' may change its object, which is const here: pass it var
+end;
+
+begin
+end.

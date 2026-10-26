@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_verinfo_err_linux.pcpp - Directive: @addverinfo on for Linux
+
+  Break step of dir_verinfo: version info is a Windows resource: a warning,
+  not used; the @vimajor after it is not reported a second time. Linux only:
+  on Windows it applies.
+*******************************************************************************/
+
+module exe dir_verinfo_err_linux;
+
+/*
+  @@test
+    kind build
+    targets x86_64-linux-gnu
+  @@end
+*/
+
+@addverinfo on; // WARN SM0103@1: a target that is not Windows
+@vimajor 1;
+
+begin
+end.

@@ -1,0 +1,49 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_cpp_err_override_const.pcpp - Type: object cpp, override const
+
+  Break step of type_object_cpp: override of a C++ const virtual without const
+  (SM0334).
+*******************************************************************************/
+
+module exe type_object_cpp_err_override_const;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+struct CGauge {
+  virtual ~CGauge() = default;
+  virtual int corners() const { return 0; }
+  int plain() { return 0; }
+};
+
+type
+  TDial = object(CGauge)
+    N: int32;
+    override method corners(): int32; // ERROR SM0334
+    begin
+      return self.N;
+    end;
+  end;
+
+var
+  LD: TDial;
+begin
+  println("{}", LD.N);
+end.

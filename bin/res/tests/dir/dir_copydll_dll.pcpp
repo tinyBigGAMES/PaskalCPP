@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_copydll_dll.pcpp - Directive fixture: the dll dir_copydll copies
+  beside itself with @copydll and loads at run time (a dep test: built in
+  each consumer cell before it, never tallied).
+*******************************************************************************/
+
+module dll dir_copydll_dll;
+
+/*
+  @@test
+    kind dep
+  @@end
+*/
+
+exported routine clink dir_copydll_twice(AN: int32): int32;
+begin
+  return AN * 2;
+end;
+
+end.

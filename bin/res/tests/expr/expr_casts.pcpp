@@ -1,0 +1,61 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_casts.pcpp - Expression: casts
+
+  A type cast T(x) for a builtin type or an alias of one, a pointer cast
+  ptr to T(x), a C-style cast (T)x and a named cast static_cast<T>(x)
+  (BNF.md sec 6). A cast always takes one value; (text) is a cast when the
+  text is unmistakably a type, else (a name) is a cast only when an operand
+  follows, so (LN) - 1 is a subtraction.
+*******************************************************************************/
+
+module exe expr_casts;
+
+/*
+  @@test
+    kind run
+    expect
+    | builtin 3 4464 300
+    | alias 4464
+    | pointer 300
+    | c style 3 -1
+    | named 3 301
+    | paren name 299
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+type
+  TSmall = int16;
+
+var
+  LF: float64 = 3.75;
+  LN: int32 = 300;
+  LBig: int32 = 70000;
+  LP: ptr to int32;
+  LU: uint64;
+
+begin
+  println("builtin {} {} {}", int32(LF), int16(LBig), float32(LN));
+  println("alias {}", TSmall(LBig));
+  LP := address of LN;
+  LU := uint64(LP);
+  LP := ptr to int32(LU);
+  println("pointer {}", LP^);
+  println("c style {} {}", (int)LF, (int32_t)-1);
+  println("named {} {}", static_cast<int>(LF), static_cast<int32_t>(LN) + 1);
+  println("paren name {}", (LN) - 1);
+end.

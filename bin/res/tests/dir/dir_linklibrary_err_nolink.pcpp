@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_linklibrary_err_nolink.pcpp - Directive: a call into winmm without @linklibrary "winmm"
+
+  Break step of dir_linklibrary: the linker cannot find timeGetTime. Windows
+  only: winmm is a Windows library. Debug only: the linker reads the calling
+  line from the objects' debug info, which the other levels strip.
+*******************************************************************************/
+
+module exe dir_linklibrary_err_nolink;
+
+/*
+  @@test
+    kind error
+    targets x86_64-windows-gnu
+    opt debug
+  @@end
+*/
+
+routine clink timeGetTime(): uint32; external;
+
+var
+  GTicks: uint32;
+
+begin
+  GTicks := timeGetTime(); // ERROR ZB0016
+end.

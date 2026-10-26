@@ -1,0 +1,50 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_is_err_target.pcpp - Type: object is, target
+
+  Break step of type_object_is: as naming a type that is not an object
+  (SM0272).
+*******************************************************************************/
+
+module exe type_object_is_err_target;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TShape = object
+    virtual method Name(): string;
+    begin
+      return "shape";
+    end;
+  end;
+  TCircle = object(TShape)
+    R: int32;
+  end;
+  TSquare = object(TShape)
+    S: int32;
+  end;
+
+routine Check(const AShape: TShape): int32;
+begin
+  return AShape as int32; // ERROR SM0272
+end;
+
+begin
+end.

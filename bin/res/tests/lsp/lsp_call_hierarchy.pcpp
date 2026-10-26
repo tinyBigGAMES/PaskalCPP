@@ -1,0 +1,65 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lsp_call_hierarchy.pcpp - LSP compliance: Show Call Hierarchy
+
+  Shift+Alt+H (Go > Show Call Hierarchy) on a routine's name, at its
+  declaration or at a call of it, opens the CALL HIERARCHY panel on that
+  routine: who calls it (incoming) and what it calls (outgoing), each with
+  the places of the calls. A call outside every routine (the program's
+  body) comes from the module itself, a leaf.
+
+  How to check: put the cursor on the name a CHECK line names (on the code
+  line below it), press Shift+Alt+H and compare the panel with the text
+  after "->".
+*******************************************************************************/
+
+module exe lsp_call_hierarchy;
+
+/*
+  @@test
+    kind manual
+  @@end
+*/
+
+// CHECK: Leaf (the forward) -> the full Leaf below; called by Mid and by
+// lsp_call_hierarchy (the body); calls nothing
+forward routine Leaf(): int32;
+
+// CHECK: Mid -> called by Top (two places); calls Leaf
+routine Mid(): int32;
+begin
+  return Leaf() + 1;
+end;
+
+// CHECK: Top -> called by lsp_call_hierarchy (the body); calls Mid (two places)
+routine Top(): int32;
+begin
+  return Mid() + Mid();
+end;
+
+routine Leaf(): int32;
+begin
+  return 1;
+end;
+
+var
+  GV: int32;
+
+begin
+  // CHECK: Top (this call) -> the same as on Top's name
+  GV := Top() + Leaf();
+  println("{}", GV);
+end.

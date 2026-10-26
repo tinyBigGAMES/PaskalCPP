@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_relational_err_operands.pcpp - Expr: relational, operands
+
+  Break step of expr_relational: a string compared with an int32 (SM0250).
+*******************************************************************************/
+
+module exe expr_relational_err_operands;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LS: string;
+
+begin
+  LS := "a";
+  if LS = 1 then // ERROR SM0250@6: operator '=' does not take
+  end;
+end.

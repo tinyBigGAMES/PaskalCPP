@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_identifiers_err_at.pcpp - Lexical: an @ with no directive name
+
+  Break step of lex_identifiers: @ starts a directive, so an @ with no
+  name after it is LX0009.
+*******************************************************************************/
+
+module exe lex_identifiers_err_at;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  @ // ERROR LX0009@3: '@' must be followed by a directive name
+end.

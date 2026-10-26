@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_choices_err_bare_unit.pcpp - Type: an imported unit's value named bare
+
+  Break step of type_choices: an imported value too is reached through its
+  type, with its module (SM0015).
+*******************************************************************************/
+
+module exe type_choices_err_bare_unit;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/type/fixtures";
+
+import type_choices_unit;
+
+var
+  LU: type_choices_unit.TMode;
+
+begin
+  LU := mFast; // ERROR SM0015@9: 'mFast' is a choice value: write type_choices_unit.TMode.mFast
+end.

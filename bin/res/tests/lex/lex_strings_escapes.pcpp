@@ -1,0 +1,317 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_strings_escapes.pcpp - Lexer: every string escape form
+
+  Each escape the lexer decodes (BNF.md sec 1: simple, octal, braced octal,
+  hex, braced hex, \u / \U, braced \u, \N{name} with its aliases and
+  generated names, raw strings) gives the same text as the same characters
+  written another way; the program compares each pair byte for byte
+  (lex_same, over each literal's whole array: = on two literals would be
+  C++'s address comparison), built by clang, so its decoding agrees with
+  the lexer's.
+*******************************************************************************/
+
+module exe lex_strings_escapes;
+
+/*
+  @@test
+    kind run
+    expect
+    | simple set: ok
+    | no trigraphs: ok
+    | octal: ok
+    | octal greedy 3: ok
+    | octal stops at 8: ok
+    | octal 177: ok
+    | octal bytes C3 A9: ok
+    | braced octal: ok
+    | braced octal zeros: ok
+    | hex: ok
+    | hex zeros: ok
+    | hex lower case: ok
+    | hex stops at G: ok
+    | hex bytes C3 A9: ok
+    | braced hex: ok
+    | braced hex bytes: ok
+    | ucn 00E9: ok
+    | ucn lower: ok
+    | ucn exactly 4: ok
+    | ucn 8 digits: ok
+    | braced ucn: ok
+    | braced ucn short: ok
+    | ucn basic: ok
+    | ucn control: ok
+    | name: ok
+    | control alias: ok
+    | control alias line feed: ok
+    | correction alias: ok
+    | corrected original: ok
+    | alternate alias: ok
+    | CJK: ok
+    | CJK leading zero: ok
+    | CJK many zeros: ok
+    | CJK extension I: ok
+    | Tangut: ok
+    | Khitan: ok
+    | Nushu: ok
+    | CJK compatibility: ok
+    | Tangut component: ok
+    | Hangul GA: ok
+    | Hangul HIH: ok
+    | raw body as written: ok
+    | raw delimiter: ok
+    | raw 16-char delimiter: ok
+    | empty: 0
+    | NUL: 1 / 3
+    | raw empty: 0
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+#include <string_view>
+
+// The bytes of two literals (each array but its closing NUL) are equal
+template <std::size_t N, std::size_t M>
+static bool lex_same(const char (&AA)[N], const char (&AB)[M])
+{
+  return std::string_view(AA, N - 1) == std::string_view(AB, M - 1);
+}
+
+begin
+  if lex_same("\a\b\f\n\r\t\v\e\E\"\'\?\\", "\x07\x08\x0C\x0A\x0D\x09\x0B\x1B\x1B\x22\x27\x3F\x5C") then
+    println("simple set: ok");
+  else
+    println("simple set: differs");
+  end;
+  if lex_same("??=", "\x3F\x3F\x3D") then
+    println("no trigraphs: ok");
+  else
+    println("no trigraphs: differs");
+  end;
+  if lex_same("\101", "A") then
+    println("octal: ok");
+  else
+    println("octal: differs");
+  end;
+  if lex_same("\1011", "A1") then
+    println("octal greedy 3: ok");
+  else
+    println("octal greedy 3: differs");
+  end;
+  if lex_same("\18", "\0018") then
+    println("octal stops at 8: ok");
+  else
+    println("octal stops at 8: differs");
+  end;
+  if lex_same("\177", "\x7F") then
+    println("octal 177: ok");
+  else
+    println("octal 177: differs");
+  end;
+  if lex_same("\303\251", "é") then
+    println("octal bytes C3 A9: ok");
+  else
+    println("octal bytes C3 A9: differs");
+  end;
+  if lex_same("\o{101}", "A") then
+    println("braced octal: ok");
+  else
+    println("braced octal: differs");
+  end;
+  if lex_same("\o{0000000000101}", "A") then
+    println("braced octal zeros: ok");
+  else
+    println("braced octal zeros: differs");
+  end;
+  if lex_same("\x41", "A") then
+    println("hex: ok");
+  else
+    println("hex: differs");
+  end;
+  if lex_same("\x0000000000000041", "A") then
+    println("hex zeros: ok");
+  else
+    println("hex zeros: differs");
+  end;
+  if lex_same("\x4a", "J") then
+    println("hex lower case: ok");
+  else
+    println("hex lower case: differs");
+  end;
+  if lex_same("\x41G", "AG") then
+    println("hex stops at G: ok");
+  else
+    println("hex stops at G: differs");
+  end;
+  if lex_same("\xC3\xA9", "é") then
+    println("hex bytes C3 A9: ok");
+  else
+    println("hex bytes C3 A9: differs");
+  end;
+  if lex_same("\x{41}", "A") then
+    println("braced hex: ok");
+  else
+    println("braced hex: differs");
+  end;
+  if lex_same("\x{c3}\x{A9}", "é") then
+    println("braced hex bytes: ok");
+  else
+    println("braced hex bytes: differs");
+  end;
+  if lex_same("\u00E9", "é") then
+    println("ucn 00E9: ok");
+  else
+    println("ucn 00E9: differs");
+  end;
+  if lex_same("\u00e9", "é") then
+    println("ucn lower: ok");
+  else
+    println("ucn lower: differs");
+  end;
+  if lex_same("\u00E9F", "éF") then
+    println("ucn exactly 4: ok");
+  else
+    println("ucn exactly 4: differs");
+  end;
+  if lex_same("\U0001F600", "😀") then
+    println("ucn 8 digits: ok");
+  else
+    println("ucn 8 digits: differs");
+  end;
+  if lex_same("\u{1F600}", "😀") then
+    println("braced ucn: ok");
+  else
+    println("braced ucn: differs");
+  end;
+  if lex_same("\u{e9}", "é") then
+    println("braced ucn short: ok");
+  else
+    println("braced ucn short: differs");
+  end;
+  if lex_same("\u0041", "A") then
+    println("ucn basic: ok");
+  else
+    println("ucn basic: differs");
+  end;
+  if lex_same("\u0001", "\x01") then
+    println("ucn control: ok");
+  else
+    println("ucn control: differs");
+  end;
+  if lex_same("\N{LATIN SMALL LETTER E WITH ACUTE}", "é") then
+    println("name: ok");
+  else
+    println("name: differs");
+  end;
+  if lex_same("\N{NULL}", "\0") then
+    println("control alias: ok");
+  else
+    println("control alias: differs");
+  end;
+  if lex_same("\N{LINE FEED}", "\n") then
+    println("control alias line feed: ok");
+  else
+    println("control alias line feed: differs");
+  end;
+  if lex_same("\N{LATIN CAPITAL LETTER GHA}", "Ƣ") then
+    println("correction alias: ok");
+  else
+    println("correction alias: differs");
+  end;
+  if lex_same("\N{LATIN CAPITAL LETTER OI}", "Ƣ") then
+    println("corrected original: ok");
+  else
+    println("corrected original: differs");
+  end;
+  if lex_same("\N{BYTE ORDER MARK}", "\uFEFF") then
+    println("alternate alias: ok");
+  else
+    println("alternate alias: differs");
+  end;
+  if lex_same("\N{CJK UNIFIED IDEOGRAPH-4E00}", "一") then
+    println("CJK: ok");
+  else
+    println("CJK: differs");
+  end;
+  if lex_same("\N{CJK UNIFIED IDEOGRAPH-04E00}", "一") then
+    println("CJK leading zero: ok");
+  else
+    println("CJK leading zero: differs");
+  end;
+  if lex_same("\N{CJK UNIFIED IDEOGRAPH-000004E00}", "一") then
+    println("CJK many zeros: ok");
+  else
+    println("CJK many zeros: differs");
+  end;
+  if lex_same("\N{CJK UNIFIED IDEOGRAPH-2EBF0}", "\U0002EBF0") then
+    println("CJK extension I: ok");
+  else
+    println("CJK extension I: differs");
+  end;
+  if lex_same("\N{TANGUT IDEOGRAPH-17000}", "\U00017000") then
+    println("Tangut: ok");
+  else
+    println("Tangut: differs");
+  end;
+  if lex_same("\N{KHITAN SMALL SCRIPT CHARACTER-18B00}", "\U00018B00") then
+    println("Khitan: ok");
+  else
+    println("Khitan: differs");
+  end;
+  if lex_same("\N{NUSHU CHARACTER-1B170}", "\U0001B170") then
+    println("Nushu: ok");
+  else
+    println("Nushu: differs");
+  end;
+  if lex_same("\N{CJK COMPATIBILITY IDEOGRAPH-F900}", "\uF900") then
+    println("CJK compatibility: ok");
+  else
+    println("CJK compatibility: differs");
+  end;
+  if lex_same("\N{TANGUT COMPONENT-001}", "\U00018800") then
+    println("Tangut component: ok");
+  else
+    println("Tangut component: differs");
+  end;
+  if lex_same("\N{HANGUL SYLLABLE GA}", "\uAC00") then
+    println("Hangul GA: ok");
+  else
+    println("Hangul GA: differs");
+  end;
+  if lex_same("\N{HANGUL SYLLABLE HIH}", "\uD7A3") then
+    println("Hangul HIH: ok");
+  else
+    println("Hangul HIH: differs");
+  end;
+  if lex_same(R"(a\n"b)", "a\\n\"b") then
+    println("raw body as written: ok");
+  else
+    println("raw body as written: differs");
+  end;
+  if lex_same(R"xy(a)"b)xy", "a)\"b") then
+    println("raw delimiter: ok");
+  else
+    println("raw delimiter: differs");
+  end;
+  if lex_same(R"0123456789abcdef(x)0123456789abcdef", "x") then
+    println("raw 16-char delimiter: ok");
+  else
+    println("raw 16-char delimiter: differs");
+  end;
+  println("empty: {}", len(""));
+  println("NUL: {} / {}", len("\0"), len("a\0b"));
+  println("raw empty: {}", len(R"()"));
+end.

@@ -6585,10 +6585,16 @@ end;
 
 function TPCEmitter.DoLibText(): string;
 begin
-  // H12 (W1 option 1): a static library starts and stops with the program
-  Result := DoResDataKeepText() + '__attribute__((constructor)) static void pcpp_lib_startup() { ::pcpp::init(0, nullptr); ' +
-    DoEntryText(DoInitChain(), '0') + '; } __attribute__((destructor)) static void pcpp_lib_shutdown() { ' +
-    DoEntryText(DoFinalChain(), '0') + '; }';
+  // H12 (W1 option 1): a static library starts and stops with the program.
+  // Its stop is registered with std::atexit once its start ran, never a
+  // destructor function: glibc runs those after every atexit handler, the
+  // runtime's leak report included (mingw before it), so a lib's finalization
+  // came after the report on Linux only. atexit runs last-registered first,
+  // and the report's object is built before any lib starts (init_priority
+  // 101): the lib stops first on every target
+  Result := DoResDataKeepText() + 'static void pcpp_lib_shutdown() { ' +
+    DoEntryText(DoFinalChain(), '0') + '; } __attribute__((constructor)) static void pcpp_lib_startup() { ' +
+    '::pcpp::init(0, nullptr); ' + DoEntryText(DoInitChain(), '0') + '; std::atexit(pcpp_lib_shutdown); }';
 end;
 
 procedure TPCEmitter.DoEmitTrailer();
@@ -6670,8 +6676,19 @@ begin
 end;
 
 function TPCEmitter.DoWriteFile(const APath: string; const ABytes: TBytes): Boolean;
+var
+  LError: string;
 begin
-  // H13: the bytes as built (UTF-8, no BOM, LF only)
+  // H13: the bytes as built (UTF-8, no BOM, LF only). A file an earlier
+  // build left under this name in another case (a unit Math, then a unit
+  // math) would keep its old name on a case-blind file system, and clang
+  // would warn on the #include that names it: it is given the exact name
+  // first (TUtils.MatchFileNameCase, never raises), then written
+  if not TUtils.MatchFileNameCase(APath, LError) then
+  begin
+    FErrors.Add(esError, PC_ERR_EMT_002, RSEmtWriteFile, [APath, LError]);
+    Exit(False);
+  end;
   try
     TFile.WriteAllBytes(APath, ABytes);
     Result := True;

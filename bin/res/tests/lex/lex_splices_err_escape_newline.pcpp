@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_splices_err_escape_newline.pcpp - Lexical: an escape before a newline
+
+  Break step of lex_splices: of the two backslashes ending the string's
+  first line the second is the splice, which joins the empty line after it;
+  the first is then an escape right before a newline, and an escape never
+  takes a newline, so the string is unterminated, LX0001. One mistake, two
+  reports, as clang gives them: the quote that was meant to close the
+  string, two lines down, now opens a string of its own that never closes
+  either, a second LX0001 at that quote.
+*******************************************************************************/
+
+module exe lex_splices_err_escape_newline;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  println(/* // ERROR LX0001@39 // */ "a\\
+
+"); // ERROR LX0001@1
+end.

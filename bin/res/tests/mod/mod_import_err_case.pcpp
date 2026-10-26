@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_import_err_case.pcpp - Module: a module name in other case than its file
+
+  Break step of mod_import: the module name must equal the file name,
+  exact case.
+*******************************************************************************/
+
+module exe Mod_Import_Err_Case; // ERROR PR0003@12
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+end.

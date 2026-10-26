@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_choices_err_not_constant.pcpp - Type: a value's number from a variable
+
+  Break step of type_choices: a value's number is a constant (SM0202).
+*******************************************************************************/
+
+module exe type_choices_err_not_constant;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LV: int32;
+
+type
+  TC = choices(cA = LV); // ERROR SM0202@21: a choice value must be a constant
+
+begin
+end.

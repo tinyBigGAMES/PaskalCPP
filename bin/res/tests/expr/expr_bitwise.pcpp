@@ -1,0 +1,55 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_bitwise.pcpp - Expression: bitwise operators
+
+  shl shr << >> | & xor ~ on integers (BNF.md sec 6). | and & sit with + and
+  * (Pascal placement), so FLAG_A | FLAG_B = LMask means (FLAG_A | FLAG_B) =
+  LMask; ^ is the deref, never xor. A constant shift count lies in
+  0 .. bits - 1. The symbols take integers only (and / or / not are the
+  logical words, xor takes two bools too), and their result is a number:
+  a bool from it is written with a comparison. xor of two bools is
+  logical and its result a bool.
+*******************************************************************************/
+
+module exe expr_bitwise;
+
+/*
+  @@test
+    kind run
+    expect
+    | shifts 16 64 8 4
+    | or and xor 7 2 6
+    | xor bools true false
+    | not -6
+    | placement true
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+var
+  LA: int32 = 1;
+  LB: int32 = 2;
+  LN: int32 = 5;
+  LT: bool = true;
+  LF: bool = false;
+
+begin
+  println("shifts {} {} {} {}", 1 shl 4, 256 shr 2, 1 << 3, 16 >> 2);
+  println("or and xor {} {} {}", 6 | 1, 6 & 3, 5 xor 3);
+  println("xor bools {} {}", LT xor LF, LT xor LT);
+  println("not {}", ~LN);
+  println("placement {}", LA | LB = 3);
+end.

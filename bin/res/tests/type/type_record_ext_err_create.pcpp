@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_ext_err_create.pcpp - Type: record ext, create
+
+  Break step of type_record_ext: create takes a pointer to a record or an
+  overlay, not a ptr to int32 (SM0409).
+*******************************************************************************/
+
+module exe type_record_ext_err_create;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LPI: ptr to int32;
+
+begin
+  create(LPI); // ERROR SM0409@10
+end.

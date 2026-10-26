@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lib_plain_err_nolink.pcpp - Lib: plain, no link
+
+  Break step of lib_plain: the program without its @linklibrary line, so the
+  linker finds no lib_plain_lib_add (the linker's error, ZB0016, at the line
+  that calls it). Debug only: the linker reads that line from the objects'
+  debug info, which the other levels strip.
+*******************************************************************************/
+
+module exe lib_plain_err_nolink;
+
+/*
+  @@test
+    kind error
+    deps lib_plain_lib
+    opt debug
+  @@end
+*/
+
+@addlibrarypath "$P:output/lib";
+
+routine clink lib_plain_lib_add(AA: int32; AB: int32): int32; external;
+
+begin
+  println("lib_plain_lib_add(2, 3) = {}", lib_plain_lib_add(2, 3)); // ERROR ZB0016
+end.

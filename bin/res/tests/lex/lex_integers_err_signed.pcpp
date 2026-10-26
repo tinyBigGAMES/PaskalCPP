@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_integers_err_signed.pcpp - Lexical: a decimal above int64 without u
+
+  Break step of lex_integers: a decimal literal is signed unless a u says
+  otherwise, so one above int64 is LX0006, and the message names the
+  spelling that works (the same literal with a u).
+*******************************************************************************/
+
+module exe lex_integers_err_signed;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int64;
+
+begin
+  LN := 0;
+  LN := 9223372036854775808; // ERROR LX0006@9: write 9223372036854775808u
+end.

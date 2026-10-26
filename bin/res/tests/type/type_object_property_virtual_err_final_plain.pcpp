@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property_virtual_err_final_plain.pcpp - Type: object property virtual, final plain
+
+  Break step of type_object_property_virtual: final closes a virtual property
+  (SM0336).
+*******************************************************************************/
+
+module exe type_object_property_virtual_err_final_plain;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBox = object
+    FA: int32;
+    final property A: int32 read FA; // ERROR SM0336@5: 'final' closes a virtual property
+  end;
+
+begin
+end.

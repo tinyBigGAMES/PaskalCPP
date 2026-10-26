@@ -1,0 +1,156 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_is.pcpp - Type: is and as
+
+  `X is T` tests the dynamic type of a polymorphic object; `X as T` casts
+  to T, raising when the object is not one (BNF.md sec 6).
+  X is an object with a virtual method, or a ptr to, own or ref of one; T
+  is an object or an interface type. Shown here:
+  - is through a const parameter, against objects and an interface;
+  - as on a var parameter is the object as T (its fields can be set);
+  - as on an interface parameter reaches the object behind it;
+  - through a ptr: is, as gives a ptr to T, a nil ptr is no T and as of
+    nil stays nil;
+  - through an own (as gives the object it holds) and a ref (as gives a
+    ref T, to an object or an interface);
+  - a wrong as raises (exccode 13), caught by a guard.
+*******************************************************************************/
+
+module exe type_object_is;
+
+/*
+  @@test
+    kind run
+    expect
+    | true false true
+    | r 2
+    | false true false
+    | 3
+    | 3
+    | true
+    | 5
+    | false
+    | true
+    | true
+    | 7
+    | true false 9
+    | 9
+    | 13 invalid cast: the object is not a TCircle
+    | [Heap] Allocs: 2, Frees: 2, Leaked: 0
+  @@end
+*/
+
+type
+  IRound = interface
+    method Radius(): int32;
+  end;
+  TShape = object
+    virtual method Name(): string;
+    begin
+      return "shape";
+    end;
+  end;
+  TCircle = object(TShape) implements IRound
+    R: int32;
+    override method Name(): string;
+    begin
+      return "circle";
+    end;
+    virtual method Radius(): int32;
+    begin
+      return self.R;
+    end;
+  end;
+  TSquare = object(TShape)
+    S: int32;
+  end;
+
+routine Describe(const AShape: TShape);
+begin
+  println("{} {} {}", AShape is TCircle, AShape is TSquare, AShape is IRound);
+  if AShape is TCircle then
+    println("r {}", (AShape as TCircle).R);
+  end;
+end;
+
+routine Grow(var AShape: TShape);
+begin
+  (AShape as TCircle).R := (AShape as TCircle).R + 1;
+end;
+
+routine Round(const ARound: IRound): int32;
+begin
+  return (ARound as TCircle).R;
+end;
+
+routine Pointers();
+var
+  LC: TCircle;
+  LP: ptr to TShape;
+  LQ: ptr to TCircle;
+  LN: ptr to TShape;
+begin
+  LC.R := 5;
+  LP := address of LC;
+  println("{}", LP is TCircle);
+  LQ := LP as TCircle;
+  println("{}", LQ^.R);
+  println("{}", LN is TCircle);
+  println("{}", (LN as TCircle) = nil);
+end;
+
+routine Owners();
+var
+  LO: own TShape;
+  LR: ref TShape;
+  LRC: ref TCircle;
+begin
+  LO := own TCircle;
+  println("{}", LO is TCircle);
+  (LO as TCircle).R := 7;
+  println("{}", (LO as TCircle).R);
+  LR := ref TCircle;
+  LRC := LR as TCircle;
+  LRC.R := 9;
+  println("{} {} {}", LR is TCircle, LR is TSquare, LRC.R);
+  println("{}", (LR as IRound).Radius());
+end;
+
+routine Wrong();
+var
+  LQ: TSquare;
+begin
+  guard
+    Grow(LQ);
+  except
+    println("{} {}", exccode(), excmsg());
+  end;
+end;
+
+var
+  LC: TCircle;
+  LS: TSquare;
+begin
+  LC.R := 2;
+  Describe(LC);
+  Describe(LS);
+  Grow(LC);
+  println("{}", LC.R);
+  println("{}", Round(LC));
+  Pointers();
+  Owners();
+  Wrong();
+end.

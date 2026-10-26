@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lib_runtime_lib.pcpp - Build kind: a lib that uses the runtime (dep)
+
+  This lib's code calls into the PaskalCPP runtime (div: checked, raises on
+  a zero divisor), so its build also builds pcpp_runtime: a second static
+  library of the same zig build, installed beside the lib in output\lib
+  (pcpp_runtime.lib on Windows, libpcpp_runtime.a on Linux), for a consumer
+  built by another toolchain. A PaskalCPP program that links the lib brings
+  its own runtime and never links pcpp_runtime. lib_runtime checks what this
+  build leaves.
+*******************************************************************************/
+
+module lib lib_runtime_lib;
+
+/*
+  @@test
+    kind dep
+  @@end
+*/
+
+exported routine clink lib_runtime_lib_div(AA: int32; AB: int32): int32;
+begin
+  return AA div AB;
+end;
+
+end.

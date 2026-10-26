@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_resdata_lib.pcpp - the library std_resdata.pcpp links: it adds the data
+  key "lib" (std_resdata_lib.txt, 8 bytes) and reads it back itself. Built on
+  its own; its entry lands in the program that links it. Nothing to check
+  here: std_resdata.pcpp checks it.
+*******************************************************************************/
+
+module lib std_resdata_lib;
+
+/*
+  @@test
+    kind dep
+  @@end
+*/
+
+@addresdata "lib" "$P:res/tests/std/fixtures/std_resdata_lib.txt";
+
+import ResData;
+
+// The key's size as the program that links this library sees it
+exported routine clink std_resdata_lib_size(): int64;
+begin
+  return FindResData("lib").Size;
+end;
+
+end.

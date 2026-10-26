@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_routine_err_arg_fit.pcpp - Decl: routine, arg fit
+
+  Break step of decl_routine: a constant argument that does not fit its value
+  parameter (300 into int8).
+*******************************************************************************/
+
+module exe decl_routine_err_arg_fit;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine Small(AN: int8);
+begin
+  println("{}", AN);
+end;
+
+begin
+  Small(300); // ERROR SM0404@9: 300 does not fit in 'int8' (-128..127)
+end.

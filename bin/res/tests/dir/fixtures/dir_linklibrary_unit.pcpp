@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_linklibrary_unit.pcpp - Directive fixture: the unit dir_linklibrary and
+  dir_linklibrary_linux import; its own @linklibrary names dir_linklibrary_lib
+  (in output\lib, where its dep build puts it), which adds to the one build of
+  the program.
+*******************************************************************************/
+
+module unit dir_linklibrary_unit;
+@addlibrarypath "$P:output/lib";
+@linklibrary "dir_linklibrary_lib";
+
+routine clink dir_linklibrary_add(AA: int32; AB: int32): int32; external;
+
+exported routine Add(AA: int32; AB: int32): int32;
+begin
+  return dir_linklibrary_add(AA, AB);
+end;
+
+end.

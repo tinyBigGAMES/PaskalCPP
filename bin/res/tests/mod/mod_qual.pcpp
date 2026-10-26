@@ -1,0 +1,51 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_qual.pcpp - Module: qualified names
+
+  <module>.<name> reaches what a unit exports: a var, a routine, a type
+  (a variable's type), a choices value (<module>.<type>.<value>).
+*******************************************************************************/
+
+module exe mod_qual;
+
+/*
+  @@test
+    kind run
+    expect
+    | G = 1
+    | F(5) = 5
+    | X = 7
+    | GCol is Green
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_qual_unit;
+
+var
+  GPt: mod_qual_unit.TPt;
+  GCol: mod_qual_unit.TCol = mod_qual_unit.TCol.Green;
+
+begin
+  GPt.X := 7;
+  println("G = {}", mod_qual_unit.G);
+  println("F(5) = {}", mod_qual_unit.F(5));
+  println("X = {}", GPt.X);
+  if GCol = mod_qual_unit.TCol.Green then
+    println("GCol is Green");
+  end;
+end.

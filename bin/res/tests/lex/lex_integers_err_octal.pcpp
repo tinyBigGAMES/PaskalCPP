@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_integers_err_octal.pcpp - Lexical: an 8 in an octal literal
+
+  Break step of lex_integers: a leading 0 makes the literal octal, so an 8
+  or 9 in it is LX0007 (the hint a plain octal gets is not given then).
+*******************************************************************************/
+
+module exe lex_integers_err_octal;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int64;
+
+begin
+  LN := 0;
+  LN := 08; // ERROR LX0007@9: Invalid digit in octal literal: 08
+end.

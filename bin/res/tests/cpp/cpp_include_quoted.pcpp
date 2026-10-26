@@ -1,0 +1,53 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  cpp_include_quoted.pcpp - C++ integration compliance: #include "..."
+
+  A quoted #include in a .pcpp finds a header beside that .pcpp, with no
+  directive, as in a C++ file (BNF.md sec 10, DESIGN.md sec 2). An imported
+  unit's quoted includes after cpp header; find the headers beside the unit,
+  from the unit's own code and from every importer. An angle #include <...>
+  does not search the .pcpp's folder (cpp_include_err_angle).
+
+  This program includes cpp_include_quoted.h (beside it) and imports
+  cpp_include_unit (cpp\fixtures), which quotes cpp_include_unit.h (beside
+  the unit). It prints a value from each header, the unit's one both through
+  the unit's routine and straight from here.
+*******************************************************************************/
+
+module exe cpp_include_quoted;
+@addmodulepath "$P:res/tests/cpp/fixtures";
+import cpp_include_unit;
+
+/*
+  @@test
+    kind run
+    expect
+    | cpp_include_quoted_value() = 7
+    | CPP_INCLUDE_QUOTED_TWICE(21) = 42
+    | cpp_include_unit.UnitValue() = 11
+    | cpp_include_unit_value() = 11
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+#include "cpp_include_quoted.h"
+
+begin
+  println("cpp_include_quoted_value() = {}", cpp("cpp_include_quoted_value()"));
+  println("CPP_INCLUDE_QUOTED_TWICE(21) = {}", cpp("CPP_INCLUDE_QUOTED_TWICE(21)"));
+  println("cpp_include_unit.UnitValue() = {}", cpp_include_unit.UnitValue());
+  println("cpp_include_unit_value() = {}", cpp("cpp_include_unit_value()"));
+end.

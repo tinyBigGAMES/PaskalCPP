@@ -1,0 +1,48 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_cpp_chars.pcpp - Type: the C++ fundamentals signed, char8_t,
+  char16_t and char32_t
+
+  Every cpp fundamental is a type expr (BNF.md sec 4): signed alone is a
+  signed int, and the three character types hold the code unit of a u8 /
+  u / U character literal (sec 9 cchar). Their sizes are fixed by C++ on
+  every target: 1, 2 and 4.
+*******************************************************************************/
+
+module exe type_cpp_chars;
+
+/*
+  @@test
+    kind run
+    expect
+    | signed -5 4
+    | chars 97 98 99
+    | sizes 1 2 4
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+var
+  LSigned: signed = -5;
+  LChar8: char8_t = u8'a';
+  LChar16: char16_t = u'b';
+  LChar32: char32_t = U'c';
+
+begin
+  println("signed {} {}", LSigned, size(signed));
+  println("chars {} {} {}", int32(LChar8), int32(LChar16), int32(LChar32));
+  println("sizes {} {} {}", size(char8_t), size(char16_t), size(char32_t));
+end.

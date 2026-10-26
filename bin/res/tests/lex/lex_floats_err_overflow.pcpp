@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_floats_err_overflow.pcpp - Lexical: a float no float64 holds
+
+  Break step of lex_floats: 1e400 is above the largest float64, LX0006.
+*******************************************************************************/
+
+module exe lex_floats_err_overflow;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LF: float64;
+
+begin
+  LF := 0.0;
+  LF := 1e400; // ERROR LX0006@9: Numeric literal out of range: 1e400
+end.

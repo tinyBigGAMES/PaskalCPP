@@ -1,0 +1,48 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_is_err_exact.pcpp - Type: object is, exact
+
+  Break step of type_object_is: is on a variable, which holds exactly its type
+  (SM0274).
+*******************************************************************************/
+
+module exe type_object_is_err_exact;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TShape = object
+    virtual method Name(): string;
+    begin
+      return "shape";
+    end;
+  end;
+  TCircle = object(TShape)
+    R: int32;
+  end;
+  TSquare = object(TShape)
+    S: int32;
+  end;
+
+var
+  LShape: TShape;
+begin
+  println("{}", LShape is TCircle); // ERROR SM0274
+end.

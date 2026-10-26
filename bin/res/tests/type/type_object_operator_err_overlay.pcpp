@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_operator_err_overlay.pcpp - Type: object operator, overlay
+
+  Break step of type_object_operator: an operator in an overlay (PR0034).
+*******************************************************************************/
+
+module exe type_object_operator_err_overlay;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TOv = overlay
+    X: int32;
+    operator +(const A: TOv; const B: TOv): TOv; // ERROR PR0034
+    begin
+      return A;
+    end;
+  end;
+
+begin
+end.

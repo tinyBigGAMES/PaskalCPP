@@ -1,0 +1,28 @@
+/****************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+ ---------------------------------------------------------------------------
+  a2_block_markers - test-suite input (spec scanner)
+****************************************************************************/
+module exe a2_block_markers;
+begin
+  x := 1 + /* // WARN LX0201@12 // prose */ 2;
+  /* // HINT LX0101
+     // ERROR SM0118: two lines */
+  /* prose, then // WARN LX0203 */
+  /* shows // ERROR <code>@<col>: an example */
+  cppstart source
+  int z = 0; /* // FATAL EM0001: in a gap */
+  cppend;
+end.

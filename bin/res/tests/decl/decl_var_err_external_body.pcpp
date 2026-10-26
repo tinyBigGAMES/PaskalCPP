@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_var_err_external_body.pcpp - Decl: var, external body
+
+  Break step of decl_var: an external variable in the main block.
+*******************************************************************************/
+
+module exe decl_var_err_external_body;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  var decl_var_counter: int32; external; // ERROR SM0302@7
+  println("{}", decl_var_counter);
+end.

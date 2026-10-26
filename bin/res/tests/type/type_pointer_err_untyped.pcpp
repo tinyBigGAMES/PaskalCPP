@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_pointer_err_untyped.pcpp - Type: the untyped ptr into a ptr to T
+
+  Break step of type_pointer: the untyped ptr is no ptr to T: cast it
+  (SM0200).
+*******************************************************************************/
+
+module exe type_pointer_err_untyped;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LP: ptr to int32;
+  LU: ptr;
+
+begin
+  LU := nil;
+  LP := LU; // ERROR SM0200@9: 'ptr' does not convert implicitly to 'ptr to int32'; write ptr to int32(LU)
+end.

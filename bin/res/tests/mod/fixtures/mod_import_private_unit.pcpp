@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_import_private_unit.pcpp - Module fixture: a unit whose exported
+  declarations name its private constants (mod_import_private imports it).
+*******************************************************************************/
+
+module unit mod_import_private_unit;
+
+const
+  KSize: int32 = 3;
+
+exported const
+  KTwice: int32 = KSize * 2;
+
+exported type
+  TRow = array[0..KSize - 1] of int32;
+
+end.

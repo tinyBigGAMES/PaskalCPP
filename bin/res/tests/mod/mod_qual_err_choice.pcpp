@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_qual_err_choice.pcpp - Module: a choices value the type does not have
+
+  Break step of mod_qual.
+*******************************************************************************/
+
+module exe mod_qual_err_choice;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_qual_unit;
+
+var
+  GK: mod_qual_unit.TCol = mod_qual_unit.TCol.Blue; // ERROR SM0010@28
+
+begin
+end.

@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_virtual_err_final_not_virtual.pcpp - Type: object virtual, final not virtual
+
+  Break step of type_object_virtual: final on a plain method: final closes a
+  virtual one (SM0336).
+*******************************************************************************/
+
+module exe type_object_virtual_err_final_not_virtual;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    final method M(); // ERROR SM0336@5: 'final' closes a virtual method
+    begin
+    end;
+  end;
+
+begin
+end.

@@ -587,6 +587,12 @@ begin
   // TPCSourceProvider: an open buffer wins over its file on disk
   ABytes := nil;
   LDocument := DoOpenDocument(AFilename);
+  // The path matched without case (Windows paths); the file name must match
+  // with it, as the disk lookup does (TUtils.FileExistsExactCase): an open
+  // Math.pcpp never answers `import math`
+  if (LDocument <> nil) and (ExtractFileName(LDocument.Filename.Replace('/', '\')) <>
+    ExtractFileName(AFilename.Replace('/', '\'))) then
+    LDocument := nil;
   Result := LDocument <> nil;
   if Result then
     ABytes := LDocument.GetBytes();

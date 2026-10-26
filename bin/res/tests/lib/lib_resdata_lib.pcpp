@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lib_resdata_lib.pcpp - Build kind: a lib that adds a data entry (dep)
+
+  @addresdata in a lib: the entry is built into the lib and reaches the
+  program that links it (lib_resdata).
+*******************************************************************************/
+
+module lib lib_resdata_lib;
+
+/*
+  @@test
+    kind dep
+  @@end
+*/
+
+@addresdata "lib_resdata/hello" "$P:res/tests/dir/fixtures/dir_addresdata_hello.txt";
+
+exported routine clink lib_resdata_value(): int32;
+begin
+  return 1;
+end;
+
+end.

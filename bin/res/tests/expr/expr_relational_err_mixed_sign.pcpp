@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_relational_err_mixed_sign.pcpp - Expr: relational, mixed sign
+
+  Break step of expr_relational: an int32 compared with a uint32 (SM0251 at
+  the int32): two numbers compare in their common type, here uint32, so -1 < 1
+  would be false; write int64(LA) < LU.
+*******************************************************************************/
+
+module exe expr_relational_err_mixed_sign;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LA: int32 = -1;
+  LU: uint32 = 1;
+
+begin
+  if LA < LU then // ERROR SM0251@6: '<' would convert signed 'int32' to unsigned 'uint32'
+    println("less");
+  end;
+end.

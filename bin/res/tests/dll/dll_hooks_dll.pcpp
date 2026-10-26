@@ -1,0 +1,45 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dll_hooks_dll.pcpp - Build kind: a dll with initialize / finalize (dep)
+
+  The dll dll_hooks links: its initialize runs when the library is loaded,
+  its finalize when it is unloaded.
+*******************************************************************************/
+
+module dll dll_hooks_dll;
+
+/*
+  @@test
+    kind dep
+  @@end
+*/
+
+exported routine clink dll_hooks_value(): int32;
+begin
+  return 7;
+end;
+
+initialize
+begin
+  println("dll initialize");
+end;
+
+finalize
+begin
+  println("dll finalize");
+end;
+
+end.

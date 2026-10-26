@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_primary_err_self_main.pcpp - Expr: primary, self main
+
+  Break step of expr_primary: self in the main block (SM0011).
+*******************************************************************************/
+
+module exe expr_primary_err_self_main;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  println("{}", self); // ERROR SM0011@17: 'self' outside a method
+end.

@@ -1,0 +1,43 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_err_align_below_cpp_field.pcpp - Type: record, align below cpp field
+
+  Break step of type_record: align(4) on a field of a C++ struct holding a
+  double: below its natural alignment 8 (SM0311, at the align value; the C++
+  layout is judged in the emitted C++).
+*******************************************************************************/
+
+module exe type_record_err_align_below_cpp_field;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+struct CPoint { double X; };
+
+type
+  TR = record align(4) // ERROR SM0311@21: align 4 is below the natural alignment 8 of 'TR', lower it with packed
+    P: CPoint;
+  end;
+
+var
+  V: TR;
+
+begin
+  V.P.X := 1.0;
+end.

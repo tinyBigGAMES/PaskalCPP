@@ -420,6 +420,7 @@ type
     procedure DoReportMisplacedDirective();
     procedure DoSkipCppBlock();
     procedure DoSkipStatement();
+    procedure DoSkipRefusedStatement();
 
     // Sections, bodies, end, tests
     procedure DoParseSections();
@@ -476,6 +477,7 @@ type
     procedure DoReportPlacementInBody(const AOwner: TList<TPCStmt>);
     procedure DoReportCppStatement(const AOwner: TList<TPCStmt>; const AHint: string);
     procedure DoReportStrayCloser(const AOwner: TList<TPCStmt>);
+    procedure DoSkipLeadingSpan(const AOwner: TList<TPCStmt>);
     procedure DoSkipCppStatement();
     class function DoFindCppStmtHint(const AKind: TPCTokenKind; out AHint: string): Boolean; static;
 
@@ -890,6 +892,16 @@ const
   PC_PAR_STRAY_CLOSERS: array[0..9] of TPCTokenKind = (
     tkSemicolon, tkKwElse, tkKwUntil, tkKwExcept, tkKwFinally, tkKwThen, tkKwDo,
     tkKwOf, tkKwTo, tkKwDownto
+  );
+
+  { PC_PAR_END_OPENERS }
+  // Words whose construct closes with its own 'end' (a repeat closes with
+  // 'until'): a skip over a statement nobody parsed counts them, so the
+  // statement's 'end' is never taken for the enclosing list's
+  // (DoSkipRefusedStatement)
+  PC_PAR_END_OPENERS: array[0..8] of TPCTokenKind = (
+    tkKwBegin, tkKwIf, tkKwWhile, tkKwFor, tkKwMatch, tkKwGuard, tkKwRecord, tkKwObject,
+    tkKwOverlay
   );
 
   { PC_PAR_MODULE_ITEM_STARTS }
@@ -2109,7 +2121,9 @@ begin
   // An import the provider has is found even when the disk has no file yet
   if Assigned(FSourceProvider) and FSourceProvider(AFilename, LBytes) then
     Exit(True);
-  Result := FileExists(AFilename);
+  // PaskalCPP is case-sensitive: `import math` takes math.pcpp only, never
+  // Math.pcpp, on every target (Windows' own lookup ignores case)
+  Result := TUtils.FileExistsExactCase(AFilename);
 end;
 
 procedure TPCParser.DoParseImportClause();
@@ -2590,13 +2604,19 @@ end;
 procedure TPCParser.DoSkipStatement();
 var
   LAfterUnknown: Boolean;
+  LUnknownEndLine: Integer;
 begin
   // Statement recovery (parser.md P3): through the next ';', or up to a token
   // that closes the enclosing statement list (not consumed), and never past
-  // the start of a module-level item (A7). Past a reported lexer span
-  // (tkUnknown: an unterminated string eats its line's ';') a token that can
-  // start a statement ends the skip, as an inserted ';' would (A3, A8)
+  // the start of a module-level item (A7). A reported lexer span (tkUnknown)
+  // that runs to its line's end (an unterminated string eats that line's
+  // ';') ends the statement there, as an inserted ';' would: a token that
+  // can start a statement on a LATER line ends the skip (A3, A8). A span
+  // that ends mid-line (a stray character) eats nothing, so the rest of its
+  // line is still this statement: the skip goes on to its ';', one error
+  // node, no second report from what follows the stray character
   LAfterUnknown := False;
+  LUnknownEndLine := 0;
   while not (DoIsOneOf(DoCurrent().Kind, [tkEOF, tkKwEnd, tkKwElse, tkKwUntil, tkKwExcept,
     tkKwFinally]) or DoIsModuleItemStart()) do
   begin
@@ -2605,9 +2625,59 @@ begin
       DoAdvance();
       Exit;
     end;
-    if LAfterUnknown and DoCanStartStatement() then
+    if LAfterUnknown and (DoCurrent().Range.StartLine > LUnknownEndLine) and
+      DoCanStartStatement() then
       Exit;
-    LAfterUnknown := LAfterUnknown or DoCheck(tkUnknown);
+    if DoCheck(tkUnknown) then
+    begin
+      LAfterUnknown := True;
+      LUnknownEndLine := DoCurrent().Range.EndLine;
+    end;
+    DoAdvance();
+  end;
+end;
+
+procedure TPCParser.DoSkipRefusedStatement();
+var
+  LBlocks: Integer;
+  LBrackets: Integer;
+  LKind: TPCTokenKind;
+  LFirst: Boolean;
+begin
+  // Recovery for a statement the nesting guard refused (PR0042): nothing of
+  // it was parsed, so its own constructs are counted while it is skipped: a
+  // word of PC_PAR_END_OPENERS through its 'end', a repeat through its
+  // 'until', ( ) [ ] { } likewise. The skip ends after the statement's
+  // depth-0 ';', or before a depth-0 token that closes the enclosing list
+  // (not consumed), a module item start, EOF or the module's 'end .'. The
+  // first token is always consumed (progress). One mistake, one report: the
+  // refused statement's own 'end' never closes the enclosing list
+  LBlocks := 0;
+  LBrackets := 0;
+  LFirst := True;
+  while (not DoCheck(tkEOF)) and (not DoIsModuleEnd()) do
+  begin
+    LKind := DoCurrent().Kind;
+    if (not LFirst) and (LBlocks = 0) and (LBrackets = 0) then
+    begin
+      if LKind = tkSemicolon then
+      begin
+        DoAdvance();
+        Exit;
+      end;
+      if DoIsOneOf(LKind, [tkKwEnd, tkKwElse, tkKwUntil, tkKwExcept, tkKwFinally]) or
+        DoIsModuleItemStart() then
+        Exit;
+    end;
+    LFirst := False;
+    if DoIsOneOf(LKind, PC_PAR_END_OPENERS) or (LKind = tkKwRepeat) then
+      Inc(LBlocks)
+    else if DoIsOneOf(LKind, [tkKwEnd, tkKwUntil]) and (LBlocks > 0) then
+      Dec(LBlocks)
+    else if DoIsOneOf(LKind, [tkLParen, tkLBracket, tkLBrace]) then
+      Inc(LBrackets)
+    else if DoIsOneOf(LKind, [tkRParen, tkRBracket, tkRBrace]) and (LBrackets > 0) then
+      Dec(LBrackets);
     DoAdvance();
   end;
 end;
@@ -2756,15 +2826,15 @@ var
 begin
   // statement (BNF.md sec 5) inside the nesting guard: statements nest
   // through their lists, so no input overflows the stack (past it PR0042 and
-  // the statement is skipped). Whatever a branch does, at least one token is
-  // consumed, so every statement list progresses. FStmtDepth tells a failed
-  // declaration item it sits in a body (DoSkipItem)
+  // the whole statement is skipped, DoSkipRefusedStatement). Whatever a
+  // branch does, at least one token is consumed, so every statement list
+  // progresses. FStmtDepth tells a failed declaration item it sits in a body
+  // (DoSkipItem)
   LStart := DoCurrentIndex();
   if not DoEnterNested() then
   begin
     LMark := DoMarkSkip();
-    DoAdvance();
-    DoSkipStatement();
+    DoSkipRefusedStatement();
     DoAddSkipped(AOwner, LMark);
     Exit;
   end;
@@ -2807,8 +2877,26 @@ begin
     DoReportCppStatement(AOwner, LHint)
   else if DoIsOneOf(LKind, PC_PAR_STRAY_CLOSERS) then
     DoReportStrayCloser(AOwner)
+  else if LKind = tkUnknown then
+    DoSkipLeadingSpan(AOwner)
   else
     DoParseExprStatement(AOwner);
+end;
+
+procedure TPCParser.DoSkipLeadingSpan(const AOwner: TList<TPCStmt>);
+var
+  LMark: TPCSkipMark;
+begin
+  // A statement that starts with a reported lexer span (a stray character
+  // between two statements, or a string cut off at its line's end): the
+  // lexer's report is the one report, so only that span (and a ';' right
+  // after it) goes into an error node, and the statement after it parses on
+  // its own. A span in the middle of a statement is DoSkipStatement's
+  // (PLAN-RECOVERY A3, A8)
+  LMark := DoMarkSkip();
+  DoAdvance();
+  DoMatch(tkSemicolon);
+  DoAddSkipped(AOwner, LMark);
 end;
 
 function TPCParser.DoParseFlowStatement(const AOwner: TList<TPCStmt>): Boolean;

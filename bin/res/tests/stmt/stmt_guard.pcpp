@@ -1,0 +1,67 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_guard.pcpp - Statement: guard
+
+  guard ... [except ...] [finally ...] end; (BNF.md sec 5) with at least
+  one of except and finally: except runs when the body raises (exccode,
+  excmsg read the exception there only), finally runs either way, last; a
+  guard nests in a guard and an inner raise reaches the outer except.
+*******************************************************************************/
+
+module exe stmt_guard;
+
+/*
+  @@test
+    kind run
+    expect
+    | caught boom
+    | code 7 seven
+    | body
+    | finally
+    | inner finally
+    | outer inner
+    | after
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+begin
+  guard
+    raise("boom");
+  except
+    println("caught {}", excmsg());
+  end;
+  guard
+    raisecode(7, "seven");
+  except
+    println("code {} {}", exccode(), excmsg());
+  end;
+  guard
+    println("body");
+  finally
+    println("finally");
+  end;
+  guard
+    guard
+      raise("inner");
+    finally
+      println("inner finally");
+    end;
+  except
+    println("outer {}", excmsg());
+  end;
+  println("after");
+end.

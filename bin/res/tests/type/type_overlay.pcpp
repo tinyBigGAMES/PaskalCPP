@@ -1,0 +1,181 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_overlay.pcpp - Type: overlay types
+
+  An overlay type (BNF.md sec 4: overlay type, anon record, anon overlay)
+  holds its fields in the same storage: each field is a view of the same
+  bytes, and its size is its largest field's. Every part of the production
+  is used here and what it does is printed (both official targets are
+  little-endian):
+  - fields of several types over one word: a uint32, an int32, a float32
+    and a static array of 4 bytes, and an anonymous record (Lo / Hi) whose
+    fields are the overlay's own (LW.Lo);
+  - a bitfield straight in an overlay (Nib: uint32 : 4) and an anonymous
+    record of bitfields over the same bits;
+  - a choices field, a named record field, a C struct field (CPair: plain
+    data, so it may share the storage), an anonymous packed record (its
+    int32 starts at byte 1) and an anonymous record holding an anonymous
+    overlay (overlay, record, overlay);
+  - an overlay as a record's field (copied with the record), as an array
+    element, behind a ptr to it (^.), as a var and a const parameter;
+  - an exported overlay of an imported unit, qualified
+    (type_overlay_unit.TPixel);
+  - an overlay starts zeroed in every byte: in Fresh, a local's fields
+    past its first field's bytes (AsInt, Cp.Second), an array
+    element's and one create builds read 0 (destroy frees it and sets
+    the pointer to nil).
+*******************************************************************************/
+
+module exe type_overlay;
+
+/*
+  @@test
+    kind run
+    expect
+    | word 305419896 lo 22136 hi 4660 bytes 120 18 size 4
+    | float bits 1065353216
+    | minus one 4294967295 hi 65535
+    | flags 309 nib 5 size 4
+    | mixed blue true x 2 y 0 tag 2 value 16777216 size 8
+    | holder 1 lo 1 hi 5 copy 1 size 8
+    | array 3
+    | ptr 7
+    | var 9 const 4
+    | unit 65280
+    | fresh 0 0 0 heap 0 0
+    | nil true
+    | [Heap] Allocs: 1, Frees: 1, Leaked: 0
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/type/fixtures";
+
+import type_overlay_unit;
+
+struct CPair { int First; int Second; };
+
+type
+  TWord = overlay
+    AsU32: uint32;
+    AsI32: int32;
+    AsF32: float32;
+    Bytes: array[0..3] of uint8;
+    record
+      Lo: uint16;
+      Hi: uint16;
+    end;
+  end;
+  TFlags = overlay
+    Raw: uint32;
+    Nib: uint32 : 4;
+    record
+      B0: uint32 : 4;
+      B1: uint32 : 4;
+      Rest: uint32 : 24;
+    end;
+  end;
+  TColor = choices(cRed, cGreen, cBlue);
+  TInner = record
+    X: int16;
+    Y: int16;
+  end;
+  TMixed = overlay
+    Col: TColor;
+    Pt: TInner;
+    Cp: CPair;
+    record packed
+      Tag: uint8;
+      Value: int32;
+    end;
+    record
+      Kind: int32;
+      overlay
+        AsInt: int32;
+        AsFloat: float32;
+      end;
+    end;
+  end;
+  THolder = record
+    Id: int32;
+    W: TWord;
+  end;
+
+routine SetHigh(var AW: TWord; AV: uint16);
+begin
+  AW.Hi := AV;
+end;
+
+routine LowOf(const AW: TWord): uint16;
+begin
+  return AW.Lo;
+end;
+
+routine Fresh();
+var
+  LM: TMixed;
+  LA: array[0..1] of TMixed;
+  LQ: ptr to TMixed;
+begin
+  create(LQ);
+  println("fresh {} {} {} heap {} {}", LM.AsInt, LM.Cp.Second, LA[1].AsInt, LQ^.AsInt, LQ^.Cp.Second);
+  destroy(LQ);
+  println("nil {}", LQ = nil);
+end;
+
+var
+  LW: TWord;
+  LF: TFlags;
+  LM: TMixed;
+  LH: THolder;
+  LH2: THolder;
+  LArr: array[0..1] of TWord;
+  LP: ptr to TWord = nil;
+  LX: type_overlay_unit.TPixel;
+
+begin
+  LW.AsU32 := 305419896;
+  println("word {} lo {} hi {} bytes {} {} size {}", LW.AsU32, LW.Lo, LW.Hi, LW.Bytes[0], LW.Bytes[3], size(TWord));
+  LW.AsF32 := 1.0;
+  println("float bits {}", LW.AsU32);
+  LW.AsI32 := -1;
+  println("minus one {} hi {}", LW.AsU32, LW.Hi);
+  LF.Raw := 0;
+  LF.B0 := 5;
+  LF.B1 := 3;
+  LF.Rest := 1;
+  println("flags {} nib {} size {}", LF.Raw, LF.Nib, size(TFlags));
+  LM.Kind := 2;
+  LM.AsInt := 1;
+  println("mixed blue {} x {} y {} tag {} value {} size {}", LM.Col = TColor.cBlue, LM.Pt.X, LM.Pt.Y, LM.Tag, LM.Value, size(TMixed));
+  LH.Id := 1;
+  LH.W.AsU32 := 65537;
+  LH2 := LH;
+  LH.W.Hi := 5;
+  println("holder {} lo {} hi {} copy {} size {}", LH.Id, LH.W.Lo, LH.W.Hi, LH2.W.Hi, size(THolder));
+  LArr[1].AsU32 := 0;
+  LArr[1].Lo := 3;
+  println("array {}", LArr[1].AsU32);
+  LP := address of LW;
+  LP^.Hi := 7;
+  println("ptr {}", LW.Hi);
+  SetHigh(LW, 9);
+  LW.Lo := 4;
+  println("var {} const {}", LW.Hi, LowOf(LW));
+  LX.Value := 0;
+  LX.G := 255;
+  println("unit {}", LX.Value);
+  Fresh();
+end.

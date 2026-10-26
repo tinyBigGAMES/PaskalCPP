@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_splices_err_stray_between.pcpp - Lexical: a stray backslash between statements
+
+  Break step of lex_splices: a stray backslash between two statements is
+  LX0004 and only itself is lost: the statement after it on the same line
+  is still read on its own. That statement is 3; on purpose, so its own
+  error (SM0613, a statement with no effect) shows it was read. (A stray
+  character in the middle of a statement is lex_splices_err_stray: there
+  the rest of the statement goes with it.)
+*******************************************************************************/
+
+module exe lex_splices_err_stray_between;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int32;
+
+begin
+  LN := 1; \ 3; // ERROR LX0004@12: Invalid character in source // ERROR SM0613@14: statement has no effect
+end.

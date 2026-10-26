@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_cli_utf16_column.pcpp - Lexer: a printed column is UTF-16
+
+  Columns are stored as UTF-8 bytes (clang's unit) and printed as UTF-16 code
+  units (the editor's): fixtures\lex_cli_utf16_column_src.pcpp's mistake
+  follows two emoji (8 bytes, 4 UTF-16 units). A cli test (pcpp itself, in
+  the suite's output root); this file itself is never compiled.
+*******************************************************************************/
+
+module exe lex_cli_utf16_column;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner <DIR>/fixtures/lex_cli_utf16_column_src.pcpp -o $P:output"
+    exitcode 1
+    expect
+    | Compiling <DIR>/fixtures/lex_cli_utf16_column_src.pcpp
+    | [ERROR] <DIR>/fixtures/lex_cli_utf16_column_src.pcpp(22,19) PR0009: invalid string literal: octal escape sequence out of range
+    | Failed.
+  @@end
+*/
+
+begin
+end.

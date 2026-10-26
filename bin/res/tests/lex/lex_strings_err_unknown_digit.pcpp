@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_strings_err_unknown_digit.pcpp - Lexer: an unknown string escape
+
+  Break step of lex_strings_escapes: \8 is no octal escape (a warning, the
+  build goes on).
+*******************************************************************************/
+
+module exe lex_strings_err_unknown_digit;
+
+/*
+  @@test
+    kind build
+  @@end
+*/
+
+begin
+  println("{}", "\8"); // WARN PR0021@17
+end.

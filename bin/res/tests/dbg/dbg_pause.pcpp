@@ -1,0 +1,65 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dbg_pause.pcpp - Debugger: pause
+
+  Pausing a running program: an endless loop with no breakpoint at all.
+  The REPL holds a program with no breakpoint at its entry until c; the
+  editor runs it at F5. A pause stops it wherever it is.
+
+  How to check, from repo\bin:
+    REPL:   pcpp res\tests\dbg\dbg_pause.pcpp -d   then type each step's words
+    Editor: open res\tests\dbg\dbg_pause.pcpp, F5, then each step's keys
+  Each step: what to type, then "->" what both front-ends show.
+  Pause: REPL Ctrl+C, editor F6 (or the Pause button).
+
+  Keys (REPL word = editor key):
+    c = F5 (continue)   n = F10 (over)   s = F11 (into)
+    finish = Shift+F11 (out)   q = Shift+F5 (stop)
+    b N = click the gutter left of line N
+    bt = the CALL STACK   f N = click CALL STACK row N (0 = top)
+    locals = the VARIABLES pane   p X = a WATCH row for X (hover is the same)
+    the program's output and keyboard = the console the REPL runs in /
+    the editor's TERMINAL tab
+
+  Steps:
+   1. (start)          -> REPL: held at entry (no breakpoint);
+                          editor: running, "spinning" in the TERMINAL tab
+                          at once (not only when the program ends)
+   2. c                -> REPL only: running, "spinning" printed at once
+   3. pause            -> stops (pause) at 63 or 62
+      p GCount         -> a count above 0
+   4. c, pause         -> stops again, p GCount is larger
+   5. q                -> the program is stopped
+*******************************************************************************/
+
+module exe dbg_pause;
+
+/*
+  @@test
+    kind manual
+    targets x86_64-windows-gnu
+  @@end
+*/
+
+var
+  GCount: int64;
+
+begin
+  println("spinning");
+  while true do
+    GCount := GCount + 1;
+  end;
+end.

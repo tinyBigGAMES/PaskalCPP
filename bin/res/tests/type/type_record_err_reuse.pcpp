@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_err_reuse.pcpp - Type: record, reuse
+
+  Break step of type_record: a field reuses its parent's field name (SM0309).
+*******************************************************************************/
+
+module exe type_record_err_reuse;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBase = record
+    A: int32;
+  end;
+  TR = record(TBase)
+    A: int32; // ERROR SM0309@5: 'A' reuses a name of the parent chain
+  end;
+
+begin
+end.

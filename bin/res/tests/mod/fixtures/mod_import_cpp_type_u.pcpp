@@ -1,0 +1,27 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_import_cpp_type_u.pcpp - Module fixture: the unit mod_import_cpp_type imports
+
+  Its header declares a C type with the unit's own name.
+*******************************************************************************/
+
+module unit mod_import_cpp_type_u;
+
+cpp header;
+
+typedef struct mod_import_cpp_type_u { int count; } mod_import_cpp_type_u;
+
+end.

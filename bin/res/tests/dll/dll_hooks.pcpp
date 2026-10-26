@@ -1,0 +1,50 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dll_hooks.pcpp - Build kind: a dll's initialize and finalize run around its use
+
+  The dep dll_hooks_dll is loaded before this program's body and unloaded
+  after it: its initialize line comes first, its finalize line last.
+*******************************************************************************/
+
+module exe dll_hooks;
+
+/*
+  @@test
+    kind run
+    deps dll_hooks_dll
+    expect
+    | dll initialize
+    | value 7
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+    | dll finalize
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@ifdef TARGET_X86_64_LINUX_GNU
+@addlibrarypath "$P:output/bin";
+@copydll "$P:output/bin/libdll_hooks_dll.so";
+@else
+@addlibrarypath "$P:output/lib";
+@copydll "$P:output/bin/dll_hooks_dll.dll";
+@endif
+@linklibrary "dll_hooks_dll";
+
+routine clink dll_hooks_value(): int32; external;
+
+begin
+  println("value {}", dll_hooks_value());
+end.

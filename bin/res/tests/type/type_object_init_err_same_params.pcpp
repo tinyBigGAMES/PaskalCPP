@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_init_err_same_params.pcpp - Type: object init, same params
+
+  Break step of type_object_init: two inits with the same parameter types:
+  inits overload by parameter types (SM0324).
+*******************************************************************************/
+
+module exe type_object_init_err_same_params;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    N: int32;
+    init(const AX: int32);
+    begin
+    end;
+    init(AY: int32); // ERROR SM0324@5: 'init' is already declared with these parameter types
+    begin
+    end;
+  end;
+
+begin
+end.

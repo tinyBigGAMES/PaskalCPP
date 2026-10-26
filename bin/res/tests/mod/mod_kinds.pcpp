@@ -1,0 +1,44 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_kinds.pcpp - Module: the module kinds and the module body
+
+  module exe | dll | lib | unit <name>; (BNF.md sec 1). An exe emits an
+  executable and must have a begin body; a dll, a lib and a unit end with
+  end. alone. A unit emits nothing of its own: it is compiled into the
+  build of every module that imports it (here fixtures\mod_kinds_unit) and
+  is never the main module. The dll and lib kinds are mod_kinds_dll and
+  mod_kinds_lib.
+*******************************************************************************/
+
+module exe mod_kinds;
+
+/*
+  @@test
+    kind run
+    expect
+    | the exe body runs
+    | mod_kinds_unit.Answer() = 42
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_kinds_unit;
+
+begin
+  println("the exe body runs");
+  println("mod_kinds_unit.Answer() = {}", mod_kinds_unit.Answer());
+end.

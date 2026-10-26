@@ -1,0 +1,150 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property_virtual.pcpp - Type: properties, dispatch and index
+
+  A property takes a method's dispatch words (BNF.md sec 4 property decl):
+  - virtual / override / final before property; an override may restate
+    its read only (TSquare.Name: LQ.Name := runs TShape's write); read
+    abstract; makes the object abstract (TAbs), an override fills it (TCon);
+  - an interface holds properties (property X: T read; [write;]); the
+    object implements one with a virtual property, its own (TShape) or an
+    inherited one (TNamed: TBaseN.Name, forwarded);
+  - one index, property Items[const AIndex: T]: U, read and written with
+    LO.Items[i]; default makes LO[i] mean it; X OP= v works on both;
+  - an embed's property is reached on its owner (LX.N is LX.C.N).
+*******************************************************************************/
+
+module exe type_object_property_virtual;
+
+/*
+  @@test
+    kind run
+    expect
+    | [sq] 16
+    | base 16
+    | named n!
+    | 15 7
+    | abs 9
+    | 4
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+type
+  IShape = interface
+    property Area: int32 read;
+    property Name: string read; write;
+  end;
+  INamed = interface
+    property Name: string read; write;
+  end;
+  TShape = object implements IShape
+    FName: string;
+    virtual property Area: int32 read
+      begin
+        return 0;
+      end;
+    virtual property Name: string read FName; write FName;
+  end;
+  TSquare = object(TShape)
+    FSide: int32;
+    override property Area: int32 read
+      begin
+        return self.FSide * self.FSide;
+      end;
+    override property Name: string read
+      begin
+        return "[" + self.FName + "]";
+      end;
+  end;
+  TBaseN = object
+    FN: string;
+    virtual property Name: string read FN; write FN;
+  end;
+  TNamed = object(TBaseN) implements INamed
+  end;
+  TBag = object
+    FItems: array[0..3] of int32;
+    property Items[const AIndex: int32]: int32 read
+      begin
+        return self.FItems[AIndex];
+      end;
+      write(AValue)
+      begin
+        self.FItems[AIndex] := AValue;
+      end;
+      default;
+  end;
+  TAbs = object
+    virtual property V: int32 read abstract;
+  end;
+  TCon = object(TAbs)
+    override property V: int32 read
+      begin
+        return 9;
+      end;
+  end;
+  TCounter = object
+    FN: int32;
+    property N: int32 read FN; write FN;
+  end;
+  TBox = object
+    embed C: TCounter;
+  end;
+
+routine Show(var AS: IShape);
+begin
+  println("{} {}", AS.Name, AS.Area);
+end;
+
+routine ShowBase(var AS: TShape);
+begin
+  println("base {}", AS.Area);
+end;
+
+routine ShowNamed(var AN: INamed);
+begin
+  AN.Name := AN.Name + "!";
+  println("named {}", AN.Name);
+end;
+
+routine ShowAbs(var AA: TAbs);
+begin
+  println("abs {}", AA.V);
+end;
+
+var
+  LQ: TSquare;
+  LN: TNamed;
+  LB: TBag;
+  LC: TCon;
+  LX: TBox;
+begin
+  LQ.FSide := 4;
+  LQ.Name := "sq";
+  Show(LQ);
+  ShowBase(LQ);
+  LN.Name := "n";
+  ShowNamed(LN);
+  LB[1] := 5;
+  LB.Items[2] := 7;
+  LB[1] += 10;
+  println("{} {}", LB[1], LB.Items[2]);
+  ShowAbs(LC);
+  LX.N := 3;
+  LX.N += 1;
+  println("{}", LX.N);
+end.

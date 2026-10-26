@@ -1,0 +1,46 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_own_err_upcast.pcpp - Type: object own, upcast
+
+  Break step of type_object_own: an own reaching an ancestor that is not
+  polymorphic: it would free only that part (SM0200).
+*******************************************************************************/
+
+module exe type_object_own_err_upcast;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TPlain = object
+    X: int32;
+  end;
+  TKid = object(TPlain)
+    Y: int32;
+  end;
+
+routine Use();
+var
+  LA: own TPlain;
+begin
+  LA := own TKid; // ERROR SM0200@9: 'own TKid' does not convert implicitly to 'own TPlain'
+end;
+
+begin
+end.

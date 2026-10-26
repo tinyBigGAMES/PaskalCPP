@@ -1,0 +1,53 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_relational.pcpp - Expression: relational operators
+
+  = <> < > <= >= <=> and in (BNF.md sec 6) give bool (<=> gives C++'s
+  ordering, compared with 0); they do not chain, and C++'s == and != are
+  errors with the PaskalCPP form. Integers, floats, chars and strings compare;
+  in tests a set's element; a record compares only through an operator it
+  declares (type_object_operator).
+*******************************************************************************/
+
+module exe expr_relational;
+
+/*
+  @@test
+    kind run
+    expect
+    | ints false true true false true true
+    | float true
+    | chars true
+    | strings true false
+    | spaceship true
+    | in true false
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+var
+  LA: int32 = 1;
+  LB: int32 = 2;
+  LS: string = "abc";
+
+begin
+  println("ints {} {} {} {} {} {}", LA = LB, LA <> LB, LA < LB, LA > LB, LA <= LB, LB >= LA);
+  println("float {}", 1.5 < 2.5);
+  println("chars {}", 'a' < 'b');
+  println("strings {} {}", LS < "abd", LS = "abd");
+  println("spaceship {}", (LA <=> LB) < 0);
+  println("in {} {}", 3 in [1, 2, 3], 4 in [1, 2, 3]);
+end.

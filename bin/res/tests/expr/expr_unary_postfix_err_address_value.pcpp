@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_unary_postfix_err_address_value.pcpp - Expr: unary postfix, address value
+
+  Break step of expr_unary_postfix: the address of a call result (SM0254).
+*******************************************************************************/
+
+module exe expr_unary_postfix_err_address_value;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine Five(): int32;
+begin
+  return 5;
+end;
+
+var
+  LP: ptr to int32;
+
+begin
+  LP := address of Five(); // ERROR SM0254@20: 'Five()' has no address
+end.

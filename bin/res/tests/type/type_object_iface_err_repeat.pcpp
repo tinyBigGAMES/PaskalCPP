@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_iface_err_repeat.pcpp - Type: object iface, repeat
+
+  Break step of type_object_iface: an interface repeating its parent's method
+  (SM0368).
+*******************************************************************************/
+
+module exe type_object_iface_err_repeat;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  IShape = interface
+    method Area(): int32;
+  end;
+  IShape2 = interface(IShape)
+    method Area(): int32; // ERROR SM0368@12: method 'Area' of interface 'IShape2' is already declared by its parent 'IShape'
+  end;
+
+begin
+end.

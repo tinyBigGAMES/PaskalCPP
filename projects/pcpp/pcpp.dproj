@@ -125,6 +125,7 @@
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
         <DCCReference Include="UPCPP.pas"/>
+        <DCCReference Include="..\..\src\PaskalCPP.Archive.pas"/>
         <DCCReference Include="..\..\src\PaskalCPP.Asar.pas"/>
         <DCCReference Include="..\..\src\PaskalCPP.AST.pas"/>
         <DCCReference Include="..\..\src\PaskalCPP.BuildOutput.pas"/>
@@ -140,7 +141,9 @@
         <DCCReference Include="..\..\src\PaskalCPP.Debug.Symbols.pas"/>
         <DCCReference Include="..\..\src\PaskalCPP.Debug.Target.pas"/>
         <DCCReference Include="..\..\src\PaskalCPP.Emitter.pas"/>
+        <DCCReference Include="..\..\src\PaskalCPP.Icon.pas"/>
         <DCCReference Include="..\..\src\PaskalCPP.Lexer.pas"/>
+        <DCCReference Include="..\..\src\PaskalCPP.LSP.Calls.pas"/>
         <DCCReference Include="..\..\src\PaskalCPP.LSP.Completion.pas"/>
         <DCCReference Include="..\..\src\PaskalCPP.LSP.Diagnostics.pas"/>
         <DCCReference Include="..\..\src\PaskalCPP.LSP.Docs.pas"/>
@@ -157,11 +160,15 @@
         <DCCReference Include="..\..\src\PaskalCPP.Semantics.pas"/>
         <DCCReference Include="..\..\src\PaskalCPP.SerializedDiag.pas"/>
         <DCCReference Include="..\..\src\PaskalCPP.SourceText.pas"/>
+        <DCCReference Include="..\..\src\PaskalCPP.TestSuite.pas"/>
+        <DCCReference Include="..\..\src\PaskalCPP.TestSuite.Spec.pas"/>
+        <DCCReference Include="..\..\src\PaskalCPP.TestSuite.Types.pas"/>
         <DCCReference Include="..\..\src\PaskalCPP.TokenStream.pas"/>
         <DCCReference Include="..\..\src\PaskalCPP.UnicodeNames.pas"/>
         <DCCReference Include="..\..\src\PaskalCPP.ZigBuild.pas"/>
         <DCCReference Include="..\..\src\PaskalCPP.ZigBuild.Targets.pas"/>
         <DCCReference Include="..\..\src\StdApp.Resources.pas"/>
+        <DCCReference Include="..\..\src\PaskalCPP.TestSuite.CodeTest.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

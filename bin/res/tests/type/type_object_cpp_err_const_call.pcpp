@@ -1,0 +1,45 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_cpp_err_const_call.pcpp - Type: object cpp, const call
+
+  Break step of type_object_cpp: a const method that calls a method that is
+  not const through self (SM0388).
+*******************************************************************************/
+
+module exe type_object_cpp_err_const_call;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBox = object
+    N: int32;
+    method Grow();
+    begin
+      self.N := self.N + 1;
+    end;
+    const method Peek(): int32;
+    begin
+      self.Grow(); // ERROR SM0388
+      return self.N;
+    end;
+  end;
+
+begin
+end.

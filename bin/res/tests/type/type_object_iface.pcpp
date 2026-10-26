@@ -1,0 +1,171 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_iface.pcpp - Type: interfaces and implements
+
+  An interface is a set of methods an object promises to have (BNF.md
+  sec 4 interface type, object type). Shown here:
+  - an interface lists methods with no body; it may name one parent
+    interface (IShape and IPrintable both extend INamed);
+  - object ... implements I1, I2 promises every method of those
+    interfaces and their parents; each is a virtual method of the object
+    or of a level above it, with the same parameters and result
+    (TSquare gets Name and Area from TBase's implements, Show is its own);
+  - an inherited method fulfils it too: TBorrow names IPrintable, TPlain
+    (its parent, which names no interface) has Show and Name; TMore
+    overrides Show, and a call through the interface runs TMore's;
+  - an interface is reached through var, const, ptr to, own or ref, never
+    held by value: Report / Named / Print take var, LP is a ptr to IShape,
+    LR a ref IShape holding a TSquare (freed at exit: Leaked 0);
+  - a pointer cast to an interface, from it back to the object and across to
+    another interface lands on the right address, both spellings (ptr to
+    IShape(x) and the pointer type's name PShape(x)): an interface is a
+    virtual base, so the address moves.
+*******************************************************************************/
+
+module exe type_object_iface;
+
+/*
+  @@test
+    kind run
+    expect
+    | base 1
+    | square 16
+    | named square
+    | ptr 16
+    | show i 4
+    | got 4
+    | plain i 3
+    | got 3
+    | named plain
+    | more i
+    | got 7
+    | ref square
+    | cast 16 16 true true
+    | back 4
+    | show x 4
+    | cross 4
+    | [Heap] Allocs: 1, Frees: 1, Leaked: 0
+  @@end
+*/
+
+type
+  INamed = interface
+    method Name(): string;
+  end;
+  IShape = interface(INamed)
+    method Area(): int32;
+  end;
+  IPrintable = interface(INamed)
+    method Show(const ATag: string): int32;
+  end;
+  TBase = object implements IShape
+    virtual method Name(): string;
+    begin
+      return "base";
+    end;
+    virtual method Area(): int32;
+    begin
+      return 1;
+    end;
+  end;
+  TSquare = object(TBase) implements IPrintable
+    S: int32;
+    override method Name(): string;
+    begin
+      return "square";
+    end;
+    override method Area(): int32;
+    begin
+      return self.S * self.S;
+    end;
+    virtual method Show(const ATag: string): int32;
+    begin
+      println("show {} {}", ATag, self.S);
+      return self.S;
+    end;
+  end;
+  TPlain = object
+    N: int32;
+    virtual method Show(const ATag: string): int32;
+    begin
+      println("plain {} {}", ATag, self.N);
+      return self.N;
+    end;
+    virtual method Name(): string;
+    begin
+      return "plain";
+    end;
+  end;
+  TBorrow = object(TPlain) implements IPrintable
+  end;
+  TMore = object(TBorrow)
+    override method Show(const ATag: string): int32;
+    begin
+      println("more {}", ATag);
+      return 7;
+    end;
+  end;
+  PShape = ptr to IShape;
+
+routine Report(var AShape: IShape);
+begin
+  println("{} {}", AShape.Name(), AShape.Area());
+end;
+
+routine Named(var AName: INamed);
+begin
+  println("named {}", AName.Name());
+end;
+
+routine Print(var AP: IPrintable);
+begin
+  println("got {}", AP.Show("i"));
+end;
+
+var
+  LSq: TSquare;
+  LB: TBase;
+  LBorrow: TBorrow;
+  LMore: TMore;
+  LP: ptr to IShape;
+  LR: ref IShape;
+  LSqP: ptr to TSquare;
+  LC: ptr to IShape;
+  LQ: PShape;
+  LPr: ptr to IPrintable;
+begin
+  LSq.S := 4;
+  Report(LB);
+  Report(LSq);
+  Named(LSq);
+  LP := address of LSq;
+  println("ptr {}", LP^.Area());
+  Print(LSq);
+  LBorrow.N := 3;
+  Print(LBorrow);
+  Named(LBorrow);
+  Print(LMore);
+  LR := ref TSquare();
+  println("ref {}", LR.Name());
+  LSqP := address of LSq;
+  LC := ptr to IShape(LSqP);
+  LQ := PShape(LSqP);
+  println("cast {} {} {} {}", LC^.Area(), LQ^.Area(), LC = LP, LQ = LP);
+  LSqP := ptr to TSquare(LC);
+  println("back {}", LSqP^.S);
+  LPr := ptr to IPrintable(LC);
+  println("cross {}", LPr^.Show("x"));
+end.

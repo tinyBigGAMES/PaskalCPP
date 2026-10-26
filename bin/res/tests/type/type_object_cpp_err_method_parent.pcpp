@@ -1,0 +1,49 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_cpp_err_method_parent.pcpp - Type: object cpp, method parent
+
+  Break step of type_object_cpp: parent.M of a method named as a value
+  (SM0432).
+*******************************************************************************/
+
+module exe type_object_cpp_err_method_parent;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TFn = routine(): int32;
+  TBase = object
+    virtual method Get(): int32;
+    begin
+      return 1;
+    end;
+  end;
+  TDerived = object(TBase)
+    override method Get(): int32;
+    var
+      LF: TFn;
+    begin
+      LF := parent.Get; // ERROR SM0432
+      return 2;
+    end;
+  end;
+
+begin
+end.

@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  test_mode_err_value.pcpp - Test: mode, value
+
+  Break step of test_mode: @unitTestMode takes on or off (SM0100).
+*******************************************************************************/
+
+module exe test_mode_err_value;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@unitTestMode maybe; // ERROR SM0100@15: 'maybe' is not a value of @unitTestMode
+
+begin
+end.

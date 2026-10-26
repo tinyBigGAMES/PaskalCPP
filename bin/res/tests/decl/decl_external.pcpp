@@ -1,0 +1,58 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_external.pcpp - Declaration: the external clause
+
+  routine ...; external [ "library" | name ]; (BNF.md sec 3). external
+  replaces a routine's body: the routine is bound to a symbol linked from
+  elsewhere. With no library, the symbol is in this build
+  (decl\fixtures\decl_external_c.c defines decl_external_mul). A library is
+  named as @linklibrary names one, never a file or a path: as a string
+  ("lib_plain_lib"), or as a const string (CRuntimeLib = "lib_runtime_lib");
+  the clause may stand on a line of its own. The library is linked because
+  the clause names it: this program has no @linklibrary, only the folder its
+  deps lib_plain_lib and lib_runtime_lib (the lib area) are built in.
+*******************************************************************************/
+
+module exe decl_external;
+
+/*
+  @@test
+    kind run
+    deps lib_plain_lib lib_runtime_lib
+    expect
+    | decl_external_mul(6, 7) = 42
+    | lib_plain_lib_add(2, 3) = 5
+    | lib_runtime_lib_div(7, 2) = 3
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addsourcefile "$P:res/tests/decl/fixtures/decl_external_c.c";
+@addlibrarypath "$P:output/lib";
+
+const
+  CRuntimeLib: string = "lib_runtime_lib";
+
+routine clink decl_external_mul(AA: int32; AB: int32): int32; external;
+routine clink lib_plain_lib_add(AA: int32; AB: int32): int32; external "lib_plain_lib";
+routine clink lib_runtime_lib_div(AA: int32; AB: int32): int32;
+  external CRuntimeLib;
+
+begin
+  println("decl_external_mul(6, 7) = {}", decl_external_mul(6, 7));
+  println("lib_plain_lib_add(2, 3) = {}", lib_plain_lib_add(2, 3));
+  println("lib_runtime_lib_div(7, 2) = {}", lib_runtime_lib_div(7, 2));
+end.

@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_bitwise_err_into_bool.pcpp - Expr: bitwise, into bool
+
+  Break step of expr_bitwise: the int32 result of & stored into a bool
+  (SM0200): & is bitwise, its result is a number; write (LN & 1) <> 0.
+*******************************************************************************/
+
+module exe expr_bitwise_err_into_bool;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int32 = 5;
+  LB: bool;
+
+begin
+  LB := LN & 1; // ERROR SM0200@9: 'int32' does not convert implicitly to 'bool'
+end.

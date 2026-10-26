@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_err_bit_store_unsigned.pcpp - Type: record, bit store unsigned
+
+  Break step of type_record: a constant stored into an unsigned bitfield is
+  held by its width: uint8 : 2 holds 0 .. 3 (SM0200).
+*******************************************************************************/
+
+module exe type_record_err_bit_store_unsigned;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TR = record
+    B: int32 : 3;
+    U: uint8 : 2;
+  end;
+
+var
+  LR: TR;
+
+begin
+  LR.U := 5; // ERROR SM0200@11: 5 does not fit in 'uint8 : 2' (0..3)
+end.

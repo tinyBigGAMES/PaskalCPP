@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_arithmetic_err_into_narrow.pcpp - Expr: arithmetic, into narrow
+
+  Break step of expr_arithmetic: the int32 sum of two int8 values stored into
+  an int8 (SM0200): the sum is computed in int32 and may not fit; write
+  int8(LA + LB).
+*******************************************************************************/
+
+module exe expr_arithmetic_err_into_narrow;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LA: int8 = 1;
+  LB: int8 = 2;
+  LN: int8;
+
+begin
+  LN := LA + LB; // ERROR SM0200@9: 'int32' does not convert implicitly to 'int8'
+end.

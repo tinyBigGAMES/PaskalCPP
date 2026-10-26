@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  suite_dir.pcpp - Test suite: <DIR> in expect lines
+
+  A program can print a path that depends on where the suite sits: here the
+  source path the emitter writes into every #line (absolute, '/' form),
+  which C++'s __FILE__ reports. In expect lines <DIR> stands for the test
+  file's folder in '/' form, so the expectation holds on every machine.
+*******************************************************************************/
+
+module exe suite_dir;
+
+/*
+  @@test
+    kind run
+    expect
+    | <DIR>/suite_dir.pcpp
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+begin
+  println("{}", cpp("__FILE__"));
+end.

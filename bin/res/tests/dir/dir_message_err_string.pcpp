@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_message_err_string.pcpp - Directive: a @message text that is not a plain string
+
+  Break step of dir_message: a wide L"..." literal.
+*******************************************************************************/
+
+module exe dir_message_err_string;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@message hint L"dir_message: a wide text"; // ERROR PR0009@15
+
+begin
+end.

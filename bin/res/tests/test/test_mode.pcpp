@@ -1,0 +1,92 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  test_mode.pcpp - Unit testing compliance: @unitTestMode on
+
+  With @unitTestMode on (BNF.md sec 8) an exe starts as always: the units'
+  initialize sections, then its own; then the runner runs the tests of every
+  unit it imports (fixtures\test_mode_unit), then its own (the body does not
+  run); finalize runs in reverse; the exit code is the number of failed tests
+  (2 here: one fails an assert, one raises). @unitTestMode off: test_mode_off.
+  Break steps: test_mode_err_value, test_mode_err_lib, test_mode_err_lib_tests.
+*******************************************************************************/
+
+module exe test_mode;
+
+/*
+  @@test
+    kind run
+    exitcode 2
+    expect
+    | unit init
+    | main init
+    | 
+    | ╔══════════════════════════════════════════════════════════════╗
+    | ║                     Unit Test Runner                         ║
+    | ╚══════════════════════════════════════════════════════════════╝
+    | 
+    | Running 4 test(s)...
+    | 
+    | ✅ PASS: unit adds
+    | ✅ PASS: passes
+    | ❌ FAIL: fails
+    |   🔴 <DIR>/test_mode.pcpp:85: testAssertEqualInt failed: expected 1, got 2
+    |   🔴 <DIR>/test_mode.pcpp:86: testFail: why
+    | ❌ FAIL: raises
+    |   🔴 <DIR>/test_mode.pcpp:89: test raised exception 7: inside
+    | 
+    | ════════════════════════════════════════════════════════════════
+    | Results: 2 passed, 2 failed, 4 total
+    | ════════════════════════════════════════════════════════════════
+    | main final
+    | unit final
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@unitTestMode on;
+@addmodulepath "$P:res/tests/test/fixtures";
+
+import test_mode_unit;
+
+initialize
+begin
+  println("main init");
+end;
+
+finalize
+begin
+  println("main final");
+end;
+
+begin
+  println("the body does not run in test mode");
+end.
+
+test "passes"
+begin
+  testAssertEqualInt(4, test_mode_unit.Add(2, 2));
+end;
+
+test "fails"
+begin
+  testAssertEqualInt(1, test_mode_unit.Add(1, 1));
+  testFail("why");
+end;
+
+test "raises"
+begin
+  raisecode(7, "inside");
+end;

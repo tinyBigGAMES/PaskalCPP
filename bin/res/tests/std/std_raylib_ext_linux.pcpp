@@ -1,0 +1,1376 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_raylib_ext_linux.pcpp - std compliance: the raylib_ext unit
+
+  `import raylib_ext;` gives raylib's file loaders an IO form. Every IO form
+  is compared with raylib's own file-name form on a real file of the same
+  bytes (written beside this program, removed after): what the file-name
+  form gives, the IO form gives.
+
+  Data: LoadFileDataIO and LoadFileTextIO over a memory IO (bytes with a NUL
+  and a CRLF in them), a file IO and a zip entry (std_customio_stored.zip:
+  data/bytes.bin, hello.txt); an empty IO as an empty file; a failing IO,
+  and nil, as a missing file (nil, size 0). Every result is unloaded with
+  UnloadFileData / UnloadFileText.
+
+  Each row prints ok or FAIL with its name; the last is `done <failures>`.
+  raylib's own log is off (SetTraceLogLevel(LOG_NONE)), so the output is the
+  rows alone.
+
+  The Linux half of std_raylib_ext: the same program, the Linux
+  expectations.
+*******************************************************************************/
+
+module exe std_raylib_ext_linux;
+
+/*
+  @@test
+    kind run
+    targets x86_64-linux-gnu
+    expect
+    | ok data real files
+    | ok data memory binary as path
+    | ok text memory binary as path
+    | ok data memory binary close
+    | ok data memory text as path
+    | ok text memory crlf as path
+    | ok data memory again as path
+    | ok data memory close
+    | ok data file as path
+    | ok text file as path
+    | ok data file close
+    | ok data zip real file
+    | ok data zip as path
+    | ok data zip size 256
+    | ok data zip close
+    | ok text zip real file
+    | ok text zip as path
+    | ok text zip close
+    | ok text edges real files
+    | ok text edges as path
+    | ok data edges as path
+    | ok text edges close
+    | ok text ctrl-z alone as path
+    | ok text ctrl-z close
+    | ok text edges removed
+    | ok data empty as path
+    | ok text empty as path
+    | ok data empty close
+    | ok data failing as missing as path
+    | ok text failing as missing as path
+    | ok data failing close
+    | ok data nil as missing as path
+    | ok text nil as missing as path
+    | ok data nil size 0
+    | ok data real files removed
+    | ok image real files
+    | ok image png loaded
+    | ok image png as path
+    | ok image png close
+    | ok image anim frames
+    | ok image anim as path
+    | ok image anim close
+    | ok image anim still as path
+    | ok image anim still close
+    | ok image raw header as path
+    | ok image raw no header as path
+    | ok image raw header too long as path
+    | ok image raw too small as path
+    | ok image raw close
+    | ok image failing as missing
+    | ok image failing close
+    | ok image real files removed
+    | ok audio device
+    | ok audio real files
+    | ok wave loaded
+    | ok wave as path
+    | ok sound loaded
+    | ok wave close
+    | ok music ogg loaded
+    | ok music ogg as path
+    | ok music ogg played
+    | ok music ogg close
+    | ok music mp3 loaded
+    | ok music mp3 as path
+    | ok music mp3 close
+    | ok wave failing as missing
+    | ok music failing as missing
+    | ok audio failing close
+    | ok audio real files removed
+    | ok music source real file
+    | ok music source made
+    | ok music source set
+    | ok music source plain path loaded
+    | ok music source as path
+    | ok music source played
+    | ok music source clear
+    | ok music source cleared
+    | ok music source set again
+    | ok music source program's own
+    | ok music source clear again
+    | ok music source program's kept
+    | ok music source program's unset
+    | ok music source all unset
+    | ok music source real removed
+    | ok window
+    | ok gpu real files
+    | ok texture loaded
+    | ok texture as path
+    | ok font image as path
+    | ok texture close
+    | ok font ttf loaded
+    | ok font ttf as path
+    | ok font ex as path
+    | ok font fnt refused as missing
+    | ok font close
+    | ok texture failing as missing
+    | ok font failing as missing
+    | ok font image failing as missing
+    | ok font ex failing as missing
+    | ok gpu failing close
+    | ok gpu real files removed
+    | ok shader real file
+    | ok shader loaded
+    | ok shader as path
+    | ok shader close
+    | ok shader default
+    | ok shader real file removed
+    | ok model real files
+    | ok model loaded
+    | ok model as path
+    | ok model texture as path
+    | ok model missing as path
+    | ok set source
+    | ok routed load
+    | ok routed texture
+    | ok routed io form texture
+    | ok clear source
+    | ok not routed after clear
+    | ok model real files removed
+    | ok icon net_wm_icon set
+    | ok icon net_wm_icon size
+    | ok video real files
+    | ok video file valid
+    | ok video file pl_mpeg reads it
+    | ok video file size as pl_mpeg
+    | ok video file frame rate as pl_mpeg
+    | ok video file duration as pl_mpeg
+    | ok video file audio as pl_mpeg
+    | ok video file sample rate as pl_mpeg
+    | ok video io valid
+    | ok video io pl_mpeg reads it
+    | ok video io size as pl_mpeg
+    | ok video io frame rate as pl_mpeg
+    | ok video io duration as pl_mpeg
+    | ok video io audio as pl_mpeg
+    | ok video io sample rate as pl_mpeg
+    | ok video io close
+    | ok video zip valid
+    | ok video zip pl_mpeg reads it
+    | ok video zip size as pl_mpeg
+    | ok video zip frame rate as pl_mpeg
+    | ok video zip duration as pl_mpeg
+    | ok video zip audio as pl_mpeg
+    | ok video zip sample rate as pl_mpeg
+    | ok video steps time as pl_mpeg
+    | ok video first frame as pl_mpeg
+    | ok video not looping
+    | ok video playing
+    | ok video callback playing
+    | ok video stopped at end
+    | ok video callback stopped
+    | ok video paused
+    | ok video stopped
+    | ok video looping
+    | ok video volume
+    | ok video volume clamped
+    | ok video looped plays on
+    | ok video silent valid
+    | ok video silent pl_mpeg reads it
+    | ok video silent size as pl_mpeg
+    | ok video silent frame rate as pl_mpeg
+    | ok video silent duration as pl_mpeg
+    | ok video silent audio as pl_mpeg
+    | ok video silent stopped at end
+    | ok video missing file
+    | ok video missing entry
+    | ok video not mpeg
+    | ok video real files removed
+    | done 0
+    | [Heap] Allocs: 125, Frees: 125, Leaked: 0
+  @@end
+*/
+
+// The window icon rows need one stamped / built in
+@exeicon "$P:res/assets/icons/paskalcpp.ico";
+
+import
+  raylib,
+  CustomIO,
+  HookIO,
+  pl_mpeg,
+  raylib_ext;
+
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <string>
+
+// The memory IO's bytes: a NUL inside and a CRLF (a text read of a file
+// may treat them as its C runtime does)
+static const unsigned char CStdRaylibExtBytes[] = {
+  'l', 'i', 'n', 'e', '1', '\r', '\n', 'l', 'i', 'n', 'e', '2', '\n', 'e', 'n', 'd'
+};
+static const unsigned char CStdRaylibExtBinary[] = { 'a', 0, 'b', 0xFF, '\r', '\n', 'c' };
+// Text-mode edge cases: a lone CR, CR CR LF, a Ctrl-Z inside; and a Ctrl-Z
+// alone
+static const unsigned char CStdRaylibExtEdges[] = {
+  'a', '\r', 'b', '\r', '\r', '\n', 'c', 0x1A, 'd', '\n'
+};
+static const unsigned char CStdRaylibExtCtrlZ[] = { 0x1A };
+
+static void* std_raylib_ext_edges()
+{
+  return const_cast<unsigned char*>(CStdRaylibExtEdges);
+}
+
+static int64_t std_raylib_ext_edges_size()
+{
+  return static_cast<int64_t>(sizeof(CStdRaylibExtEdges));
+}
+
+static void* std_raylib_ext_ctrlz()
+{
+  return const_cast<unsigned char*>(CStdRaylibExtCtrlZ);
+}
+
+static int64_t std_raylib_ext_ctrlz_size()
+{
+  return static_cast<int64_t>(sizeof(CStdRaylibExtCtrlZ));
+}
+
+// A trivial but valid raylib fragment shader (version 330), as its own
+// file would hold it
+static std::string std_raylib_ext_shader_src()
+{
+  return
+    "#version 330\n"
+    "in vec2 fragTexCoord; in vec4 fragColor; out vec4 finalColor;\n"
+    "uniform sampler2D texture0; uniform vec4 colDiffuse;\n"
+    "void main(){ finalColor = texture(texture0, fragTexCoord)*colDiffuse*fragColor; }\n";
+}
+
+// AText (its bytes, no terminator) into a new real text file at APath
+static bool std_raylib_ext_write_text(const std::string& APath, const std::string& AText)
+{
+  std::FILE* LFile = std::fopen(APath.c_str(), "wb");
+  if (LFile == nullptr)
+    return false;
+  const bool LOk = AText.empty() ||
+    (std::fwrite(AText.data(), 1, AText.size(), LFile) == AText.size());
+  return (std::fclose(LFile) == 0) && LOk;
+}
+
+// ACount bytes into a new real file at APath
+static bool std_raylib_ext_write(const std::string& APath, const void* AData, const std::size_t ACount)
+{
+  std::FILE* LFile = std::fopen(APath.c_str(), "wb");
+  if (LFile == nullptr)
+    return false;
+  const bool LWritten = (ACount == 0) || (std::fwrite(AData, 1, ACount, LFile) == ACount);
+  return (std::fclose(LFile) == 0) && LWritten;
+}
+
+// AIO's bytes read straight through CustomIO (apart from raylib_ext's
+// reader) into a new real file at APath
+static bool std_raylib_ext_copy(const ::pcpp_m_CustomIO::IO AIO, const std::string& APath)
+{
+  unsigned char LBuffer[4096];
+  std::string LAll;
+  std::int64_t LGot;
+  if (AIO == nullptr)
+    return false;
+  ::pcpp_m_CustomIO::IOSeek(AIO, 0, ::pcpp_m_CustomIO::SeekOrigin::FromStart);
+  do
+  {
+    LGot = ::pcpp_m_CustomIO::IORead(AIO, LBuffer, sizeof(LBuffer));
+    if (LGot > 0)
+      LAll.append(reinterpret_cast<const char*>(LBuffer), static_cast<std::size_t>(LGot));
+  } while (LGot > 0);
+  return std_raylib_ext_write(APath, LAll.data(), LAll.size());
+}
+
+// Two LoadFileData results: both nil, or both set with the same size and
+// the same bytes
+static bool std_raylib_ext_same(const unsigned char* AFirst, const int AFirstSize,
+  const unsigned char* ASecond, const int ASecondSize)
+{
+  if ((AFirst == nullptr) || (ASecond == nullptr))
+    return (AFirst == nullptr) && (ASecond == nullptr) && (AFirstSize == ASecondSize);
+  return (AFirstSize == ASecondSize) &&
+    (std::memcmp(AFirst, ASecond, static_cast<std::size_t>(AFirstSize)) == 0);
+}
+
+// Two images: the same size, format and mipmaps, and the same pixel bytes
+// (AFrames frames of them, for an image sequence); two empty images too
+static bool std_raylib_ext_same_image(const Image& AFirst, const Image& ASecond, const int AFrames)
+{
+  if ((AFirst.data == nullptr) || (ASecond.data == nullptr))
+    return (AFirst.data == nullptr) && (ASecond.data == nullptr) && (AFirst.width == ASecond.width);
+  if ((AFirst.width != ASecond.width) || (AFirst.height != ASecond.height) ||
+    (AFirst.format != ASecond.format) || (AFirst.mipmaps != ASecond.mipmaps))
+    return false;
+  const int LBytes = GetPixelDataSize(AFirst.width, AFirst.height, AFirst.format) * AFrames;
+  return std::memcmp(AFirst.data, ASecond.data, static_cast<std::size_t>(LBytes)) == 0;
+}
+
+// Two textures: both loaded with the same size, format and mipmaps, or both
+// empty
+static bool std_raylib_ext_same_texture(const Texture2D& AFirst, const Texture2D& ASecond)
+{
+  if ((AFirst.id == 0) || (ASecond.id == 0))
+    return (AFirst.id == 0) && (ASecond.id == 0);
+  return (AFirst.width == ASecond.width) && (AFirst.height == ASecond.height) &&
+    (AFirst.format == ASecond.format) && (AFirst.mipmaps == ASecond.mipmaps);
+}
+
+// Two fonts: the same size, glyph count and padding, and an atlas of the
+// same size; for raylib's default font (a failure), the same texture
+static bool std_raylib_ext_same_font(const Font& AFirst, const Font& ASecond)
+{
+  return (AFirst.baseSize == ASecond.baseSize) && (AFirst.glyphCount == ASecond.glyphCount) &&
+    (AFirst.glyphPadding == ASecond.glyphPadding) &&
+    (AFirst.texture.width == ASecond.texture.width) && (AFirst.texture.height == ASecond.texture.height);
+}
+
+static bool std_raylib_ext_is_default_font(const Font& AFont)
+{
+  return AFont.texture.id == GetFontDefault().texture.id;
+}
+
+// Two waves: the same frame count, rate, sample size and channels, and the
+// same sample bytes; two empty waves (no data) too
+static bool std_raylib_ext_same_wave(const Wave& AFirst, const Wave& ASecond)
+{
+  if ((AFirst.data == nullptr) || (ASecond.data == nullptr))
+    return (AFirst.data == nullptr) && (ASecond.data == nullptr) &&
+      (AFirst.frameCount == ASecond.frameCount);
+  if ((AFirst.frameCount != ASecond.frameCount) || (AFirst.sampleRate != ASecond.sampleRate) ||
+    (AFirst.sampleSize != ASecond.sampleSize) || (AFirst.channels != ASecond.channels))
+    return false;
+  const std::size_t LBytes = static_cast<std::size_t>(AFirst.frameCount) * AFirst.channels *
+    (AFirst.sampleSize / 8);
+  return std::memcmp(AFirst.data, ASecond.data, LBytes) == 0;
+}
+
+// Two music streams: both loaded with the same frame count and the same
+// stream rate / sample size / channels, or both empty (ctxData nil)
+static bool std_raylib_ext_same_music(const Music& AFirst, const Music& ASecond)
+{
+  if ((AFirst.ctxData == nullptr) || (ASecond.ctxData == nullptr))
+    return (AFirst.ctxData == nullptr) && (ASecond.ctxData == nullptr);
+  return (AFirst.frameCount == ASecond.frameCount) &&
+    (AFirst.stream.sampleRate == ASecond.stream.sampleRate) &&
+    (AFirst.stream.sampleSize == ASecond.stream.sampleSize) &&
+    (AFirst.stream.channels == ASecond.stream.channels);
+}
+
+// An entry of the std_raylib_ext.zip fixture copied to the real file APath
+static bool std_raylib_ext_extract(const char* AEntry, const std::string& APath)
+{
+  const ::pcpp_m_CustomIO::IO LIO = ::pcpp_m_CustomIO::CreateZipFileIO(
+    "$P:../../res/tests/std/fixtures/std_raylib_ext.zip", AEntry);
+  const bool LOk = std_raylib_ext_copy(LIO, APath);
+  if (LIO != nullptr)
+    ::pcpp_m_CustomIO::IOClose(LIO);
+  return LOk;
+}
+
+// The folder of APath, with its last separator ("" when it has none)
+static std::string std_raylib_ext_folder(const std::string& APath)
+{
+  const std::size_t LLast = APath.find_last_of("/\\");
+  if (LLast == std::string::npos)
+    return std::string();
+  return APath.substr(0, LLast + 1);
+}
+
+// The width of the albedo texture of mesh 0's material: raylib's default
+// texture (a missing image) is 1 wide, a loaded one its own width; 0 when
+// the model has no mesh
+static int std_raylib_ext_albedo_width(const Model& AModel)
+{
+  if ((AModel.meshCount <= 0) || (AModel.meshMaterial == nullptr) || (AModel.materials == nullptr))
+    return 0;
+  const int LMaterial = AModel.meshMaterial[0];
+  if ((LMaterial < 0) || (LMaterial >= AModel.materialCount))
+    return 0;
+  return AModel.materials[LMaterial].maps[MATERIAL_MAP_ALBEDO].texture.width;
+}
+
+// Two LoadFileText results: both nil, or both set with the same text
+static bool std_raylib_ext_same_text(const char* AFirst, const char* ASecond)
+{
+  if ((AFirst == nullptr) || (ASecond == nullptr))
+    return (AFirst == nullptr) && (ASecond == nullptr);
+  return std::strcmp(AFirst, ASecond) == 0;
+}
+
+// CreateMemoryIO takes a ptr; the IOs made of these are read-only, so the
+// bytes are never written through it
+static void* std_raylib_ext_bytes()
+{
+  return const_cast<unsigned char*>(CStdRaylibExtBytes);
+}
+
+static int64_t std_raylib_ext_bytes_size()
+{
+  return static_cast<int64_t>(sizeof(CStdRaylibExtBytes));
+}
+
+static void* std_raylib_ext_binary()
+{
+  return const_cast<unsigned char*>(CStdRaylibExtBinary);
+}
+
+// pl_mpeg's own read of an MPEG-1 file, the reference the video rows
+// compare against: AFacts gets width, height, frame rate, duration, audio
+// streams, sample rate; false when pl_mpeg cannot open it
+static bool std_raylib_ext_plm_facts(const std::string& APath, double* AFacts)
+{
+  plm_t* LPlm = plm_create_with_filename(APath.c_str());
+
+  if (LPlm == nullptr)
+    return false;
+  AFacts[0] = plm_get_width(LPlm);
+  AFacts[1] = plm_get_height(LPlm);
+  AFacts[2] = plm_get_framerate(LPlm);
+  AFacts[3] = plm_get_duration(LPlm);
+  AFacts[4] = plm_get_num_audio_streams(LPlm);
+  AFacts[5] = plm_get_samplerate(LPlm);
+  plm_destroy(LPlm);
+  return true;
+}
+
+// The reference's decode callbacks: the video one counts the frames, the
+// audio one takes the samples (raylib_ext decodes both, so the reference
+// does too)
+static void std_raylib_ext_plm_on_video(plm_t*, plm_frame_t*, void* AUser)
+{
+  ++*static_cast<int*>(AUser);
+}
+
+static void std_raylib_ext_plm_on_audio(plm_t*, plm_samples_t*, void*)
+{
+}
+
+// pl_mpeg's time after ASteps decode steps of AStep seconds, from the start
+static double std_raylib_ext_plm_time(const std::string& APath, const int ASteps, const double AStep)
+{
+  plm_t* LPlm = plm_create_with_filename(APath.c_str());
+  int LFrames = 0;
+  double LTime;
+
+  if (LPlm == nullptr)
+    return -1.0;
+  plm_set_video_decode_callback(LPlm, std_raylib_ext_plm_on_video, &LFrames);
+  plm_set_audio_decode_callback(LPlm, std_raylib_ext_plm_on_audio, nullptr);
+  for (int LI = 0; LI < ASteps; ++LI)
+    plm_decode(LPlm, AStep);
+  LTime = plm_get_time(LPlm);
+  plm_destroy(LPlm);
+  return LTime;
+}
+
+// The largest channel difference between AImage (RGBA8, the video's size)
+// and pl_mpeg's own CPU conversion (plm_frame_to_rgba) of the file's first
+// frame; -1 when either is missing or the sizes differ. The shader path
+// does the same Rec. 601 matrix in float, pl_mpeg in integer steps: a few
+// units of rounding apart, never a different picture.
+static int std_raylib_ext_frame_diff(const Image& AImage, const std::string& APath)
+{
+  plm_t* LPlm = plm_create_with_filename(APath.c_str());
+  plm_frame_t* LFrame;
+  int LMax = -1;
+
+  if (LPlm == nullptr)
+    return -1;
+  LFrame = plm_decode_video(LPlm);
+  if ((LFrame != nullptr) && (AImage.data != nullptr) && (AImage.format == PIXELFORMAT_UNCOMPRESSED_R8G8B8A8) &&
+    (AImage.width == static_cast<int>(LFrame->width)) && (AImage.height == static_cast<int>(LFrame->height)))
+  {
+    std::string LPixels(static_cast<std::size_t>(LFrame->width) * LFrame->height * 4, '\xFF');
+    unsigned char* LOwn = reinterpret_cast<unsigned char*>(LPixels.data());
+    const unsigned char* LDrawn = static_cast<const unsigned char*>(AImage.data);
+    plm_frame_to_rgba(LFrame, LOwn, static_cast<int>(LFrame->width) * 4);
+    LMax = 0;
+    for (std::size_t LI = 0; LI < LPixels.size(); ++LI)
+    {
+      if ((LI % 4) == 3)
+        continue;
+      const int LDiff = (LOwn[LI] > LDrawn[LI]) ? (LOwn[LI] - LDrawn[LI]) : (LDrawn[LI] - LOwn[LI]);
+      if (LDiff > LMax)
+        LMax = LDiff;
+    }
+  }
+  plm_destroy(LPlm);
+  return LMax;
+}
+
+// The program's window icon as the window manager sees it, read with no
+// windows.h / Xlib.h (their names collide with raylib's). Windows: AWhich
+// 1 = WM_GETICON ICON_BIG, 0 = ICON_SMALL, true when an icon is set.
+// Linux: _NET_WM_ICON's first two values (width, height), true when the
+// property is set with at least them.
+@ifdef TARGET_X86_64_WINDOWS_GNU
+extern "C" __declspec(dllimport) intptr_t __stdcall SendMessageW(void* AWindow, unsigned int AMessage,
+  uintptr_t AW, intptr_t AL);
+
+static bool std_raylib_ext_icon(const int AWhich, long* AWidth, long* AHeight)
+{
+  *AWidth = 0;
+  *AHeight = 0;
+  return SendMessageW(GetWindowHandle(), 0x007F, static_cast<uintptr_t>(AWhich), 0) != 0;
+}
+@else
+#include <dlfcn.h>
+extern "C" void* glfwGetCurrentContext(void);
+extern "C" void* glfwGetX11Display(void);
+extern "C" unsigned long glfwGetX11Window(void* AWindow);
+
+static bool std_raylib_ext_icon(const int, long* AWidth, long* AHeight)
+{
+  using TInternAtom = unsigned long (*)(void*, const char*, int);
+  using TGetProperty = int (*)(void*, unsigned long, unsigned long, long, long, int, unsigned long,
+    unsigned long*, int*, unsigned long*, unsigned long*, unsigned char**);
+  using TFree = int (*)(void*);
+  void* LX11 = dlopen("libX11.so.6", RTLD_NOW | RTLD_NOLOAD);
+  bool LSet = false;
+
+  *AWidth = 0;
+  *AHeight = 0;
+  if (LX11 == nullptr)
+    return false;
+  const auto LIntern = reinterpret_cast<TInternAtom>(dlsym(LX11, "XInternAtom"));
+  const auto LGet = reinterpret_cast<TGetProperty>(dlsym(LX11, "XGetWindowProperty"));
+  const auto LFree = reinterpret_cast<TFree>(dlsym(LX11, "XFree"));
+  void* LDisplay = glfwGetX11Display();
+  void* LContext = glfwGetCurrentContext();
+  if ((LIntern != nullptr) && (LGet != nullptr) && (LFree != nullptr) && (LDisplay != nullptr) &&
+    (LContext != nullptr))
+  {
+    unsigned long LAtom = LIntern(LDisplay, "_NET_WM_ICON", 0);
+    unsigned long LType = 0;
+    int LFormat = 0;
+    unsigned long LCount = 0;
+    unsigned long LAfter = 0;
+    unsigned char* LData = nullptr;
+    if ((LGet(LDisplay, glfwGetX11Window(LContext), LAtom, 0, 2, 0, 0, &LType, &LFormat, &LCount,
+      &LAfter, &LData) == 0) && (LData != nullptr))
+    {
+      if ((LFormat == 32) && (LCount >= 2))
+      {
+        // Format 32 comes back as C longs
+        *AWidth = reinterpret_cast<long*>(LData)[0];
+        *AHeight = reinterpret_cast<long*>(LData)[1];
+        LSet = true;
+      }
+      LFree(LData);
+    }
+  }
+  dlclose(LX11);
+  return LSet;
+}
+@endif
+
+static int64_t std_raylib_ext_binary_size()
+{
+  return static_cast<int64_t>(sizeof(CStdRaylibExtBinary));
+}
+
+var
+  GFails: int32;
+  // The video status callback's record: how many calls, the last status
+  GStatusCalls: int32;
+  GStatusLast: VideoStatus;
+
+routine Check(const AName: string; const AOk: bool);
+begin
+  if AOk then
+    println("ok {}", AName);
+  else
+    println("FAIL {}", AName);
+    GFails := GFails + 1;
+  end;
+end;
+
+// A Read callback that always fails: the IO is in error at once
+routine FailingRead(const AUserData: ptr; const ABuffer: ptr; const ASize: int64; var AState: IOState): int64;
+begin
+  AState := IOState.Error;
+  return 0;
+end;
+
+// LoadFileDataIO on AIO against LoadFileData on the real file APath
+routine CheckData(const AName: string; const AIO: IO; const APath: string);
+var
+  LViaIO: ptr to uint8;
+  LViaPath: ptr to uint8;
+  LIOSize: int32;
+  LPathSize: int32;
+begin
+  LIOSize := -1;
+  LPathSize := -1;
+  LViaIO := LoadFileDataIO(AIO, LIOSize);
+  LViaPath := LoadFileData(APath.c_str(), address of LPathSize);
+  Check(AName + " as path", std_raylib_ext_same(LViaIO, LIOSize, LViaPath, LPathSize));
+  if LViaIO <> nil then
+    UnloadFileData(LViaIO);
+  end;
+  if LViaPath <> nil then
+    UnloadFileData(LViaPath);
+  end;
+end;
+
+// LoadFileTextIO on AIO against LoadFileText on the real file APath
+routine CheckText(const AName: string; const AIO: IO; const APath: string);
+var
+  LViaIO: ptr to char;
+  LViaPath: ptr to char;
+begin
+  LViaIO := LoadFileTextIO(AIO);
+  LViaPath := LoadFileText(APath.c_str());
+  Check(AName + " as path", std_raylib_ext_same_text(LViaIO, LViaPath));
+  if LViaIO <> nil then
+    UnloadFileText(LViaIO);
+  end;
+  if LViaPath <> nil then
+    UnloadFileText(LViaPath);
+  end;
+end;
+
+// The data loaders over memory, file and zip IOs, empty, failing and nil
+routine TestData();
+var
+  LPath: string;
+  LBinaryPath: string;
+  LEmptyPath: string;
+  LZipPath: string;
+  LHelloPath: string;
+  LMissing: string;
+  LEdgesPath: string;
+  LCtrlZPath: string;
+  LMemory: IO;
+  LFile: IO;
+  LZip: IO;
+  LCallbacks: IOInterface;
+  LFailing: IO;
+  LSize: int32;
+  LData: ptr to uint8;
+begin
+  LPath := paramstr(0) + ".text.txt";
+  LBinaryPath := paramstr(0) + ".binary.bin";
+  LEmptyPath := paramstr(0) + ".empty.bin";
+  LZipPath := paramstr(0) + ".zip.bin";
+  LHelloPath := paramstr(0) + ".hello.txt";
+  LMissing := paramstr(0) + ".missing.bin";
+  LEdgesPath := paramstr(0) + ".edges.txt";
+  LCtrlZPath := paramstr(0) + ".ctrlz.txt";
+  Check("data real files", std_raylib_ext_write(LPath, std_raylib_ext_bytes(), std_raylib_ext_bytes_size()) and std_raylib_ext_write(LBinaryPath, std_raylib_ext_binary(), std_raylib_ext_binary_size()) and std_raylib_ext_write(LEmptyPath, nil, 0));
+
+  LMemory := CreateMemoryIO(std_raylib_ext_binary(), std_raylib_ext_binary_size(), true);
+  CheckData("data memory binary", LMemory, LBinaryPath);
+  CheckText("text memory binary", LMemory, LBinaryPath);
+  Check("data memory binary close", IOClose(LMemory));
+
+  LMemory := CreateMemoryIO(std_raylib_ext_bytes(), std_raylib_ext_bytes_size(), true);
+  CheckData("data memory text", LMemory, LPath);
+  CheckText("text memory crlf", LMemory, LPath);
+  // Read twice: the IO is read from its start each time
+  CheckData("data memory again", LMemory, LPath);
+  Check("data memory close", IOClose(LMemory));
+
+  LFile := CreateFileIO(LPath, FileMode.Read);
+  CheckData("data file", LFile, LPath);
+  CheckText("text file", LFile, LPath);
+  Check("data file close", (LFile <> nil) and IOClose(LFile));
+
+  LZip := CreateZipFileIO("$P:../../res/tests/std/fixtures/std_customio_stored.zip", "data/bytes.bin");
+  Check("data zip real file", std_raylib_ext_copy(LZip, LZipPath));
+  CheckData("data zip", LZip, LZipPath);
+  LSize := -1;
+  LData := LoadFileDataIO(LZip, LSize);
+  Check("data zip size 256", (LData <> nil) and (LSize = 256));
+  if LData <> nil then
+    UnloadFileData(LData);
+  end;
+  Check("data zip close", (LZip <> nil) and IOClose(LZip));
+  LZip := CreateZipFileIO("$P:../../res/tests/std/fixtures/std_customio_stored.zip", "hello.txt");
+  Check("text zip real file", std_raylib_ext_copy(LZip, LHelloPath));
+  CheckText("text zip", LZip, LHelloPath);
+  Check("text zip close", (LZip <> nil) and IOClose(LZip));
+
+  // The text-mode edge cases, each against raylib's own text read
+  Check("text edges real files", std_raylib_ext_write(LEdgesPath, std_raylib_ext_edges(), std_raylib_ext_edges_size()) and std_raylib_ext_write(LCtrlZPath, std_raylib_ext_ctrlz(), std_raylib_ext_ctrlz_size()));
+  LMemory := CreateMemoryIO(std_raylib_ext_edges(), std_raylib_ext_edges_size(), true);
+  CheckText("text edges", LMemory, LEdgesPath);
+  CheckData("data edges", LMemory, LEdgesPath);
+  Check("text edges close", IOClose(LMemory));
+  LMemory := CreateMemoryIO(std_raylib_ext_ctrlz(), std_raylib_ext_ctrlz_size(), true);
+  CheckText("text ctrl-z alone", LMemory, LCtrlZPath);
+  Check("text ctrl-z close", IOClose(LMemory));
+  Check("text edges removed", (remove(LEdgesPath.c_str()) = 0) and (remove(LCtrlZPath.c_str()) = 0));
+
+  LMemory := CreateMemoryIO();
+  CheckData("data empty", LMemory, LEmptyPath);
+  CheckText("text empty", LMemory, LEmptyPath);
+  Check("data empty close", IOClose(LMemory));
+
+  LCallbacks.Read := FailingRead;
+  LCallbacks.Write := nil;
+  LCallbacks.Seek := nil;
+  LCallbacks.Tell := nil;
+  LCallbacks.Size := nil;
+  LCallbacks.Flush := nil;
+  LCallbacks.Close := nil;
+  LFailing := CreateIO(LCallbacks, nil);
+  CheckData("data failing as missing", LFailing, LMissing);
+  CheckText("text failing as missing", LFailing, LMissing);
+  Check("data failing close", IOClose(LFailing));
+  CheckData("data nil as missing", nil, LMissing);
+  CheckText("text nil as missing", nil, LMissing);
+  LSize := -1;
+  Check("data nil size 0", (LoadFileDataIO(nil, LSize) = nil) and (LSize = 0));
+
+  Check("data real files removed", (remove(LPath.c_str()) = 0) and (remove(LBinaryPath.c_str()) = 0) and (remove(LEmptyPath.c_str()) = 0) and (remove(LZipPath.c_str()) = 0) and (remove(LHelloPath.c_str()) = 0));
+end;
+
+// A failing IO (every read an error), for the "as a missing file" rows
+routine FailingIO(): IO;
+var
+  LCallbacks: IOInterface;
+begin
+  LCallbacks.Read := FailingRead;
+  LCallbacks.Write := nil;
+  LCallbacks.Seek := nil;
+  LCallbacks.Tell := nil;
+  LCallbacks.Size := nil;
+  LCallbacks.Flush := nil;
+  LCallbacks.Close := nil;
+  return CreateIO(LCallbacks, nil);
+end;
+
+// The image loaders, each against its file-name form on the fixture's
+// entry copied to a real file
+routine TestImages();
+var
+  LPng: string;
+  LGif: string;
+  LRaw: string;
+  LMissing: string;
+  LIO: IO;
+  LFailing: IO;
+  LViaIO: Image;
+  LViaPath: Image;
+  LIOFrames: int32;
+  LPathFrames: int32;
+begin
+  LPng := paramstr(0) + ".image.png";
+  LGif := paramstr(0) + ".anim.gif";
+  LRaw := paramstr(0) + ".raw.bin";
+  LMissing := paramstr(0) + ".missing.png";
+  Check("image real files", std_raylib_ext_extract("image.png", LPng) and std_raylib_ext_extract("anim.gif", LGif) and std_raylib_ext_extract("raw.bin", LRaw));
+
+  LIO := CreateZipFileIO("$P:../../res/tests/std/fixtures/std_raylib_ext.zip", "image.png");
+  LViaIO := LoadImageIO(LIO, ".png");
+  LViaPath := LoadImage(LPng.c_str());
+  Check("image png loaded", IsImageValid(LViaIO));
+  Check("image png as path", std_raylib_ext_same_image(LViaIO, LViaPath, 1));
+  UnloadImage(LViaIO);
+  UnloadImage(LViaPath);
+  Check("image png close", (LIO <> nil) and IOClose(LIO));
+
+  LIO := CreateZipFileIO("$P:../../res/tests/std/fixtures/std_raylib_ext.zip", "anim.gif");
+  LIOFrames := -1;
+  LPathFrames := -1;
+  LViaIO := LoadImageAnimIO(LIO, ".gif", LIOFrames);
+  LViaPath := LoadImageAnim(LGif.c_str(), address of LPathFrames);
+  Check("image anim frames", (LIOFrames = 2) and (LIOFrames = LPathFrames));
+  Check("image anim as path", std_raylib_ext_same_image(LViaIO, LViaPath, LIOFrames));
+  UnloadImage(LViaIO);
+  UnloadImage(LViaPath);
+  Check("image anim close", (LIO <> nil) and IOClose(LIO));
+  // A still image through the sequence loader, against the path form on the
+  // same png
+  LIO := CreateZipFileIO("$P:../../res/tests/std/fixtures/std_raylib_ext.zip", "image.png");
+  LIOFrames := -1;
+  LPathFrames := -1;
+  LViaIO := LoadImageAnimIO(LIO, ".png", LIOFrames);
+  LViaPath := LoadImageAnim(LPng.c_str(), address of LPathFrames);
+  Check("image anim still as path", (LIOFrames = LPathFrames) and std_raylib_ext_same_image(LViaIO, LViaPath, 1));
+  UnloadImage(LViaIO);
+  UnloadImage(LViaPath);
+  Check("image anim still close", (LIO <> nil) and IOClose(LIO));
+
+  LIO := CreateZipFileIO("$P:../../res/tests/std/fixtures/std_raylib_ext.zip", "raw.bin");
+  // 4 x 4 RGBA after the 16-byte header; the pixels alone; more than it holds
+  LViaIO := LoadImageRawIO(LIO, 4, 4, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 16);
+  LViaPath := LoadImageRaw(LRaw.c_str(), 4, 4, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 16);
+  Check("image raw header as path", IsImageValid(LViaIO) and std_raylib_ext_same_image(LViaIO, LViaPath, 1));
+  UnloadImage(LViaIO);
+  UnloadImage(LViaPath);
+  LViaIO := LoadImageRawIO(LIO, 4, 4, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 0);
+  LViaPath := LoadImageRaw(LRaw.c_str(), 4, 4, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 0);
+  Check("image raw no header as path", std_raylib_ext_same_image(LViaIO, LViaPath, 1));
+  UnloadImage(LViaIO);
+  UnloadImage(LViaPath);
+  LViaIO := LoadImageRawIO(LIO, 4, 4, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 64);
+  LViaPath := LoadImageRaw(LRaw.c_str(), 4, 4, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 64);
+  Check("image raw header too long as path", std_raylib_ext_same_image(LViaIO, LViaPath, 1));
+  UnloadImage(LViaIO);
+  UnloadImage(LViaPath);
+  LViaIO := LoadImageRawIO(LIO, 16, 16, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 0);
+  LViaPath := LoadImageRaw(LRaw.c_str(), 16, 16, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 0);
+  Check("image raw too small as path", (not IsImageValid(LViaIO)) and std_raylib_ext_same_image(LViaIO, LViaPath, 1));
+  UnloadImage(LViaIO);
+  UnloadImage(LViaPath);
+  Check("image raw close", (LIO <> nil) and IOClose(LIO));
+
+  LFailing := FailingIO();
+  LViaIO := LoadImageIO(LFailing, ".png");
+  LViaPath := LoadImage(LMissing.c_str());
+  Check("image failing as missing", std_raylib_ext_same_image(LViaIO, LViaPath, 1));
+  Check("image failing close", IOClose(LFailing));
+
+  Check("image real files removed", (remove(LPng.c_str()) = 0) and (remove(LGif.c_str()) = 0) and (remove(LRaw.c_str()) = 0));
+end;
+
+// The texture and font loaders: they need the hidden window
+routine TestGpu();
+var
+  LPng: string;
+  LTtf: string;
+  LMissing: string;
+  LIO: IO;
+  LFailing: IO;
+  LTexIO: Texture2D;
+  LTexPath: Texture2D;
+  LFontIO: Font;
+  LFontPath: Font;
+begin
+  LPng := paramstr(0) + ".image.png";
+  LTtf := paramstr(0) + ".font.ttf";
+  LMissing := paramstr(0) + ".missing.ttf";
+  Check("gpu real files", std_raylib_ext_extract("image.png", LPng) and std_raylib_ext_extract("font.ttf", LTtf));
+
+  LIO := CreateZipFileIO("$P:../../res/tests/std/fixtures/std_raylib_ext.zip", "image.png");
+  LTexIO := LoadTextureIO(LIO, ".png");
+  LTexPath := LoadTexture(LPng.c_str());
+  Check("texture loaded", IsTextureValid(LTexIO));
+  Check("texture as path", std_raylib_ext_same_texture(LTexIO, LTexPath));
+  UnloadTexture(LTexIO);
+  UnloadTexture(LTexPath);
+  // The same image as an image font, against LoadFont on the file
+  LFontIO := LoadFontIO(LIO, ".png");
+  LFontPath := LoadFont(LPng.c_str());
+  Check("font image as path", std_raylib_ext_same_font(LFontIO, LFontPath));
+  UnloadFont(LFontIO);
+  UnloadFont(LFontPath);
+  Check("texture close", (LIO <> nil) and IOClose(LIO));
+
+  LIO := CreateZipFileIO("$P:../../res/tests/std/fixtures/std_raylib_ext.zip", "font.ttf");
+  LFontIO := LoadFontIO(LIO, ".ttf");
+  LFontPath := LoadFont(LTtf.c_str());
+  Check("font ttf loaded", IsFontValid(LFontIO) and (not std_raylib_ext_is_default_font(LFontIO)));
+  Check("font ttf as path", std_raylib_ext_same_font(LFontIO, LFontPath));
+  UnloadFont(LFontIO);
+  UnloadFont(LFontPath);
+  LFontIO := LoadFontExIO(LIO, ".ttf", 20, nil, 0);
+  LFontPath := LoadFontEx(LTtf.c_str(), 20, nil, 0);
+  Check("font ex as path", (LFontIO.baseSize = 20) and std_raylib_ext_same_font(LFontIO, LFontPath));
+  UnloadFont(LFontIO);
+  UnloadFont(LFontPath);
+  // A .fnt is refused: what LoadFont gives for a .fnt it cannot read
+  LFontIO := LoadFontIO(LIO, ".fnt");
+  LFontPath := LoadFont((paramstr(0) + ".missing.fnt").c_str());
+  Check("font fnt refused as missing", std_raylib_ext_same_font(LFontIO, LFontPath) and (std_raylib_ext_is_default_font(LFontIO) = std_raylib_ext_is_default_font(LFontPath)));
+  Check("font close", (LIO <> nil) and IOClose(LIO));
+
+  // Each failure against the path form on a missing file of the same type
+  // (an empty font or the default font, as raylib gives it)
+  LFailing := FailingIO();
+  LTexIO := LoadTextureIO(LFailing, ".png");
+  LTexPath := LoadTexture(LMissing.c_str());
+  Check("texture failing as missing", std_raylib_ext_same_texture(LTexIO, LTexPath));
+  LFontIO := LoadFontIO(LFailing, ".ttf");
+  LFontPath := LoadFont(LMissing.c_str());
+  Check("font failing as missing", std_raylib_ext_same_font(LFontIO, LFontPath) and (std_raylib_ext_is_default_font(LFontIO) = std_raylib_ext_is_default_font(LFontPath)));
+  LFontIO := LoadFontIO(LFailing, ".png");
+  LFontPath := LoadFont((paramstr(0) + ".missing.png").c_str());
+  Check("font image failing as missing", std_raylib_ext_same_font(LFontIO, LFontPath) and (std_raylib_ext_is_default_font(LFontIO) = std_raylib_ext_is_default_font(LFontPath)));
+  LFontIO := LoadFontExIO(LFailing, ".ttf", 20, nil, 0);
+  LFontPath := LoadFontEx(LMissing.c_str(), 20, nil, 0);
+  Check("font ex failing as missing", std_raylib_ext_same_font(LFontIO, LFontPath) and (std_raylib_ext_is_default_font(LFontIO) = std_raylib_ext_is_default_font(LFontPath)));
+  Check("gpu failing close", IOClose(LFailing));
+
+  Check("gpu real files removed", (remove(LPng.c_str()) = 0) and (remove(LTtf.c_str()) = 0));
+end;
+
+// The audio loaders: a wave and a sound fully in memory, a music stream
+// read while it plays. Each IO form against raylib's own path form on a
+// real file of the same bytes. Needs the audio device.
+routine TestAudio();
+var
+  LWavPath: string;
+  LOggPath: string;
+  LMp3Path: string;
+  LMissing: string;
+  LIO: IO;
+  LFailing: IO;
+  LWaveIO: Wave;
+  LWavePath: Wave;
+  LSoundIO: Sound;
+  LMusicIO: Music;
+  LMusicPath: Music;
+begin
+  LWavPath := paramstr(0) + ".tone.wav";
+  LOggPath := paramstr(0) + ".music.ogg";
+  LMp3Path := paramstr(0) + ".music.mp3";
+  LMissing := paramstr(0) + ".missing.wav";
+  Check("audio real files", std_raylib_ext_extract("tone.wav", LWavPath) and
+    std_raylib_ext_extract("music.ogg", LOggPath) and std_raylib_ext_extract("music.mp3", LMp3Path));
+
+  // Wave: fully in memory, every fact against the path form
+  LIO := CreateZipFileIO("$P:../../res/tests/std/fixtures/std_raylib_ext.zip", "tone.wav");
+  LWaveIO := LoadWaveIO(LIO, ".wav");
+  LWavePath := LoadWave(LWavPath.c_str());
+  Check("wave loaded", LWaveIO.frameCount > 0);
+  Check("wave as path", std_raylib_ext_same_wave(LWaveIO, LWavePath));
+  UnloadWave(LWaveIO);
+  UnloadWave(LWavePath);
+  // Sound: the same, needs the audio device
+  LSoundIO := LoadSoundIO(LIO, ".wav");
+  Check("sound loaded", LSoundIO.frameCount > 0);
+  UnloadSound(LSoundIO);
+  Check("wave close", (LIO <> nil) and IOClose(LIO));
+
+  // Music: the IO stays registered and is read while it plays. The ogg
+  // read through the hooks matches the same ogg as a file
+  LIO := CreateZipFileIO("$P:../../res/tests/std/fixtures/std_raylib_ext.zip", "music.ogg");
+  LMusicIO := LoadMusicStreamIO(LIO, ".ogg");
+  LMusicPath := LoadMusicStream(LOggPath.c_str());
+  Check("music ogg loaded", LMusicIO.ctxData <> nil);
+  Check("music ogg as path", std_raylib_ext_same_music(LMusicIO, LMusicPath));
+  // Play, update, seek forward and back: every read goes to the IO
+  PlayMusicStream(LMusicIO);
+  UpdateMusicStream(LMusicIO);
+  SeekMusicStream(LMusicIO, GetMusicTimeLength(LMusicIO) / 2.0);
+  UpdateMusicStream(LMusicIO);
+  SeekMusicStream(LMusicIO, 0.0);
+  UpdateMusicStream(LMusicIO);
+  Check("music ogg played", IsMusicStreamPlaying(LMusicIO));
+  StopMusicStream(LMusicIO);
+  UnloadMusicStreamIO(LMusicIO);
+  UnloadMusicStream(LMusicPath);
+  Check("music ogg close", (LIO <> nil) and IOClose(LIO));
+
+  // The mp3 fixture: the same, a second format read through the hooks
+  LIO := CreateZipFileIO("$P:../../res/tests/std/fixtures/std_raylib_ext.zip", "music.mp3");
+  LMusicIO := LoadMusicStreamIO(LIO, ".mp3");
+  LMusicPath := LoadMusicStream(LMp3Path.c_str());
+  Check("music mp3 loaded", LMusicIO.ctxData <> nil);
+  Check("music mp3 as path", std_raylib_ext_same_music(LMusicIO, LMusicPath));
+  PlayMusicStream(LMusicIO);
+  UpdateMusicStream(LMusicIO);
+  StopMusicStream(LMusicIO);
+  UnloadMusicStreamIO(LMusicIO);
+  UnloadMusicStream(LMusicPath);
+  Check("music mp3 close", (LIO <> nil) and IOClose(LIO));
+
+  // A failing IO and nil as a missing file
+  LFailing := FailingIO();
+  LWaveIO := LoadWaveIO(LFailing, ".wav");
+  LWavePath := LoadWave(LMissing.c_str());
+  Check("wave failing as missing", std_raylib_ext_same_wave(LWaveIO, LWavePath));
+  UnloadWave(LWaveIO);
+  UnloadWave(LWavePath);
+  LMusicIO := LoadMusicStreamIO(LFailing, ".ogg");
+  LMusicPath := LoadMusicStream(LMissing.c_str());
+  Check("music failing as missing", std_raylib_ext_same_music(LMusicIO, LMusicPath));
+  Check("audio failing close", IOClose(LFailing));
+
+  Check("audio real files removed", (remove(LWavPath.c_str()) = 0) and
+    (remove(LOggPath.c_str()) = 0) and (remove(LMp3Path.c_str()) = 0));
+end;
+
+// Shader (two IOs) and automation event list. Needs a window.
+routine TestShader();
+var
+  LFragPath: string;
+  LFragSrc: string;
+  LIO: IO;
+  LShaderIO: Shader;
+  LShaderPath: Shader;
+  LShaderDefault: Shader;
+begin
+  // A trivial fragment shader: a real file beside the program, read by both
+  // the file-name form and the file IO form
+  LFragSrc := std_raylib_ext_shader_src();
+  LFragPath := paramstr(0) + ".shader.fs";
+  Check("shader real file", std_raylib_ext_write_text(LFragPath, LFragSrc));
+
+  LIO := CreateFileIO(LFragPath.c_str(), FileMode.Read);
+  LShaderIO := LoadShaderIO(nil, LIO);
+  LShaderPath := LoadShader(nil, LFragPath.c_str());
+  Check("shader loaded", IsShaderValid(LShaderIO));
+  Check("shader as path", IsShaderValid(LShaderIO) = IsShaderValid(LShaderPath));
+  UnloadShader(LShaderIO);
+  UnloadShader(LShaderPath);
+  Check("shader close", (LIO <> nil) and IOClose(LIO));
+
+  // nil, nil gives raylib's default shader, as LoadShader(NULL, NULL)
+  LShaderDefault := LoadShaderIO(nil, nil);
+  Check("shader default", IsShaderValid(LShaderDefault));
+  UnloadShader(LShaderDefault);
+
+  Check("shader real file removed", remove(LFragPath.c_str()) = 0);
+end;
+
+// Source routing: a model with a .bin and a texture, all in a zip source,
+// loads with the same mesh / material counts as from the folder; a missing
+// sibling fails as the path form does; the previous callbacks are restored.
+routine TestSource();
+var
+  LGltf: string;
+  LBin: string;
+  LTex: string;
+  LSource: IOSource;
+  LModelIO: Model;
+  LModelPath: Model;
+begin
+  // The model's three files extracted beside the program: the .gltf under
+  // the program's name, its siblings under the names its relative uris give
+  // (model.bin, tex.png), so raylib's own LoadModel reads them from disk
+  LGltf := paramstr(0) + ".model.gltf";
+  LBin := std_raylib_ext_folder(paramstr(0)) + "model.bin";
+  LTex := std_raylib_ext_folder(paramstr(0)) + "tex.png";
+  Check("model real files",
+    std_raylib_ext_extract("model/model.gltf", LGltf) and
+    std_raylib_ext_extract("model/model.bin", LBin) and
+    std_raylib_ext_extract("model/tex.png", LTex));
+
+  // The source form: LoadModelIO reads the gltf and its siblings from the zip
+  LSource := CreateZipIOSource("$P:../../res/tests/std/fixtures/std_raylib_ext.zip");
+  LModelIO := LoadModelIO(LSource, "model/model.gltf");
+  LModelPath := LoadModel(LGltf.c_str());
+  Check("model loaded", LModelIO.meshCount > 0);
+  Check("model as path", (LModelIO.meshCount = LModelPath.meshCount) and
+    (LModelIO.materialCount = LModelPath.materialCount));
+  // The texture beside the .gltf (raylib names it "./<folder>/tex.png")
+  // comes from the source, as the path form's from disk: tex.png is 2 wide
+  Check("model texture as path", (std_raylib_ext_albedo_width(LModelIO) = 2) and
+    (std_raylib_ext_albedo_width(LModelPath) = 2));
+  UnloadModel(LModelIO);
+  UnloadModel(LModelPath);
+
+  // A missing path fails as the path form does for a missing file
+  LModelIO := LoadModelIO(LSource, "model/missing.gltf");
+  LModelPath := LoadModel((paramstr(0) + ".missing.gltf").c_str());
+  Check("model missing as path", LModelIO.meshCount = LModelPath.meshCount);
+  UnloadModel(LModelIO);
+  UnloadModel(LModelPath);
+
+  // SetRaylibIOSource routes every raylib path load until nil restores it;
+  // after nil, a plain LoadModel of the same source path no longer resolves
+  Check("set source", SetRaylibIOSource(LSource));
+  LModelIO := LoadModel("model/model.gltf");
+  Check("routed load", LModelIO.meshCount = 1);
+  Check("routed texture", std_raylib_ext_albedo_width(LModelIO) = 2);
+  UnloadModel(LModelIO);
+  // An IO form while a source is set: its own io:// paths (the texture's
+  // behind raylib's "./") still reach its source, not the routed one
+  LModelIO := LoadModelIO(LSource, "model/model.gltf");
+  Check("routed io form texture", (LModelIO.meshCount = 1) and
+    (std_raylib_ext_albedo_width(LModelIO) = 2));
+  UnloadModel(LModelIO);
+  Check("clear source", SetRaylibIOSource(nil));
+  LModelIO := LoadModel("model/model.gltf");
+  Check("not routed after clear", LModelIO.meshCount = 0);
+  UnloadModel(LModelIO);
+
+  IOSourceClose(LSource);
+  Check("model real files removed",
+    (remove(LGltf.c_str()) = 0) and (remove(LBin.c_str()) = 0) and (remove(LTex.c_str()) = 0));
+end;
+
+// The video status callback: every change counted, the last one kept
+routine OnVideoStatus(const AStatus: VideoStatus; const AName: ptr to const char);
+begin
+  GStatusCalls := GStatusCalls + 1;
+  GStatusLast := AStatus;
+end;
+
+// A video's facts against pl_mpeg's own read of the same file
+routine CheckVideoFacts(const AName: string; const AVideo: Video; const APath: string);
+var
+  LFacts: array[0..5] of float64;
+begin
+  Check(AName + " valid", IsVideoValid(AVideo));
+  Check(AName + " pl_mpeg reads it", std_raylib_ext_plm_facts(APath, address of LFacts[0]));
+  Check(AName + " size as pl_mpeg", (float64(AVideo.width) = LFacts[0]) and (float64(AVideo.height) = LFacts[1]));
+  Check(AName + " frame rate as pl_mpeg", GetVideoFrameRate(AVideo) = LFacts[2]);
+  // pl_mpeg's duration is the last frame's start; the video plays one
+  // frame past it
+  Check(AName + " duration as pl_mpeg", GetVideoDuration(AVideo) = LFacts[3] + 1.0 / LFacts[2]);
+  Check(AName + " audio as pl_mpeg", HasVideoAudio(AVideo) = (LFacts[4] > 0.0));
+  if LFacts[4] > 0.0 then
+    Check(AName + " sample rate as pl_mpeg", float64(GetVideoSampleRate(AVideo)) = LFacts[5]);
+  end;
+end;
+
+// The video player (PLAN-RAYLIB-EXT atom 7) over the generated fixtures
+// video.mpg (MP2 audio) and video_silent.mpg (none), extracted beside the
+// program: the file, IO and zip forms give pl_mpeg's facts; ten fixed steps
+// reach pl_mpeg's own time after the same steps; the first frame drawn
+// equals pl_mpeg's CPU conversion of it (within rounding); a video that does
+// not loop stops at its end and says so through the callback; a looping
+// one wraps and plays on; the silent one plays to its end; a missing file,
+// a missing entry and a file that is no MPEG fail to open. Needs a window
+// and the audio device.
+routine TestVideo();
+var
+  LPath: string;
+  LSilentPath: string;
+  LNotVideo: string;
+  LZip: string;
+  LVideo: Video;
+  LIO: IO;
+  LTarget: RenderTexture2D;
+  LImage: Image;
+  LDiff: int32;
+  LI: int32;
+begin
+  LPath := paramstr(0) + ".video.mpg";
+  LSilentPath := paramstr(0) + ".silent.mpg";
+  LNotVideo := paramstr(0) + ".notvideo.mpg";
+  LZip := "$P:../../res/tests/std/fixtures/std_raylib_ext.zip";
+  Check("video real files", std_raylib_ext_extract("video.mpg", LPath) and
+    std_raylib_ext_extract("video_silent.mpg", LSilentPath) and
+    std_raylib_ext_extract("image.png", LNotVideo));
+
+  // The three forms
+  LVideo := LoadVideo(LPath);
+  CheckVideoFacts("video file", LVideo, LPath);
+  UnloadVideo(LVideo);
+  LIO := CreateZipFileIO(LZip, "video.mpg");
+  LVideo := LoadVideoIO(LIO, "video.mpg");
+  CheckVideoFacts("video io", LVideo, LPath);
+  UnloadVideo(LVideo);
+  Check("video io close", (LIO <> nil) and IOClose(LIO));
+  LVideo := LoadVideoZip(LZip, "video.mpg", "");
+  CheckVideoFacts("video zip", LVideo, LPath);
+
+  // Ten fixed steps: pl_mpeg's own time after the same steps
+  PlayVideo(LVideo);
+  for LI := 1 to 10 do
+    UpdateVideo(LVideo, 0.04);
+  end;
+  Check("video steps time as pl_mpeg", GetVideoTime(LVideo) = std_raylib_ext_plm_time(LPath, 10, 0.04));
+  UnloadVideo(LVideo);
+
+  // The first frame drawn into a render texture of the video's size
+  LVideo := LoadVideo(LPath);
+  PlayVideo(LVideo);
+  UpdateVideo(LVideo, 0.001);
+  LTarget := LoadRenderTexture(LVideo.width, LVideo.height);
+  BeginTextureMode(LTarget);
+  ClearBackground(BLACK);
+  DrawVideo(LVideo, 0, 0, WHITE);
+  EndTextureMode();
+  LImage := LoadImageFromTexture(LTarget.texture);
+  // A render texture's rows come back bottom first
+  ImageFlipVertical(address of LImage);
+  LDiff := std_raylib_ext_frame_diff(LImage, LPath);
+  Check("video first frame as pl_mpeg", (LDiff >= 0) and (LDiff <= 4));
+  UnloadImage(LImage);
+  UnloadRenderTexture(LTarget);
+  UnloadVideo(LVideo);
+
+  // Not looping: stops at its end, the callback says Playing then Stopped
+  LVideo := LoadVideo(LPath);
+  GStatusCalls := 0;
+  SetVideoStatusCallback(LVideo, OnVideoStatus);
+  SetVideoLooping(LVideo, false);
+  Check("video not looping", not IsVideoLooping(LVideo));
+  PlayVideo(LVideo);
+  Check("video playing", IsVideoPlaying(LVideo) and (GetVideoStatus(LVideo) = VideoStatus.VideoPlaying));
+  Check("video callback playing", (GStatusCalls = 1) and (GStatusLast = VideoStatus.VideoPlaying));
+  for LI := 1 to 75 do
+    UpdateVideo(LVideo, 0.04);
+  end;
+  Check("video stopped at end", (not IsVideoPlaying(LVideo)) and (GetVideoStatus(LVideo) = VideoStatus.VideoStopped));
+  Check("video callback stopped", (GStatusCalls = 2) and (GStatusLast = VideoStatus.VideoStopped));
+  PlayVideo(LVideo);
+  PauseVideo(LVideo);
+  Check("video paused", GetVideoStatus(LVideo) = VideoStatus.VideoPaused);
+  StopVideo(LVideo);
+  Check("video stopped", (GetVideoStatus(LVideo) = VideoStatus.VideoStopped) and (GetVideoTime(LVideo) = 0.0));
+  UnloadVideo(LVideo);
+
+  // Looping: past its end it wraps and plays on
+  LVideo := LoadVideo(LPath);
+  SetVideoLooping(LVideo, true);
+  Check("video looping", IsVideoLooping(LVideo));
+  SetVideoVolume(LVideo, 0.5);
+  Check("video volume", GetVideoVolume(LVideo) = 0.5);
+  SetVideoVolume(LVideo, 2.0);
+  Check("video volume clamped", GetVideoVolume(LVideo) = 1.0);
+  PlayVideo(LVideo);
+  for LI := 1 to 75 do
+    UpdateVideo(LVideo, 0.04);
+  end;
+  Check("video looped plays on", IsVideoPlaying(LVideo) and (GetVideoTime(LVideo) < GetVideoDuration(LVideo)));
+  UnloadVideo(LVideo);
+
+  // No audio track: plays silently to its end
+  LVideo := LoadVideo(LSilentPath);
+  CheckVideoFacts("video silent", LVideo, LSilentPath);
+  PlayVideo(LVideo);
+  for LI := 1 to 75 do
+    UpdateVideo(LVideo, 0.04);
+  end;
+  Check("video silent stopped at end", GetVideoStatus(LVideo) = VideoStatus.VideoStopped);
+  UnloadVideo(LVideo);
+
+  // What does not open
+  LVideo := LoadVideo(paramstr(0) + ".missing.mpg");
+  Check("video missing file", not IsVideoValid(LVideo));
+  UnloadVideo(LVideo);
+  LVideo := LoadVideoZip(LZip, "missing.mpg", "");
+  Check("video missing entry", not IsVideoValid(LVideo));
+  UnloadVideo(LVideo);
+  LVideo := LoadVideo(LNotVideo);
+  Check("video not mpeg", not IsVideoValid(LVideo));
+  UnloadVideo(LVideo);
+
+  Check("video real files removed", (remove(LPath.c_str()) = 0) and
+    (remove(LSilentPath.c_str()) = 0) and (remove(LNotVideo.c_str()) = 0));
+end;
+
+// The window icon (PLAN-RAYLIB-EXT atom 9): this program is built with
+// @exeicon, so raylib's window carries it with no call of the program's:
+// Windows WM_GETICON gives a big and a small icon; Linux _NET_WM_ICON holds
+// a picture of a real size. std_raylib_ext_noicon checks a build without
+// @exeicon keeps the platform default. Needs a window.
+routine TestIcon();
+var
+  LWidth: long;
+  LHeight: long;
+begin
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  Check("icon big set", std_raylib_ext_icon(1, address of LWidth, address of LHeight));
+  Check("icon small set", std_raylib_ext_icon(0, address of LWidth, address of LHeight));
+@else
+  Check("icon net_wm_icon set", std_raylib_ext_icon(0, address of LWidth, address of LHeight));
+  Check("icon net_wm_icon size", (LWidth > 0) and (LHeight > 0) and (LWidth <= 1024) and (LHeight <= 1024));
+@endif
+end;
+
+// raylib's music decoders open the plain path themselves (fopen): with a
+// zip source set by SetRaylibIOSource, LoadMusicStream("music.ogg") streams
+// the zip's entry (HookIO's path source); nil unsets it; a path source the
+// program set itself after that survives SetRaylibIOSource(nil). Needs the
+// audio device.
+routine TestMusicSource();
+var
+  LRealPath: string;
+  LSource: IOSource;
+  LOther: IOSource;
+  LMusic: Music;
+  LReal: Music;
+begin
+  LRealPath := paramstr(0) + ".music.ogg";
+  Check("music source real file", std_raylib_ext_extract("music.ogg", LRealPath));
+  LReal := LoadMusicStream(LRealPath.c_str());
+  LSource := CreateZipIOSource("$P:../../res/tests/std/fixtures/std_raylib_ext.zip");
+  LOther := CreateZipIOSource("$P:../../res/tests/std/fixtures/std_raylib_ext.zip");
+  Check("music source made", (LSource <> nil) and (LOther <> nil));
+
+  Check("music source set", SetRaylibIOSource(LSource));
+  LMusic := LoadMusicStream("music.ogg");
+  Check("music source plain path loaded", LMusic.ctxData <> nil);
+  Check("music source as path", std_raylib_ext_same_music(LMusic, LReal));
+  PlayMusicStream(LMusic);
+  UpdateMusicStream(LMusic);
+  SeekMusicStream(LMusic, GetMusicTimeLength(LMusic) / 2.0);
+  UpdateMusicStream(LMusic);
+  Check("music source played", IsMusicStreamPlaying(LMusic));
+  StopMusicStream(LMusic);
+  UnloadMusicStream(LMusic);
+
+  Check("music source clear", SetRaylibIOSource(nil));
+  LMusic := LoadMusicStream("music.ogg");
+  Check("music source cleared", LMusic.ctxData = nil);
+  UnloadMusicStream(LMusic);
+
+  // The program's own path source, set after raylib_ext's, survives nil
+  Check("music source set again", SetRaylibIOSource(LSource));
+  Check("music source program's own", SetIOPathSource(LOther));
+  Check("music source clear again", SetRaylibIOSource(nil));
+  LMusic := LoadMusicStream("music.ogg");
+  Check("music source program's kept", LMusic.ctxData <> nil);
+  UnloadMusicStream(LMusic);
+  Check("music source program's unset", SetIOPathSource(nil));
+  LMusic := LoadMusicStream("music.ogg");
+  Check("music source all unset", LMusic.ctxData = nil);
+  UnloadMusicStream(LMusic);
+
+  UnloadMusicStream(LReal);
+  IOSourceClose(LSource);
+  IOSourceClose(LOther);
+  Check("music source real removed", remove(LRealPath.c_str()) = 0);
+end;
+
+begin
+  GFails := 0;
+  GStatusCalls := 0;
+  GStatusLast := VideoStatus.VideoStopped;
+  SetTraceLogLevel(LOG_NONE);
+  TestData();
+  TestImages();
+  InitAudioDevice();
+  Check("audio device", IsAudioDeviceReady());
+  if IsAudioDeviceReady() then
+    TestAudio();
+    TestMusicSource();
+  end;
+  SetConfigFlags(FLAG_WINDOW_HIDDEN);
+  InitWindow(64, 64, "std_raylib_ext");
+  Check("window", IsWindowReady());
+  if IsWindowReady() then
+    TestGpu();
+    TestShader();
+    TestSource();
+    TestIcon();
+    // The video's audio plays through the device when it is open
+    TestVideo();
+    CloseWindow();
+  end;
+  if IsAudioDeviceReady() then
+    CloseAudioDevice();
+  end;
+  println("done {}", GFails);
+end.

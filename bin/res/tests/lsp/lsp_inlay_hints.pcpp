@@ -1,0 +1,120 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lsp_inlay_hints.pcpp - LSP compliance: parameter-name hints at calls
+
+  At each call of a PaskalCPP routine the editor shows the parameter's name
+  in grey before each argument, e.g. Add(AA: 1, AB: 2). The hints are not
+  text: they cannot be selected and are not saved.
+
+  How to check: each CHECK line lists the hints the call below it shows,
+  in order. "none" = that argument shows no hint.
+*******************************************************************************/
+
+module exe lsp_inlay_hints;
+
+/*
+  @@test
+    kind manual
+  @@end
+*/
+
+type
+  TFn = routine(const AP: int32; const AQ: int32): int32;
+  TObj = object
+    F: int32;
+    method Put(const AV: int32);
+    begin
+    end;
+  end;
+
+forward routine Fw(const AA: int32): int32;
+
+routine Add(const AA: int32; var AB: int32): int32;
+begin
+  return AA + AB;
+end;
+
+routine Ov(const AN: int32; const AK: int32);
+begin
+end;
+
+routine Ov(const AN: string);
+begin
+end;
+
+routine Dz(const AU: int32);
+begin
+end;
+
+routine Dz(const AW: string);
+begin
+end;
+
+routine V(const AN: int32; ...);
+begin
+end;
+
+routine Fw(const AA: int32): int32;
+begin
+  return AA;
+end;
+
+routine CallValue(const AFn: TFn): int32;
+begin
+  // CHECK: AP: before 4, AQ: before 5 (a routine VALUE: its type's names)
+  return AFn(4, 5);
+end;
+
+var
+  AB: int32;
+  LB: int32;
+  LO: TObj;
+
+begin
+  // CHECK: AA: before 1 + 2 (at its start); none before AB: the argument
+  //        is already spelled like its parameter
+  AB := Add(1 + 2, AB);
+
+  // CHECK: AA: before 8, AB: before LB (a var parameter is hinted too)
+  AB := Add(8, LB);
+
+  // CHECK: AN: before 1, AK: before 2 (an overload set: only Ov(AN; AK)
+  //        takes two arguments, so the call is that routine's); AN: before
+  //        "s" (only Ov(AN: string) takes a string)
+  Ov(1, 2);
+  Ov("s");
+
+  // CHECK: AU: before 1 (only Dz(AU: int32) takes an int32)
+  Dz(1);
+
+  // CHECK: none (a C++ value: both Dz routines take it, and they name their
+  //        parameter differently, so no name is shown)
+  Dz(cpp("1"));
+
+  // CHECK: AN: before 1, none before 2 and 3 (the variadic tail)
+  V(1, 2, 3);
+
+  // CHECK: AV: before 6 (a method)
+  LO.Put(6);
+
+  // CHECK: AA: before Add, and inside it AA: before 7 (nested calls; Fw is
+  //        a forward: the names of its full routine)
+  AB := Fw(Add(7, AB));
+
+  // CHECK: none before the text (puts is C: its parameters are clang's);
+  //        AA: before 9, AB: before LB (after a non-ASCII text: é)
+  puts("é"); AB := Add(9, LB);
+end.

@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_overlay_err_nested_record.pcpp - Type: overlay, nested record
+
+  Break step of type_overlay: an anonymous record goes inside an overlay, not
+  inside an anonymous record (PR0034).
+*******************************************************************************/
+
+module exe type_overlay_err_nested_record;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TV = overlay
+    A: int32;
+    record
+      B: int32;
+      record // ERROR PR0034@7: 'record' is not allowed in an anonymous record
+        C: int32;
+      end;
+    end;
+  end;
+
+begin
+end.

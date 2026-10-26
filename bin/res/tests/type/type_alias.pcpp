@@ -1,0 +1,158 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_alias.pcpp - Type: alias types
+
+  An alias type (BNF.md sec 4: alias type = type expr) gives a type a second
+  name; it IS that type, so values move between the two spellings freely.
+  Every type expr form is aliased here and used through its alias:
+  - a builtin (TCount = int32), an alias of an alias (TIndex = TCount), a
+    pointer, a static and a dynamic array, a record, a choices type (its
+    values reached through the alias: TShade.cRed), an imported unit's type
+    (qualified: type_alias_unit.TKind), and a routine's own local alias;
+  - C++ types written as C++ spells them: std::string, std::vector<int>,
+    size_t (a C name from <cstddef>) and const std::string&;
+  - the alias as a cast (TByte(300) = 44), as a parameter and return type,
+    and both ways across var parameters (a TCount into var int32, an int32
+    into var TCount).
+*******************************************************************************/
+
+module exe type_alias;
+
+/*
+  @@test
+    kind run
+    expect
+    | count 20 5 size 4
+    | index 10
+    | ptr 5
+    | bytes 9 size 4
+    | nums 7 len 3
+    | record 1 2
+    | unit kind 3 size 8
+    | shade cRed true
+    | cast 44
+    | C++ string abc size 3
+    | C++ vector size 1
+    | C++ size_t 7
+    | C++ const ref 3
+    | local 9
+    | var params 2 12
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/type/fixtures";
+
+import type_alias_unit;
+
+#include <cstddef>
+#include <string>
+#include <vector>
+
+type
+  TCount = int32;
+  TIndex = TCount;
+  TIntPtr = ptr to int32;
+  TBytes = array[0..3] of uint8;
+  TNums = array of int32;
+  TPoint = record
+    X: int32;
+    Y: int32;
+  end;
+  TPt = TPoint;
+  TUnitKind = type_alias_unit.TKind;
+  TColor = choices(cRed, cGreen);
+  TShade = TColor;
+  TByte = uint8;
+  TCppStr = std::string;
+  TCppVec = std::vector<int>;
+  TSize = size_t;
+  TStrRef = const std::string&;
+
+routine Twice(AN: TCount): TIndex;
+begin
+  return AN * 2;
+end;
+
+routine Len(AS: TStrRef): int64;
+begin
+  return int64(AS.size());
+end;
+
+routine Local(): int64;
+type
+  TLocal = int64;
+var
+  LV: TLocal = 9;
+begin
+  return LV;
+end;
+
+routine Bump(var AN: int32);
+begin
+  AN := AN + 1;
+end;
+
+routine BumpCount(var AN: TCount);
+begin
+  AN := AN + 10;
+end;
+
+var
+  LC: TCount = 20;
+  LI: int32 = 0;
+  LN: int32 = 5;
+  LP: TIntPtr = nil;
+  LB: TBytes;
+  LNs: TNums;
+  LPt: TPt;
+  LK: TUnitKind = 3;
+  LSh: TShade = TShade.cRed;
+  LWide: int32 = 300;
+  LS: TCppStr = "abc";
+  LV: TCppVec;
+  LZ: TSize = 7;
+  LBumpC: TCount = 1;
+  LBumpI: int32 = 2;
+
+begin
+  LI := LC;
+  LC := LN;
+  LP := address of LN;
+  LB[1] := 9;
+  setlength(LNs, 3);
+  LNs[2] := 7;
+  LPt.X := 1;
+  LPt.Y := 2;
+  LV.push_back(4);
+  Bump(LBumpC);
+  BumpCount(LBumpI);
+  println("count {} {} size {}", LI, LC, size(TCount));
+  println("index {}", Twice(LC));
+  println("ptr {}", LP^);
+  println("bytes {} size {}", LB[1], size(TBytes));
+  println("nums {} len {}", LNs[2], len(LNs));
+  println("record {} {}", LPt.X, LPt.Y);
+  println("unit kind {} size {}", LK, size(TUnitKind));
+  println("shade cRed {}", LSh = TColor.cRed);
+  println("cast {}", TByte(LWide));
+  println("C++ string {} size {}", LS, LS.size());
+  println("C++ vector size {}", LV.size());
+  println("C++ size_t {}", LZ);
+  println("C++ const ref {}", Len(LS));
+  println("local {}", Local());
+  println("var params {} {}", LBumpC, LBumpI);
+end.

@@ -1,0 +1,45 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_embed_err_iface_signature.pcpp - Type: object embed, iface signature
+
+  Break step of type_object_embed: an embedded method whose result differs
+  from the interface's (SM0366).
+*******************************************************************************/
+
+module exe type_object_embed_err_iface_signature;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  INamed = interface
+    method Name(): string;
+  end;
+  TA = object
+    method Name(): int32;
+    begin
+      return 1;
+    end;
+  end;
+  TBox = object implements INamed // ERROR SM0366@28: 'TBox.A.Name' does not implement 'INamed.Name'
+    embed A: TA;
+  end;
+
+begin
+end.

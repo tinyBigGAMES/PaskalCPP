@@ -1,0 +1,45 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_routine_err_set.pcpp - Type: an overload set with no member of the routine type
+
+  Break step of type_routine: assigned to a routine variable, an overload
+  set gives the member of its type, and here it has none (SM0200).
+*******************************************************************************/
+
+module exe type_routine_err_set;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine Over(AN: int32): int32;
+begin
+  return AN;
+end;
+
+routine Over(const AS: string): int32;
+begin
+  return 0;
+end;
+
+var
+  LF: routine(AN: float64): int32;
+
+begin
+  LF := Over; // ERROR SM0200@9: has no member of type
+end.

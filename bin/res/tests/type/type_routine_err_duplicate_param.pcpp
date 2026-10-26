@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_routine_err_duplicate_param.pcpp - Type: two parameters of one routine type with one name
+
+  Break step of type_routine: a routine type's parameters have distinct
+  names (SM0004).
+*******************************************************************************/
+
+module exe type_routine_err_duplicate_param;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TF = routine(AN: int32; AN: int32): int32; // ERROR SM0004@27: is already declared
+
+begin
+end.

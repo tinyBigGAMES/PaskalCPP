@@ -1,0 +1,45 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_sysutils_format_err_cpp_value.pcpp - Std: sysutils format, cpp value
+
+  Break step of std_sysutils_format: a C++ value with no std::formatter as an
+  argument (SM0425 at the argument).
+*******************************************************************************/
+
+module exe std_sysutils_format_err_cpp_value;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+import
+  SysUtils;
+
+struct CNo {
+  int x;
+};
+
+var
+  LValue: CNo;
+  LText: string;
+
+begin
+  LValue.x := 1;
+  LText := FormatStr("{}", LValue); // ERROR SM0425@28
+  println("{}", LText);
+end.

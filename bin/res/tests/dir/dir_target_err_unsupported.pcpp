@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_target_err_unsupported.pcpp - Directive: a triple that is not an official target
+
+  Break step of dir_target: well formed, but not one of the two supported
+  targets (the report names them); it is not applied.
+*******************************************************************************/
+
+module exe dir_target_err_unsupported;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@target "aarch64-linux-gnu"; // ERROR CD0011@9: is not supported
+
+begin
+end.

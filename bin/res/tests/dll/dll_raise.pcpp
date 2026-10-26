@@ -1,0 +1,52 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dll_raise.pcpp - Build kind: a raise that leaves a dll
+
+  A raise inside the dep dll_raise_dll, not guarded there, reaches the
+  program's guard across the library boundary.
+*******************************************************************************/
+
+module exe dll_raise;
+
+/*
+  @@test
+    kind run
+    deps dll_raise_dll
+    expect
+    | caught: raised inside the dll
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@ifdef TARGET_X86_64_LINUX_GNU
+@addlibrarypath "$P:output/bin";
+@copydll "$P:output/bin/libdll_raise_dll.so";
+@else
+@addlibrarypath "$P:output/lib";
+@copydll "$P:output/bin/dll_raise_dll.dll";
+@endif
+@linklibrary "dll_raise_dll";
+
+routine clink dll_raise_fail(); external;
+
+begin
+  guard
+    dll_raise_fail();
+  except
+    println("caught: {}", excmsg());
+  end;
+end.

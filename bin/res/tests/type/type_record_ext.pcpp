@@ -1,0 +1,166 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_ext.pcpp - Type: record extensions
+
+  A record extension, record(TBase), stands in for its base, Oberon style:
+  - a ptr to TRect converts to a ptr to TShape (and compares with one), a
+    TRect value converts to a TShape (the base part is copied), a TRect
+    variable passes to a var TShape parameter;
+  - a base record holding a routine-typed field (Area) gives dispatch: an
+    extension sets it, Describe(ptr to TShape) calls the extension's routine;
+    the routine downcasts explicitly (ptr to TRect(AS)); TShape names itself
+    in its own field, so it is declared forward first (decl_forward);
+  - overloads at several levels of one chain: the most derived member that
+    takes the argument runs, by pointer and by const value;
+  - a record literal on an extension names the inherited fields too;
+  - a C++ struct as the parent converts to a ptr to that struct;
+  - create / destroy on a pointer to a record.
+*******************************************************************************/
+
+module exe type_record_ext;
+
+/*
+  @@test
+    kind run
+    expect
+    | literal 4 3 5 3
+    | dispatch 9 15
+    | pointer 4 true
+    | ranked 2 2 1
+    | value ranked 23 10
+    | copy 4
+    | var 5
+    | downcast 3
+    | nil -1
+    | C++ parent 7 8
+    | created 36
+    | destroyed true
+    | [Heap] Allocs: 1, Frees: 1, Leaked: 0
+  @@end
+*/
+
+struct CPt { int x; };
+
+forward type TShape;
+
+type
+  TShape = record
+    Sides: int32;
+    Area: routine(AS: ptr to TShape): int32;
+  end;
+  TSquare = record(TShape)
+    Side: int32;
+  end;
+  TRect = record(TSquare)
+    Height: int32;
+  end;
+  TPoint3 = record(CPt)
+    Z: int32;
+  end;
+
+routine SquareArea(AS: ptr to TShape): int32;
+var
+  LSq: ptr to TSquare;
+begin
+  LSq := ptr to TSquare(AS);
+  return LSq->Side * LSq->Side;
+end;
+
+routine RectArea(AS: ptr to TShape): int32;
+var
+  LRc: ptr to TRect;
+begin
+  LRc := ptr to TRect(AS);
+  return LRc->Side * LRc->Height;
+end;
+
+routine Describe(AS: ptr to TShape): int32;
+begin
+  if AS = nil then
+    return -1;
+  end;
+  return AS->Area(AS);
+end;
+
+routine Kind(AS: ptr to TShape): int32;
+begin
+  return 1;
+end;
+
+routine Kind(AS: ptr to TSquare): int32;
+begin
+  return 2;
+end;
+
+routine Level(const AS: TShape): int32;
+begin
+  return 10 + AS.Sides;
+end;
+
+routine Level(const AS: TSquare): int32;
+begin
+  return 20 + AS.Side;
+end;
+
+routine Grow(var AS: TShape);
+begin
+  AS.Sides := AS.Sides + 1;
+end;
+
+routine CX(AP: ptr to CPt): int32;
+begin
+  return AP->x;
+end;
+
+var
+  LS: TShape;
+  LQ: TSquare;
+  LR: TRect;
+  LP3: TPoint3;
+  LPS: ptr to TShape;
+  LPR: ptr to TRect;
+  LPQ: ptr to TSquare;
+
+begin
+  LQ := TSquare(Sides: 4, Area: SquareArea, Side: 3);
+  LR := TRect(Sides: 4, Area: RectArea, Side: 3, Height: 5);
+  println("literal {} {} {} {}", LR.Sides, LR.Side, LR.Height, LQ.Side);
+  LPS := address of LQ;
+  println("dispatch {} {}", Describe(LPS), Describe(address of LR));
+  LPR := address of LR;
+  LPS := LPR;
+  println("pointer {} {}", LPS->Sides, LPS = LPR);
+  println("ranked {} {} {}", Kind(LPR), Kind(address of LQ), Kind(LPS));
+  println("value ranked {} {}", Level(LR), Level(LS));
+  LS := LR;
+  println("copy {}", LS.Sides);
+  Grow(LR);
+  println("var {}", LR.Sides);
+  LPQ := ptr to TSquare(LPS);
+  println("downcast {}", LPQ->Side);
+  LPS := nil;
+  println("nil {}", Describe(LPS));
+  LP3.x := 7;
+  LP3.Z := 8;
+  println("C++ parent {} {}", CX(address of LP3), LP3.Z);
+  create(LPQ);
+  LPQ->Sides := 4;
+  LPQ->Side := 6;
+  LPQ->Area := SquareArea;
+  println("created {}", Describe(LPQ));
+  destroy(LPQ);
+  println("destroyed {}", LPQ = nil);
+end.

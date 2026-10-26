@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_cppstart_err_eof.pcpp - Lexical: a cppstart block with no cppend
+
+  Break step of lex_cppstart: a cppstart block runs to its cppend, so one
+  the file never closes is LX0013, at the cppstart; everything after it
+  (the module's body too) is part of the block.
+*******************************************************************************/
+
+module exe lex_cppstart_err_eof;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+cppstart source // ERROR LX0013@1
+int GX = 1;
+
+begin
+  println("{}", GX);
+end.

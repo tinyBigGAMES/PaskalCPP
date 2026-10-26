@@ -1,0 +1,47 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_cli_run_exitcode.pcpp - Build-kind compliance: a run that ends with an
+  exit code
+
+  A program run by pcpp -r that ends with exit code 3: pcpp reports it
+  (ZB0031) and exits with that code. This file itself is never compiled.
+*******************************************************************************/
+
+module exe exe_cli_run_exitcode;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner <DIR>/fixtures/exe_cli_exitcode.pcpp -r -o $P:output"
+    exitcode 3
+    expect
+    | Compiling <DIR>/fixtures/exe_cli_exitcode.pcpp
+    | Target platform: x86_64-windows-gnu
+    | Optimize level: debug
+    | Subsystem: Console
+    | Saving build file...
+    | Building exe_cli_exitcode...
+    | Build succeeded.
+    | Output: <OUT>/bin/exe_cli_exitcode.exe
+    | Running exe_cli_exitcode.exe...
+    | exe_cli_exitcode ends with 3
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+    | [ERROR] ZB0031: Program exited with code 3.
+  @@end
+*/
+
+begin
+end.

@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_array_err_too_large.pcpp - Type: array, too large
+
+  Break step of type_array: no type holds more than 1152921504606846975 bytes:
+  one element more (SM0277).
+*******************************************************************************/
+
+module exe type_array_err_too_large;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = array[0..1152921504606846975] of uint8; // ERROR SM0277@8: 'array[0..1152921504606846975] of uint8' is too large: a type holds at most 1152921504606846975 bytes
+
+begin
+end.

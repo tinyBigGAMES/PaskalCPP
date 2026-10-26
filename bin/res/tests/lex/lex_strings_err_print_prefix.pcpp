@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_strings_err_print_prefix.pcpp - Lexical: printing a u8 string
+
+  Break step of lex_strings: a u8"..." literal lexes, but its C++ type
+  (const char8_t[]) has no std::formatter, so printing it is SM0425, and
+  the message names the argument as written.
+*******************************************************************************/
+
+module exe lex_strings_err_print_prefix;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  println("{}", u8"abc"); // ERROR SM0425@17: 'u8"abc"' cannot be printed
+end.

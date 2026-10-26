@@ -1,0 +1,43 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_set_err_in_element.pcpp - Type: set, in element
+
+  Break step of type_set: in takes a value of the set's element type (SM0268).
+*******************************************************************************/
+
+module exe type_set_err_in_element;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TColor = choices(cRed, cGreen, cBlue);
+  TS = set of 0..15;
+  TColors = set of TColor;
+
+var
+  LS: TS;
+  LC: TColors;
+  LB: bool;
+
+begin
+  LS := [1];
+  LC := [TColor.cRed];
+  LB := TColor.cRed in LS; // ERROR SM0268@9: 'in': 'TColor' is not the element type of 'TS'
+end.

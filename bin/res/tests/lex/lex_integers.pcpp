@@ -1,0 +1,57 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_integers.pcpp - Lexical: integer literals
+
+  Integer literals follow C++ (BNF.md sec 9): decimal, octal (a leading 0:
+  010 is 8, and every build hints at it, LX0101), hex in either case, binary,
+  the ' digit separator, the standard suffixes, and a suffix that is none
+  of them is a C++ user-defined literal (3_k calls the operator the mixed
+  C++ declares). A decimal literal above int64 needs a u suffix; hex, octal
+  and binary go up to uint64 as they are.
+*******************************************************************************/
+
+module exe lex_integers;
+
+/*
+  @@test
+    kind run
+    expect
+    | decimal 1234
+    | octal 8
+    | hex 255 255
+    | binary 10
+    | separators 1000000 65535
+    | suffixes 7 7 7 7 7
+    | int64 max 9223372036854775807
+    | uint64 max 18446744073709551615 18446744073709551615
+    | udl 3000
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+long long operator""_k(unsigned long long AValue) { return static_cast<long long>(AValue * 1000); }
+
+begin
+  println("decimal {}", 1234);
+  println("octal {}", 010); // HINT LX0101@23: Leading zero: 010 is an octal literal
+  println("hex {} {}", 0xFF, 0Xff);
+  println("binary {}", 0b1010);
+  println("separators {} {}", 1'000'000, 0xFF'FF);
+  println("suffixes {} {} {} {} {}", 7u, 7l, 7ll, 7z, 7ULL);
+  println("int64 max {}", 9223372036854775807);
+  println("uint64 max {} {}", 18446744073709551615u, 0xFFFFFFFFFFFFFFFF);
+  println("udl {}", 3_k);
+end.

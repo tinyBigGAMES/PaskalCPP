@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_splices_err_stray_eof.pcpp - Lexical: a backslash ending the file
+
+  Break step of lex_splices: a splice is a backslash before a newline,
+  so one that ends the file with no newline after it is a stray
+  character, LX0004. The marked line ends in that backslash, so its
+  marker is a block-comment marker.
+  Its bytes are part of the test (see above): edit it with an editor
+  that keeps them as they are.
+*******************************************************************************/
+
+module exe lex_splices_err_stray_eof;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  println("{}", 1);
+/* // ERROR LX0004@33 // */ end.\

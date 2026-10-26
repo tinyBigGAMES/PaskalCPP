@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_array_err_index_below.pcpp - Type: array, index below
+
+  Break step of type_array: a constant index is not below the low bound: -3 is
+  below array[-2..2] (SM0276).
+*******************************************************************************/
+
+module exe type_array_err_index_below;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LA: array[-2..2] of int32;
+
+begin
+  LA[-3] := 1; // ERROR SM0276@6: index -3 is outside 'array[-2..2] of int32' (-2..2)
+end.

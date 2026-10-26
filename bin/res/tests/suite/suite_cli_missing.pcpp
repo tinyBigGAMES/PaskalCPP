@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  suite_cli_missing.pcpp - Test suite: a cli test with <DIR>
+
+  pcpp names a source file that does not exist by its full path. <DIR> in
+  args and in the expect line is this file's folder in '/' form (a cli test
+  runs in the suite's output root), so the argument and the expectation
+  hold wherever the suite sits. fixtures/suite_cli_missing.pcpp is never
+  written: its absence is the test. This file itself is never compiled.
+*******************************************************************************/
+
+module exe suite_cli_missing;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner <DIR>/fixtures/suite_cli_missing.pcpp"
+    exitcode 2
+    expect
+    | Error: Source file not found: <DIR>/fixtures/suite_cli_missing.pcpp
+  @@end
+*/
+
+begin
+end.

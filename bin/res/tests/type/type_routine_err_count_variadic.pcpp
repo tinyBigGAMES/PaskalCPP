@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_routine_err_count_variadic.pcpp - Type: a variadic routine value called without its fixed argument
+
+  Break step of type_routine: a type ending in ... still takes its fixed
+  arguments (SM0401).
+*******************************************************************************/
+
+module exe type_routine_err_count_variadic;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LV: routine(AN: int32; ...): int32;
+  LN: int32;
+
+begin
+  LV := nil;
+  LN := LV(); // ERROR SM0401@9: takes at least 1 argument(s), 0 given
+end.

@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_overlay_err_duplicate.pcpp - Type: overlay, duplicate
+
+  Break step of type_overlay: an anonymous record's field reuses a name of the
+  overlay: its fields are the overlay's own (SM0004).
+*******************************************************************************/
+
+module exe type_overlay_err_duplicate;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TV = overlay
+    A: int32;
+    record
+      A: int16; // ERROR SM0004@7: 'A' is already declared in this scope
+      B: int16;
+    end;
+  end;
+
+begin
+end.

@@ -1,0 +1,47 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_embed_err_shared.pcpp - Type: object embed, shared
+
+  Break step of type_object_embed: a name two embeds share: name one, as
+  self.A.X (SM0370).
+*******************************************************************************/
+
+module exe type_object_embed_err_shared;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    X: int32;
+  end;
+  TB = object
+    X: int32;
+  end;
+  TBoth = object
+    embed A: TA;
+    embed B: TB;
+    method Put();
+    begin
+      self.X := 1; // ERROR SM0370@12: 'X' is reached through two embeds, 'A' and 'B'
+    end;
+  end;
+
+begin
+end.

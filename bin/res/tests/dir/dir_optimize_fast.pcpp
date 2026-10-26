@@ -1,0 +1,62 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_optimize_fast.pcpp - Directive: @optimize fast
+
+  @optimize <level>; sets the build's optimize level, one of debug, safe,
+  fast, small, exact case (BNF.md sec 2; the default is debug). A module
+  gives @optimize once, so each level is its own file: dir_optimize (small),
+  dir_optimize_debug, dir_optimize_safe, dir_optimize_fast. Each prints the
+  macros clang sees, which tell the levels apart: debug defines PCPP_DEBUG
+  (the runtime's heap report), safe __OPTIMIZE__, fast __OPTIMIZE__ and
+  NDEBUG, small __OPTIMIZE__, __OPTIMIZE_SIZE__ and NDEBUG. Only a debug
+  build prints the [Heap] report. The fast level: optimized for speed, asserts off.
+*******************************************************************************/
+
+module exe dir_optimize_fast;
+
+/*
+  @@test
+    kind run
+    opt fast
+    expect
+    | clang sees: __OPTIMIZE__ NDEBUG
+  @@end
+*/
+
+@optimize fast;
+
+// The macros clang defines at this level, in a fixed order
+static const char* dir_optimize_flags()
+{
+  return ""
+#ifdef __OPTIMIZE__
+  " __OPTIMIZE__"
+#endif
+#ifdef __OPTIMIZE_SIZE__
+  " __OPTIMIZE_SIZE__"
+#endif
+#ifdef NDEBUG
+  " NDEBUG"
+#endif
+#ifdef PCPP_DEBUG
+  " PCPP_DEBUG"
+#endif
+  ;
+}
+
+begin
+  println("clang sees:{}", cpp("dir_optimize_flags()"));
+end.

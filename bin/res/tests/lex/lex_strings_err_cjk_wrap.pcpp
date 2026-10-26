@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_strings_err_cjk_wrap.pcpp - Lexer: a string escape mistake
+
+  Break step of lex_strings_escapes: a CJK code point that would wrap.
+*******************************************************************************/
+
+module exe lex_strings_err_cjk_wrap;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  println("{}", "\N{CJK UNIFIED IDEOGRAPH-100004E00}"); // ERROR PR0009@17
+end.

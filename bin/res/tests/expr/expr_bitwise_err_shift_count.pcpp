@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_bitwise_err_shift_count.pcpp - Expr: bitwise, shift count
+
+  Break step of expr_bitwise: a constant shift count of 32 on an int32
+  (SM0259).
+*******************************************************************************/
+
+module exe expr_bitwise_err_shift_count;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int32;
+
+begin
+  LN := 1 shl 32; // ERROR SM0259@15: shift count 32 outside 0..31
+end.

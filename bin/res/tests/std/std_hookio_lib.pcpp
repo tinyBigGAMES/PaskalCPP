@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_hookio_lib.pcpp - std compliance: the static C library std_hookio.pcpp
+  drives its stream family through
+
+  A `module lib` holding only C: std_hookio_c.c, whose functions read and
+  write a file through the stdio stream family (fopen, fread, fseek, ftell,
+  the 64-bit seek / tell names, fgetc, getc, ungetc, fgets, fwrite, fputc,
+  putc, fputws, the printf family, fscanf on Linux, fflush, fclose, ...).
+  std_hookio.pcpp links it (external "std_hookio_lib") and defines the
+  HookIO hooks, which must bind the calls inside this archive too. It builds
+  and is not run: std_hookio.pcpp holds the output to expect.
+*******************************************************************************/
+
+module lib std_hookio_lib;
+
+/*
+  @@test
+    kind dep
+  @@end
+*/
+
+@addsourcefile "$P:res/tests/std/fixtures/std_hookio_c.c";
+
+end.

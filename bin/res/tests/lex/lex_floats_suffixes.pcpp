@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_floats_suffixes.pcpp - Lexical: the float suffixes l / L and f16 / F16
+
+  BNF.md sec 9 float suffix: f F l L f16 F16, the ones the bundled clang
+  takes. l / L makes a long double, f16 / F16 a 16-bit float; each value
+  below is exact in its type, so the double it is cast to prints it as
+  written. Their sizes are the targets' (long double is 16 bytes on both
+  official x86_64 targets, f16 is 2).
+*******************************************************************************/
+
+module exe lex_floats_suffixes;
+
+/*
+  @@test
+    kind run
+    expect
+    | long double 2.5 0.5 16
+    | half 1.5 2.25 2
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+begin
+  println("long double {} {} {}", static_cast<double>(2.5L), static_cast<double>(0.5l),
+    sizeof(2.5L));
+  println("half {} {} {}", static_cast<double>(1.5f16), static_cast<double>(2.25F16),
+    sizeof(1.5f16));
+end.

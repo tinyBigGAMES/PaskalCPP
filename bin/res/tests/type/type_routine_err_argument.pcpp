@@ -1,0 +1,55 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_routine_err_argument.pcpp - Type: a routine of another signature as an argument
+
+  Break step of type_routine: a routine with the wrong signature for a
+  routine-typed parameter (SM0404).
+*******************************************************************************/
+
+module exe type_routine_err_argument;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TOps = record
+    F: routine(AN: int32): int32;
+  end;
+
+routine Double(AN: int32): int32;
+begin
+  return AN * 2;
+end;
+
+routine Wrong(AN: int64): int32;
+begin
+  return 0;
+end;
+
+routine Apply(AF: routine(AN: int32): int32; AN: int32): int32;
+begin
+  return AF(AN);
+end;
+
+var
+  LN: int32;
+
+begin
+  LN := Apply(Wrong, 1); // ERROR SM0404@15
+end.

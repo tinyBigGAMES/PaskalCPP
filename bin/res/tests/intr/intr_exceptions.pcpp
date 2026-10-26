@@ -1,0 +1,67 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_exceptions.pcpp - Intrinsic: raise, raisecode, exccode and excmsg
+
+  raise(M) raises code 1 with text M, raisecode(C, M) code C (BNF.md sec 7);
+  a guard's except reads them with exccode() and excmsg(), and nowhere else.
+  A raise reaches the nearest guard through routine calls; code 0 is still
+  caught. An unguarded raise ends the program: intr_exceptions_unhandled.
+*******************************************************************************/
+
+module exe intr_exceptions;
+
+/*
+  @@test
+    kind run
+    expect
+    | raise 1 plain
+    | raisecode 42 answer
+    | from a routine 5 too big
+    | code zero still caught 0
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+routine Fail(AN: int32);
+begin
+  if AN > 1 then
+    raisecode(AN, "too big");
+  end;
+end;
+
+begin
+  guard
+    raise("plain");
+  except
+    println("raise {} {}", exccode(), excmsg());
+  end;
+  guard
+    raisecode(42, "answer");
+  except
+    println("raisecode {} {}", exccode(), excmsg());
+  end;
+  guard
+    Fail(1);
+    Fail(5);
+  except
+    println("from a routine {} {}", exccode(), excmsg());
+  end;
+  guard
+    raisecode(0, "zero");
+  except
+    println("code zero still caught {}", exccode());
+  end;
+end.

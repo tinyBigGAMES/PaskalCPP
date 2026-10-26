@@ -1,0 +1,62 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_strings.pcpp - Lexical: string and character literals
+
+  Strings follow C++ (BNF.md sec 9): adjacent literals join into one; the
+  escapes are C++'s (decoded as clang does: quote, backslash, hex, octal, a
+  universal character name); a raw string R"(...)" keeps its text as
+  written, with a delimiter when the text holds )"; L"..." is a wstring
+  (the prefix touches the quote); 'c' is a char, L'w' a wchar; len counts
+  a string's elements, an escape being one. A suffix right after the
+  closing quote makes one user-defined literal ("std"s is a std::string,
+  through std's own operator""s), and u8"..." is a UTF-8 string (its
+  e-acute is two char8_t elements).
+*******************************************************************************/
+
+module exe lex_strings;
+
+using namespace std::string_literals;
+
+/*
+  @@test
+    kind run
+    expect
+    | joined in one
+    | quote["] back[\]
+    | hex A octal A ucn é
+    | raw \n stays
+    | has )" inside
+    | wide
+    | c w
+    | len 3
+    | std string 10
+    | u8 len 2
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+begin
+  println("{}", "joined " "in" " one");
+  println("{}", "quote[\"] back[\\]");
+  println("{}", "hex \x41 octal \101 ucn \u00e9");
+  println("{}", R"(raw \n stays)");
+  println("{}", R"tag(has )" inside)tag");
+  println("{}", L"wide");
+  println("{} {}", 'c', L'w');
+  println("len {}", len("a\nb"));
+  println("{} {}", "std string"s, ("std string"s).size());
+  println("u8 len {}", len(u8"é"));
+end.

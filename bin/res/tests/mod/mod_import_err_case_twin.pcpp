@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_import_err_case_twin.pcpp - Module: two modules whose names differ only in case
+
+  Break step of mod_import: std's Math and the fixture unit math are two
+  names (PaskalCPP is case-sensitive), but one program cannot hold both:
+  their generated files would be one file on a case-blind file system. The
+  second registered (math, imported after Math) is rejected at its own
+  header, fixtures\math.pcpp, whose marker says so. Nothing is emitted.
+*******************************************************************************/
+
+module exe mod_import_err_case_twin;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import Math, math;
+
+begin
+end.

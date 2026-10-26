@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property_virtual_err_parent_name.pcpp - Type: object property virtual, parent name
+
+  Break step of type_object_property_virtual: a property is named as no field
+  of the parent (SM0309).
+*******************************************************************************/
+
+module exe type_object_property_virtual_err_parent_name;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBase = object
+    A: int32;
+  end;
+  TKid = object(TBase)
+    FB: int32;
+    property A: int32 read FB; // ERROR SM0309@5: reuses a name of the parent chain
+  end;
+
+begin
+end.

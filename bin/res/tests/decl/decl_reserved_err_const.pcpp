@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_reserved_err_const.pcpp - Decl: reserved, const
+
+  Break step of decl_reserved: a const named pcpp_k (SM0017).
+*******************************************************************************/
+
+module exe decl_reserved_err_const;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+const
+  pcpp_k: int32 = 1; // ERROR SM0017@3: are reserved for the compiler
+
+begin
+end.

@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_conditional_err_noopener.pcpp - Directive: @endif with nothing open
+
+  Break step of dir_conditional: @endif closes an @ifdef / @ifndef.
+*******************************************************************************/
+
+module exe dir_conditional_err_noopener;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@endif // ERROR CD0002@1
+
+begin
+end.

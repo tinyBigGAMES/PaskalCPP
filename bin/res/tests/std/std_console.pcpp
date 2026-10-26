@@ -1,0 +1,317 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_console.pcpp - Std library compliance: the Console unit
+  (res\libs\std\Console.pcpp)
+
+  The Csi routines give VT sequences: positions 0-based in, CSI 1-based out,
+  row first, a position below 0 counted as 0; a count <= 0 gives "" (a CSI
+  count of 0 would mean 1); SGR 30 + i / 90 + i - 8 for a TextColor's
+  foreground, 40 + i / 100 + i - 8 for its background; 38;2 / 48;2 for an
+  Rgb; 38;5 / 48;5 for a 256-colour entry (0-255, else ""); OSC 0 for a
+  title, its C0 controls and DEL left out. TextColorAt holds its number to
+  0-15; IsEnterKey / IsEscapeKey match KeyEnter / KeyEscape. DisplayWidth
+  counts terminal columns: wide characters and emoji 2, combining marks and
+  controls 0. PadText / RuleText fill by columns (a wide pad fills two, a
+  column left over is a space, an empty pad is a space); ProgressBarText
+  floors (full and 100% only at the end); SpinnerFrame turns | / - \ for any
+  frame. The escape mode: On writes escapes, Off never, Auto while standard
+  output is a terminal. Write / WriteLn / WriteKeepFormat / WriteLnKeepFormat,
+  WritePadded and HorizontalRule write their text; run with standard output
+  a pipe or a file (as the tester does) no escape byte is written: a
+  terminal also gets the sequences, which it shows as nothing.
+  Each check row prints "ok <case>", or "FAIL <case>" with what came back and
+  what the rule says. The raw escape bytes in On mode and the key / line
+  readers are checked by scripts\vendor\sfx\console_std.pcpp (stdin none).
+*******************************************************************************/
+
+module exe std_console;
+
+/*
+  @@test
+    kind run
+    expect
+    | ok   pos
+    | ok   pos below 0
+    | ok   up
+    | ok   up 0
+    | ok   up negative
+    | ok   down
+    | ok   forward
+    | ok   back
+    | ok   scroll up
+    | ok   scroll down
+    | ok   insert chars
+    | ok   delete chars
+    | ok   erase chars
+    | ok   column
+    | ok   column below 0
+    | ok   insert lines
+    | ok   delete lines 0
+    | ok   fg 256
+    | ok   bg 256
+    | ok   fg 256 out of range
+    | ok   fg red
+    | ok   fg bright white
+    | ok   bg blue
+    | ok   bg bright cyan
+    | ok   fg rgb
+    | ok   bg rgb
+    | ok   title
+    | ok   title controls
+    | ok   reset
+    | ok   bg dark grey
+    | ok   rgb black
+    | ok   rgb parts
+    | ok   color at below 0
+    | ok   color at 3
+    | ok   color at past 15
+    | ok   enter key
+    | ok   line feed is no enter
+    | ok   escape key
+    | ok   backspace key
+    | ok   width abc
+    | ok   width empty
+    | ok   width e acute
+    | ok   width combining
+    | ok   width kai
+    | ok   width nihongo
+    | ok   width emoji
+    | ok   width tab
+    | ok   pad left
+    | ok   pad right
+    | ok   pad center
+    | ok   pad too wide
+    | ok   pad dots
+    | ok   pad wide text
+    | ok   pad wide pad
+    | ok   pad empty pad
+    | ok   rule
+    | ok   rule wide
+    | ok   rule 0
+    | ok   rule negative
+    | ok   bar 0/10
+    | ok   bar 5/10
+    | ok   bar 10/10
+    | ok   bar 99/100
+    | ok   bar past total
+    | ok   bar below 0
+    | ok   bar no total
+    | ok   bar 1/3
+    | ok   bar width 0
+    | ok   spinner -5
+    | ok   spinner -1
+    | ok   spinner 0
+    | ok   spinner 1
+    | ok   spinner 2
+    | ok   spinner 5
+    | ok   mode on
+    | ok   escapes on
+    | ok   mode off
+    | ok   escapes off
+    | ok   mode auto
+    | write 1 + 2
+    | keep1!
+    | a
+    | ..x
+    | ======
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import Console;
+
+// A sequence made readable for a FAIL row: ESC as <ESC>, BEL as <BEL> (raw,
+// a terminal would act on them and hide the row)
+#include <string>
+std::string Shown(const std::string& AText)
+{
+  std::string LShown;
+  for (const char LChar : AText)
+  {
+    if (LChar == '\x1b')
+    {
+      LShown += "<ESC>";
+    }
+    else if (LChar == '\x07')
+    {
+      LShown += "<BEL>";
+    }
+    else
+    {
+      LShown.push_back(LChar);
+    }
+  }
+  return LShown;
+}
+
+routine Check(const AName: string; const AGot: string; const AWant: string);
+begin
+  if AGot = AWant then
+    println("ok   {}", AName);
+  else
+    println("FAIL {}: got [{}] want [{}]", AName, Shown(AGot), Shown(AWant));
+  end;
+end;
+
+routine CheckInt(const AName: string; const AGot: int64; const AWant: int64);
+begin
+  if AGot = AWant then
+    println("ok   {}", AName);
+  else
+    println("FAIL {}: got [{}] want [{}]", AName, AGot, AWant);
+  end;
+end;
+
+routine CheckBool(const AName: string; const AGot: bool; const AWant: bool);
+begin
+  if AGot = AWant then
+    println("ok   {}", AName);
+  else
+    println("FAIL {}: got [{}] want [{}]", AName, AGot, AWant);
+  end;
+end;
+
+routine CheckSequences();
+var
+  LOrange: Rgb(255, 128, 0);
+  LSmall: Rgb(1, 2, 3);
+  LControls: string;
+begin
+  Check("pos", CsiCursorPosition(4, 2), "\x1b[3;5H");
+  Check("pos below 0", CsiCursorPosition(-3, -1), "\x1b[1;1H");
+  Check("up", CsiCursorUp(3), "\x1b[3A");
+  Check("up 0", CsiCursorUp(0), "");
+  Check("up negative", CsiCursorUp(-2), "");
+  Check("down", CsiCursorDown(1), "\x1b[1B");
+  Check("forward", CsiCursorForward(12), "\x1b[12C");
+  Check("back", CsiCursorBack(7), "\x1b[7D");
+  Check("scroll up", CsiScrollUp(2), "\x1b[2S");
+  Check("scroll down", CsiScrollDown(5), "\x1b[5T");
+  Check("insert chars", CsiInsertChars(4), "\x1b[4@");
+  Check("delete chars", CsiDeleteChars(3), "\x1b[3P");
+  Check("erase chars", CsiEraseChars(9), "\x1b[9X");
+  Check("column", CsiCursorColumn(9), "\x1b[10G");
+  Check("column below 0", CsiCursorColumn(-1), "\x1b[1G");
+  Check("insert lines", CsiInsertLines(2), "\x1b[2L");
+  Check("delete lines 0", CsiDeleteLines(0), "");
+  Check("fg 256", CsiForeground256(238), "\x1b[38;5;238m");
+  Check("bg 256", CsiBackground256(255), "\x1b[48;5;255m");
+  Check("fg 256 out of range", CsiForeground256(256), "");
+  Check("fg red", CsiForeground(TextColor.Red), "\x1b[31m");
+  Check("fg bright white", CsiForeground(TextColor.BrightWhite), "\x1b[97m");
+  Check("bg blue", CsiBackground(TextColor.Blue), "\x1b[44m");
+  Check("bg bright cyan", CsiBackground(TextColor.BrightCyan), "\x1b[106m");
+  Check("fg rgb", CsiForeground(LOrange), "\x1b[38;2;255;128;0m");
+  Check("bg rgb", CsiBackground(LSmall), "\x1b[48;2;1;2;3m");
+  Check("title", CsiTitle("Hi é"), "\x1b]0;Hi é\x07");
+  // one literal per escape: a hex escape reads every hex digit after it
+  LControls := "a\x07" + "b\x1b" + "c\x7f" + "d\t";
+  Check("title controls", CsiTitle(LControls), "\x1b]0;abcd\x07");
+  Check("reset", CsiResetFormat, "\x1b[0m");
+  Check("bg dark grey", CsiBgDarkGrey, "\x1b[48;5;238m");
+end;
+
+routine CheckValues();
+var
+  LBlack: Rgb;
+  LParts: Rgb(1, 2, 3);
+begin
+  CheckBool("rgb black", (LBlack.R = 0) and (LBlack.G = 0) and (LBlack.B = 0), true);
+  CheckBool("rgb parts", (LParts.R = 1) and (LParts.G = 2) and (LParts.B = 3), true);
+  CheckBool("color at below 0", TextColorAt(-1) = TextColor.Black, true);
+  CheckBool("color at 3", TextColorAt(3) = TextColor.Yellow, true);
+  CheckBool("color at past 15", TextColorAt(99) = TextColor.BrightWhite, true);
+  CheckBool("enter key", IsEnterKey("\r"), true);
+  CheckBool("line feed is no enter", IsEnterKey("\n"), false);
+  CheckBool("escape key", IsEscapeKey(KeyEscape), true);
+  Check("backspace key", KeyBackspace, "\x08");
+end;
+
+routine CheckText();
+begin
+  CheckInt("width abc", DisplayWidth("abc"), 3);
+  CheckInt("width empty", DisplayWidth(""), 0);
+  CheckInt("width e acute", DisplayWidth("é"), 1);
+  CheckInt("width combining", DisplayWidth("e\u0301"), 1);
+  CheckInt("width kai", DisplayWidth("界"), 2);
+  CheckInt("width nihongo", DisplayWidth("日本語"), 6);
+  CheckInt("width emoji", DisplayWidth("😀"), 2);
+  CheckInt("width tab", DisplayWidth("\t"), 0);
+
+  Check("pad left", PadText("ab", 6), "ab    ");
+  Check("pad right", PadText("ab", 6, " ", TextAlign.Right), "    ab");
+  Check("pad center", PadText("ab", 7, " ", TextAlign.Center), "  ab   ");
+  Check("pad too wide", PadText("abcdef", 4), "abcdef");
+  Check("pad dots", PadText("ab", 6, "."), "ab....");
+  Check("pad wide text", PadText("界", 5, "-", TextAlign.Center), "-界--");
+  Check("pad wide pad", PadText("a", 4, "界"), "a界 ");
+  Check("pad empty pad", PadText("a", 3, ""), "a  ");
+
+  Check("rule", RuleText("-", 5), "-----");
+  Check("rule wide", RuleText("界", 5), "界界 ");
+  Check("rule 0", RuleText("-", 0), "");
+  Check("rule negative", RuleText("-", -3), "");
+
+  Check("bar 0/10", ProgressBarText(0, 10, 10), "[          ]   0%");
+  Check("bar 5/10", ProgressBarText(5, 10, 10), "[=====     ]  50%");
+  Check("bar 10/10", ProgressBarText(10, 10, 10), "[==========] 100%");
+  Check("bar 99/100", ProgressBarText(99, 100, 10), "[========= ]  99%");
+  Check("bar past total", ProgressBarText(15, 10, 4), "[====] 100%");
+  Check("bar below 0", ProgressBarText(-3, 10, 4), "[    ]   0%");
+  Check("bar no total", ProgressBarText(1, 0, 4), "[    ]   0%");
+  Check("bar 1/3", ProgressBarText(1, 3, 6), "[==    ]  33%");
+  Check("bar width 0", ProgressBarText(1, 2, 0), "[]  50%");
+
+  Check("spinner -5", SpinnerFrame(-5), "\\");
+  Check("spinner -1", SpinnerFrame(-1), "\\");
+  Check("spinner 0", SpinnerFrame(0), "|");
+  Check("spinner 1", SpinnerFrame(1), "/");
+  Check("spinner 2", SpinnerFrame(2), "-");
+  Check("spinner 5", SpinnerFrame(5), "/");
+end;
+
+routine CheckModes();
+begin
+  SetEscapeMode(EscapeMode.On);
+  CheckBool("mode on", GetEscapeMode() = EscapeMode.On, true);
+  CheckBool("escapes on", EscapesEnabled(), true);
+  SetEscapeMode(EscapeMode.Off);
+  CheckBool("mode off", GetEscapeMode() = EscapeMode.Off, true);
+  CheckBool("escapes off", EscapesEnabled(), false);
+  SetEscapeMode(EscapeMode.Auto);
+  CheckBool("mode auto", GetEscapeMode() = EscapeMode.Auto, true);
+end;
+
+// The writes, with standard output a pipe: text only
+routine CheckWrites();
+begin
+  WriteLn("write {} + {}", 1, 2);
+  WriteKeepFormat("keep{}", 1);
+  WriteLnKeepFormat("!");
+  Write("a");
+  WriteLn();
+  WritePadded("x", 3, ".", TextAlign.Right);
+  WriteLn();
+  HorizontalRule("=", 6);
+end;
+
+begin
+  CheckSequences();
+  CheckValues();
+  CheckText();
+  CheckModes();
+  CheckWrites();
+end.

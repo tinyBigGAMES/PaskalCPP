@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_variadic_err_clink_count.pcpp - Decl: variadic, clink count
+
+  Break step of decl_variadic: varargs.count in a clink variadic (a C caller
+  passes no count).
+*******************************************************************************/
+
+module exe decl_variadic_err_clink_count;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine clink CCount(AN: int32; ...): int32;
+begin
+  return varargs.count; // ERROR SM0418@10
+end;
+
+begin
+  println("{}", CCount(1, 2));
+end.

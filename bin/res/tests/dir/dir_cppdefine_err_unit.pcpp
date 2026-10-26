@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_cppdefine_err_unit.pcpp - Directive: a macro an imported unit sets to another value
+
+  Break step of dir_cppdefine: every module's macros reach every translation
+  unit, so one name has one meaning across the build. The unit is analyzed
+  first (it is imported), so the report is here, naming the unit's file.
+*******************************************************************************/
+
+module exe dir_cppdefine_err_unit;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@cppdefine "DIR_CPPDEF_U" "2"; // ERROR SM0118@12: dir_cppdefine_err_unit_unit.pcpp
+@addmodulepath "$P:res/tests/dir/fixtures";
+import dir_cppdefine_err_unit_unit;
+
+begin
+end.

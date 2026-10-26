@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_alias_err_unit_var.pcpp - Type: an alias of a unit's exported variable
+
+  Break step of type_alias: GUnitCount is not a type (SM0013, at the
+  qualified name).
+*******************************************************************************/
+
+module exe type_alias_err_unit_var;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/type/fixtures";
+
+import type_alias_unit;
+
+type
+  TA = type_alias_unit.GUnitCount; // ERROR SM0013@8: 'type_alias_unit.GUnitCount' is not a type
+
+begin
+end.

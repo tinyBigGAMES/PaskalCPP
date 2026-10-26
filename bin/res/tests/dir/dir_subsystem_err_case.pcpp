@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_subsystem_err_case.pcpp - Directive: a @subsystem value in another case
+
+  Break step of dir_subsystem: the values are exact case, as every
+  directive value (dir_optimize_err_case).
+*******************************************************************************/
+
+module exe dir_subsystem_err_case;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@subsystem Console; // ERROR SM0100@12: 'Console' is not a value of @subsystem
+
+begin
+end.

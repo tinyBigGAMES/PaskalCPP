@@ -1,0 +1,35 @@
+/****************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+ ---------------------------------------------------------------------------
+  a2_err_value - test-suite input (spec scanner)
+****************************************************************************/
+module exe a2_err_value;
+/*
+  @@test
+    kind run
+    targets x86_64-mars-gnu
+    opt turbo
+    subsystem tablet
+    define 9LIVES A=B=C
+    exitcode -1
+    warnings deny
+    deps a2_x a2_x
+    args hello
+    expect x86_64-plan9
+    | out
+  @@end
+*/
+begin
+end.

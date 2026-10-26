@@ -1,0 +1,47 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_optimize_override.pcpp - pcpp: -opt over @optimize
+
+  A cli test: pcpp runs itself with the args (in the suite's output root,
+  -o "$P:output" so the build lands there), on the fixture named; its
+  output and exit code are the check. pcpp -opt is an override: it wins over the source's @optimize
+  fast, so the program is a debug build (the runtime's heap report).
+*******************************************************************************/
+
+module exe dir_optimize_override;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner <DIR>/fixtures/dir_cli_fast.pcpp -opt debug -r -o $P:output"
+    exitcode 0
+    expect
+    | Compiling <DIR>/fixtures/dir_cli_fast.pcpp
+    | Target platform: x86_64-windows-gnu
+    | Optimize level: debug
+    | Subsystem: Console
+    | Saving build file...
+    | Building dir_cli_fast...
+    | Build succeeded.
+    | Output: <OUT>/bin/dir_cli_fast.exe
+    | Running dir_cli_fast.exe...
+    | dir_cli_fast runs
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+begin
+end.

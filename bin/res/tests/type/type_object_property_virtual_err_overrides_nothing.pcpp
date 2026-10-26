@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property_virtual_err_overrides_nothing.pcpp - Type: object property virtual, overrides nothing
+
+  Break step of type_object_property_virtual: override needs a virtual
+  property above (SM0333).
+*******************************************************************************/
+
+module exe type_object_property_virtual_err_overrides_nothing;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBase = object
+    FA: int32;
+  end;
+  TKid = object(TBase)
+    override property A: int32 read FA; // ERROR SM0333@5: 'A' overrides nothing
+  end;
+
+begin
+end.

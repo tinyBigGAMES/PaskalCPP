@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property_err_value.pcpp - Type: object property, value
+
+  Break step of type_object_property: a property assignment is a statement
+  (SM0377).
+*******************************************************************************/
+
+module exe type_object_property_err_value;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBox = object
+    FN: int32;
+    property N: int32 read FN; write FN;
+  end;
+
+var
+  LB: TBox;
+  LX: int32;
+begin
+  LX := LB.N := 1; // ERROR SM0377@9: an assignment to property 'N' is a statement
+end.

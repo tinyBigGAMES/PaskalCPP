@@ -1,0 +1,56 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_resdata_dll.pcpp - the dll std_resdata.pcpp links: it adds the data key
+  "dll" (std_resdata_dll.txt, 9 bytes). A dll reads its own binary's data, not
+  the program's: it holds one key, and the program's "text" is not one of
+  them. Nothing to check here: std_resdata.pcpp checks it.
+*******************************************************************************/
+
+module dll std_resdata_dll;
+
+/*
+  @@test
+    kind dep
+  @@end
+*/
+
+@addresdata "dll" "$P:res/tests/std/fixtures/std_resdata_dll.txt";
+
+import ResData;
+
+// How many keys this dll holds
+exported routine clink std_resdata_dll_count(): int64;
+begin
+  return ResDataCount();
+end;
+
+// Its own key's size
+exported routine clink std_resdata_dll_size(): int64;
+begin
+  return FindResData("dll").Size;
+end;
+
+// Whether it sees the program's key: the key is built at run time, since
+// this build adds no "text" (a literal one would be SM0122 here)
+exported routine clink std_resdata_dll_sees_text(): bool;
+var
+  LKey: string;
+begin
+  LKey := "text";
+  return HasResData(LKey);
+end;
+
+end.

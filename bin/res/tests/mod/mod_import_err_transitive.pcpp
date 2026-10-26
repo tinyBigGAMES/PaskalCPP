@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_import_err_transitive.pcpp - Module: imports are not transitive
+
+  Break step of mod_import: this file imports mod_import_b only;
+  mod_import_b imports mod_import_a, but that does not make mod_import_a
+  this file's import.
+*******************************************************************************/
+
+module exe mod_import_err_transitive;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_import_b;
+
+var
+  GPair: mod_import_a.TPair; // ERROR SM0007@10
+
+begin
+end.

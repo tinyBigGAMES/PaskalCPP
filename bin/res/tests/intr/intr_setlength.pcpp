@@ -1,0 +1,60 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  intr_setlength.pcpp - Intrinsic: setlength
+
+  setlength(V, N) sets the length of a dynamic array or a string variable
+  (BNF.md sec 7): growing adds zeroed elements, shrinking drops the tail.
+  A negative length raises code 12 (as getmem of a negative size) and
+  leaves the variable as it was.
+*******************************************************************************/
+
+module exe intr_setlength;
+
+/*
+  @@test
+    kind run
+    expect
+    | grow 3 9
+    | shrink 1
+    | string 5
+    | string cut a
+    | 12 negative length -1
+    | kept 1
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+var
+  LA: array of int32;
+  LS: string = "ab";
+
+begin
+  setlength(LA, 3);
+  LA[2] := 9;
+  println("grow {} {}", len(LA), LA[2]);
+  setlength(LA, 1);
+  println("shrink {}", len(LA));
+  setlength(LS, 5);
+  println("string {}", len(LS));
+  setlength(LS, 1);
+  println("string cut {}", LS);
+  guard
+    setlength(LA, -1);
+  except
+    println("{} {}", exccode(), excmsg());
+  end;
+  println("kept {}", len(LA));
+end.

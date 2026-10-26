@@ -1,0 +1,54 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_import_bare_a.pcpp - Module fixture: a unit mod_import_bare imports
+
+  An exported type, consts, a var, a routine and an overload set, named
+  bare there. KShared is also exported by mod_import_bare_b.
+*******************************************************************************/
+
+module unit mod_import_bare_a;
+
+exported type
+  TSize = record
+    W: int32;
+    H: int32;
+  end;
+
+exported const
+  KScale: int32 = 3;
+  KDepth: int32 = 4;
+  KShared: int32 = 1;
+
+exported var
+  GCalls: int32 = 0;
+
+exported routine Area(const ASize: TSize): int32;
+begin
+  GCalls += 1;
+  return ASize.W * ASize.H;
+end;
+
+exported routine Describe(const AN: int32): string;
+begin
+  return "int";
+end;
+
+exported routine Describe(const AB: bool): string;
+begin
+  return "bool";
+end;
+
+end.

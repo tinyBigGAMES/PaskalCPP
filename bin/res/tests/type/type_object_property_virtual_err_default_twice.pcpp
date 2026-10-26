@@ -1,0 +1,46 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property_virtual_err_default_twice.pcpp - Type: object property virtual, default twice
+
+  Break step of type_object_property_virtual: one default property per object
+  (SM0379).
+*******************************************************************************/
+
+module exe type_object_property_virtual_err_default_twice;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBag = object
+    FI: int32;
+    property A[const AI: int32]: int32 read
+      begin
+        return AI;
+      end;
+      default;
+    property B[const AI: int32]: int32 read
+      begin
+        return AI;
+      end;
+      default; // ERROR SM0379@7: is a second default
+  end;
+
+begin
+end.

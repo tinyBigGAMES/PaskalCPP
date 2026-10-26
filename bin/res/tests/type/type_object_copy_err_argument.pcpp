@@ -1,0 +1,50 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_copy_err_argument.pcpp - Type: object copy, argument
+
+  Break step of type_object_copy: such an object passed by value: the argument
+  would be copied (SM0427).
+*******************************************************************************/
+
+module exe type_object_copy_err_argument;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TRes = object
+    Id: int32;
+    done;
+    begin
+    end;
+  end;
+
+routine Take(AR: TRes);
+begin
+end;
+
+routine Use();
+var
+  LA: TRes;
+begin
+  Take(LA); // ERROR SM0427@8: 'LA' would be copied here, and 'TRes' cannot be copied: pass it var / const, return it from a local
+end;
+
+begin
+end.

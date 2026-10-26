@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_integers_err_signed_z.pcpp - Lexical: above int64 with the z suffix
+
+  Break step of lex_integers: z (like Z) is the signed size type's suffix,
+  so a decimal literal above int64 with it is LX0006, and the message
+  writes it uz.
+*******************************************************************************/
+
+module exe lex_integers_err_signed_z;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int64;
+
+begin
+  LN := 0;
+  LN := 9223372036854775808z; // ERROR LX0006@9: write 9223372036854775808uz
+end.

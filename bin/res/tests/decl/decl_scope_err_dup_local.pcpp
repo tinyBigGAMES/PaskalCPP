@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_scope_err_dup_local.pcpp - Decl: scope, dup local
+
+  Break step of decl_scope: a routine's var with its parameter's name.
+*******************************************************************************/
+
+module exe decl_scope_err_dup_local;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine Use(AN: int32): int32;
+var
+  AN: int32 = 0; // ERROR SM0004@3
+begin
+  return AN;
+end;
+
+begin
+  println("{}", Use(1));
+end.

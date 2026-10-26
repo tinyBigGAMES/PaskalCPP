@@ -1,0 +1,303 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_hookio_query.pcpp - std compliance: the HookIO query family
+
+  `import HookIO;` answers the query names for a virtual path (`io://<n>`)
+  as fopen would find it: the file exists when an open of it can succeed,
+  its size is the IO's, it is writable when a write open that empties
+  nothing ("r+") succeeds, it is never executable, it has no times, and
+  directories are not answered. Any other path goes to the C runtime.
+
+  Through raylib (a static C library, built with the C runtime's own
+  declarations): FileExists, IsPathFile, GetFileLength, GetFileModTime and
+  DirectoryExists on a registered memory IO, on entries of a registered zip
+  IOSource (std_customio_stored.zip: hello.txt, data/bytes.bin; data is a
+  folder in it), on a missing entry, an unregistered prefix and prefix 0,
+  and on a real file of the same bytes and a missing real file (a missing
+  virtual path answers as a missing real one does); Windows also
+  IsFileHidden. Then the names directly: Linux access (F_OK, R_OK | W_OK,
+  X_OK, W_OK on a zip entry the zip will not open for writing, a bad mode
+  bit) and stat; Windows _access (0, 6, 2 on the zip entry, a bad mode),
+  the oldnames access, C++'s stat (mingw's stat64i32) and
+  GetFileAttributesA (NORMAL, READONLY, INVALID_FILE_ATTRIBUTES with
+  ERROR_FILE_NOT_FOUND). Each answer for a real path is the C runtime's own.
+
+  Each row prints ok or FAIL with its name; the last is `done <failures>`.
+
+  The Linux expectations: std_hookio_query_linux (the same program).
+*******************************************************************************/
+
+module exe std_hookio_query;
+
+/*
+  @@test
+    kind run
+    targets x86_64-windows-gnu
+    expect
+    | ok register
+    | ok real file
+    | ok raylib FileExists memory
+    | ok raylib FileExists memory bare prefix
+    | ok raylib FileExists zip entry
+    | ok raylib FileExists zip nested entry
+    | ok raylib FileExists zip missing
+    | ok raylib FileExists unregistered prefix
+    | ok raylib FileExists prefix 0
+    | ok raylib FileExists real
+    | ok raylib FileExists missing as missing real
+    | ok raylib IsPathFile memory
+    | ok raylib IsPathFile zip entry
+    | ok raylib IsPathFile zip folder
+    | ok raylib IsPathFile zip missing
+    | ok raylib IsPathFile real
+    | ok raylib GetFileLength memory
+    | ok raylib GetFileLength zip entry
+    | ok raylib GetFileLength zip nested entry
+    | ok raylib GetFileLength zip missing
+    | ok raylib GetFileLength real
+    | ok raylib GetFileModTime memory
+    | ok raylib GetFileModTime real
+    | ok raylib DirectoryExists zip root
+    | ok raylib DirectoryExists zip folder
+    | ok raylib DirectoryExists memory
+    | ok raylib IsFileHidden memory
+    | ok raylib IsFileHidden zip missing
+    | ok _access memory exists
+    | ok _access memory read write
+    | ok _access zip entry write refused
+    | ok _access zip entry read
+    | ok _access zip missing
+    | ok _access bad mode
+    | ok _access real
+    | ok access memory exists
+    | ok access zip missing
+    | ok access real
+    | ok stat memory
+    | ok stat zip entry
+    | ok stat zip missing
+    | ok stat real
+    | ok attributes memory
+    | ok attributes zip entry
+    | ok attributes zip missing
+    | ok attributes real
+    | ok real removed
+    | ok unregister memory
+    | ok unregister zip
+    | ok io close
+    | ok source close
+    | done 0
+    | [Heap] Allocs: 6, Frees: 6, Leaked: 0
+  @@end
+*/
+
+import
+  CustomIO,
+  HookIO,
+  raylib;
+
+#include <cerrno>
+#include <cstdio>
+#include <sys/stat.h>
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+#include <io.h>
+// windows.h clashes with raylib.h: the two Win32 calls declared here,
+// dllimport as in the SDK, so they go through the import slot as raylib's do
+extern "C" __declspec(dllimport) unsigned long __stdcall GetFileAttributesA(const char* APath);
+extern "C" __declspec(dllimport) unsigned long __stdcall GetLastError(void);
+@else
+#include <unistd.h>
+@endif
+
+var
+  GFails: int32;
+
+routine Check(const AName: string; const AOk: bool);
+begin
+  if AOk then
+    println("ok {}", AName);
+  else
+    println("FAIL {}", AName);
+    GFails := GFails + 1;
+  end;
+end;
+
+// AText into a new real file at APath (the C runtime's own FILE)
+routine WriteRealFile(const APath: string; const AText: string): bool;
+var
+  LFile: ptr to FILE;
+  LWritten: bool;
+begin
+  LFile := fopen(APath.c_str(), "wb");
+  if LFile = nil then
+    return false;
+  end;
+  LWritten := fwrite(AText.data(), 1, AText.size(), LFile) = AText.size();
+  return (fclose(LFile) = 0) and LWritten;
+end;
+
+// raylib's queries on every kind of path
+routine TestRaylib(const AMemory: string; const AZip: string; const AReal: string);
+begin
+  Check("raylib FileExists memory", FileExists((AMemory + "/a.png").c_str()));
+  Check("raylib FileExists memory bare prefix", FileExists(AMemory.c_str()));
+  Check("raylib FileExists zip entry", FileExists((AZip + "/hello.txt").c_str()));
+  Check("raylib FileExists zip nested entry", FileExists((AZip + "/data/bytes.bin").c_str()));
+  Check("raylib FileExists zip missing", not FileExists((AZip + "/missing.txt").c_str()));
+  Check("raylib FileExists unregistered prefix", not FileExists("io://999999/a.txt"));
+  Check("raylib FileExists prefix 0", not FileExists("io://0/a.txt"));
+  Check("raylib FileExists real", FileExists(AReal.c_str()));
+  Check("raylib FileExists missing as missing real", FileExists((AZip + "/missing.txt").c_str()) = FileExists((AReal + ".none").c_str()));
+
+  Check("raylib IsPathFile memory", IsPathFile((AMemory + "/a.png").c_str()));
+  Check("raylib IsPathFile zip entry", IsPathFile((AZip + "/hello.txt").c_str()));
+  Check("raylib IsPathFile zip folder", not IsPathFile((AZip + "/data").c_str()));
+  Check("raylib IsPathFile zip missing", not IsPathFile((AZip + "/missing.txt").c_str()));
+  Check("raylib IsPathFile real", IsPathFile(AReal.c_str()));
+
+  Check("raylib GetFileLength memory", GetFileLength((AMemory + "/a.png").c_str()) = 5);
+  Check("raylib GetFileLength zip entry", GetFileLength((AZip + "/hello.txt").c_str()) = 12);
+  Check("raylib GetFileLength zip nested entry", GetFileLength((AZip + "/data/bytes.bin").c_str()) = 256);
+  Check("raylib GetFileLength zip missing", GetFileLength((AZip + "/missing.txt").c_str()) = 0);
+  Check("raylib GetFileLength real", GetFileLength(AReal.c_str()) = 5);
+
+  Check("raylib GetFileModTime memory", GetFileModTime((AMemory + "/a.png").c_str()) = 0);
+  Check("raylib GetFileModTime real", GetFileModTime(AReal.c_str()) > 0);
+
+  Check("raylib DirectoryExists zip root", not DirectoryExists(AZip.c_str()));
+  Check("raylib DirectoryExists zip folder", not DirectoryExists((AZip + "/data").c_str()));
+  Check("raylib DirectoryExists memory", not DirectoryExists((AMemory + "/a.png").c_str()));
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  Check("raylib IsFileHidden memory", not IsFileHidden((AMemory + "/a.png").c_str()));
+  Check("raylib IsFileHidden zip missing", not IsFileHidden((AZip + "/missing.txt").c_str()));
+@endif
+end;
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+// _access, the oldnames access, C++'s stat and GetFileAttributesA
+routine TestDirect(const AMemory: string; const AZip: string; const AReal: string);
+var
+  LStat: struct stat;
+  LResult: int32;
+  LError: int32;
+begin
+  Check("_access memory exists", _access((AMemory + "/a").c_str(), 0) = 0);
+  Check("_access memory read write", _access((AMemory + "/a").c_str(), 6) = 0);
+  errno := 0;
+  LResult := _access((AZip + "/hello.txt").c_str(), 2);
+  LError := errno;
+  Check("_access zip entry write refused", (LResult = -1) and (LError = EACCES));
+  Check("_access zip entry read", _access((AZip + "/hello.txt").c_str(), 4) = 0);
+  errno := 0;
+  LResult := _access((AZip + "/missing.txt").c_str(), 0);
+  LError := errno;
+  Check("_access zip missing", (LResult = -1) and (LError = ENOENT));
+  errno := 0;
+  LResult := _access((AMemory + "/a").c_str(), 1);
+  LError := errno;
+  Check("_access bad mode", (LResult = -1) and (LError = EINVAL));
+  Check("_access real", _access(AReal.c_str(), 0) = 0);
+  Check("access memory exists", access((AMemory + "/a").c_str(), 0) = 0);
+  errno := 0;
+  LResult := access((AZip + "/missing.txt").c_str(), 0);
+  LError := errno;
+  Check("access zip missing", (LResult = -1) and (LError = ENOENT));
+  Check("access real", access(AReal.c_str(), 0) = 0);
+
+  Check("stat memory", (stat((AMemory + "/a").c_str(), address of LStat) = 0) and (LStat.st_size = 5) and ((LStat.st_mode & _S_IFMT) = _S_IFREG) and ((LStat.st_mode & _S_IWRITE) <> 0));
+  Check("stat zip entry", (stat((AZip + "/hello.txt").c_str(), address of LStat) = 0) and (LStat.st_size = 12) and ((LStat.st_mode & _S_IFMT) = _S_IFREG) and ((LStat.st_mode & _S_IWRITE) = 0));
+  errno := 0;
+  LResult := stat((AZip + "/missing.txt").c_str(), address of LStat);
+  LError := errno;
+  Check("stat zip missing", (LResult = -1) and (LError = ENOENT));
+  Check("stat real", (stat(AReal.c_str(), address of LStat) = 0) and (LStat.st_size = 5));
+
+  Check("attributes memory", GetFileAttributesA((AMemory + "/a").c_str()) = 0x80);
+  Check("attributes zip entry", GetFileAttributesA((AZip + "/hello.txt").c_str()) = 0x1);
+  Check("attributes zip missing", (GetFileAttributesA((AZip + "/missing.txt").c_str()) = 0xFFFFFFFF) and (GetLastError() = 2));
+  Check("attributes real", GetFileAttributesA(AReal.c_str()) <> 0xFFFFFFFF);
+end;
+@else
+// access and stat
+routine TestDirect(const AMemory: string; const AZip: string; const AReal: string);
+var
+  LStat: struct stat;
+  LResult: int32;
+  LError: int32;
+begin
+  Check("access memory exists", access((AMemory + "/a").c_str(), F_OK) = 0);
+  Check("access memory read write", access((AMemory + "/a").c_str(), R_OK | W_OK) = 0);
+  errno := 0;
+  LResult := access((AMemory + "/a").c_str(), X_OK);
+  LError := errno;
+  Check("access memory execute refused", (LResult = -1) and (LError = EACCES));
+  errno := 0;
+  LResult := access((AZip + "/hello.txt").c_str(), W_OK);
+  LError := errno;
+  Check("access zip entry write refused", (LResult = -1) and (LError = EACCES));
+  Check("access zip entry read", access((AZip + "/hello.txt").c_str(), R_OK) = 0);
+  errno := 0;
+  LResult := access((AZip + "/missing.txt").c_str(), F_OK);
+  LError := errno;
+  Check("access zip missing", (LResult = -1) and (LError = ENOENT));
+  errno := 0;
+  LResult := access((AMemory + "/a").c_str(), 0x40);
+  LError := errno;
+  Check("access bad mode", (LResult = -1) and (LError = EINVAL));
+  errno := 0;
+  LResult := access(AReal.c_str(), 0x40);
+  LError := errno;
+  Check("access bad mode as real", (LResult = -1) and (LError = EINVAL));
+  Check("access real", access(AReal.c_str(), R_OK) = 0);
+
+  Check("stat memory", (stat((AMemory + "/a").c_str(), address of LStat) = 0) and (LStat.st_size = 5) and S_ISREG(LStat.st_mode) and ((LStat.st_mode & S_IWUSR) <> 0) and (LStat.st_uid = getuid()));
+  Check("stat zip entry", (stat((AZip + "/hello.txt").c_str(), address of LStat) = 0) and (LStat.st_size = 12) and S_ISREG(LStat.st_mode) and ((LStat.st_mode & S_IWUSR) = 0));
+  errno := 0;
+  LResult := stat((AZip + "/missing.txt").c_str(), address of LStat);
+  LError := errno;
+  Check("stat zip missing", (LResult = -1) and (LError = ENOENT));
+  Check("stat real", (stat(AReal.c_str(), address of LStat) = 0) and (LStat.st_size = 5) and S_ISREG(LStat.st_mode));
+end;
+@endif
+
+var
+  LText: string;
+  LMemory: IO;
+  LZip: IOSource;
+  LMemoryPrefix: string;
+  LZipPrefix: string;
+  LRealPath: string;
+begin
+  GFails := 0;
+  LText := "hello";
+  LMemory := CreateMemoryIO(LText.data(), int64(LText.size()), true);
+  LMemoryPrefix := RegisterIO(LMemory);
+  LZip := CreateZipIOSource("$P:../../res/tests/std/fixtures/std_customio_stored.zip");
+  LZipPrefix := RegisterIOSource(LZip);
+  Check("register", (LMemoryPrefix <> "") and (LZipPrefix <> ""));
+  LRealPath := paramstr(0) + ".query.txt";
+  Check("real file", WriteRealFile(LRealPath, LText));
+
+  TestRaylib(LMemoryPrefix, LZipPrefix, LRealPath);
+  TestDirect(LMemoryPrefix, LZipPrefix, LRealPath);
+
+  Check("real removed", remove(LRealPath.c_str()) = 0);
+  Check("unregister memory", UnregisterIO(LMemoryPrefix));
+  Check("unregister zip", UnregisterIO(LZipPrefix));
+  Check("io close", IOClose(LMemory));
+  Check("source close", IOSourceClose(LZip));
+  println("done {}", GFails);
+end.

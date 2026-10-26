@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_operator_err_own.pcpp - Type: object operator, own
+
+  Break step of type_object_operator: an operator none of whose operands is
+  the declaring type (SM0381).
+*******************************************************************************/
+
+module exe type_object_operator_err_own;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TVec = record
+    X: int32;
+    Y: int32;
+    operator +(const A: int32; const B: int32): int32; // ERROR SM0381
+    begin
+      return A;
+    end;
+  end;
+
+begin
+end.

@@ -1,0 +1,44 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  test_asserts_outside.pcpp - Unit testing compliance: an assert outside a
+  test
+
+  An assert in a routine or the body (not in a test block) that does not
+  hold prints <file>:<line>: <message> to stderr, after what the program had
+  printed, and ends the program with exit code 1 on every target; one that
+  holds does nothing. Nothing after it runs, so no heap report either.
+*******************************************************************************/
+
+module exe test_asserts_outside;
+
+/*
+  @@test
+    kind run
+    exitcode 1
+    expect
+    | before
+    | held
+    | <DIR>/test_asserts_outside.pcpp:42: testAssertEqualInt failed: expected 1, got 2
+  @@end
+*/
+
+begin
+  println("before");
+  testAssertTrue(true);
+  println("held");
+  testAssertEqualInt(1, 2);
+  println("never printed");
+end.

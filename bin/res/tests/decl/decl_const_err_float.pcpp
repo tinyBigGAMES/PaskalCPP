@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_const_err_float.pcpp - Decl: const, float
+
+  Break step of decl_const: a float value for an integer const.
+*******************************************************************************/
+
+module exe decl_const_err_float;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+const
+  CWhole: int32 = 1.5; // ERROR SM0200@19
+
+begin
+  println("{}", CWhole);
+end.

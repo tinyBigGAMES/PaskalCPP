@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_forward_err_only.pcpp - Decl: forward, only
+
+  Break step of decl_forward: a forward type used by value before its full
+  declaration (only ptr to may name it).
+*******************************************************************************/
+
+module exe decl_forward_err_only;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+forward type TNode;
+
+type
+  TBox = record
+    Item: TNode; // ERROR SM0300@11
+  end;
+  TNode = record
+    Value: int32;
+  end;
+
+begin
+end.

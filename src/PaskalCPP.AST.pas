@@ -42,6 +42,10 @@ const
   { PC_ERR_AST_001 }
   // A second module with the same name (AddModule); the first is kept
   PC_ERR_AST_001 = 'AS0001';
+  { PC_ERR_AST_002 }
+  // A second module whose name differs from a registered one only in case
+  // (AddModule); the first is kept
+  PC_ERR_AST_002 = 'AS0002';
 
 type
 
@@ -2245,6 +2249,8 @@ type
     class function DoCallNamesRuntime(const ACall: TPCCall): Boolean; static;
     class function DoExternalLibRange(const ANode: TPCNode;
       const ALibrary: string): TSourceRange; static;
+    class function DoNamesSourceFile(const ADirective: TPCDirective;
+      const ASourceFile: string): Boolean; static;
     class function DoNarrowestAt(const AModule: TPCModule; const ALine: UInt64;
       const AColumn: UInt64; out ANode: TPCNode; out ASpan: TPCEmitSpan): Boolean; static;
   public
@@ -2256,9 +2262,14 @@ type
     function NodeCount(): Integer;
     // A second module with the same name -> PC_ERR_AST_001, first kept (the rejected one is
     // still found by FindModuleByFile, never re-parsed); a nameless module (broken header,
-    // already reported) is added without the check
+    // already reported) is added without the check. A module whose name equals a
+    // registered one but for case -> PC_ERR_AST_002, first kept the same way: their
+    // generated files would be one file on a case-blind file system
     procedure AddModule(const AModule: TPCModule);
     function FindModule(const AModuleName: string): TPCModule;
+    // The registered module whose name equals AModuleName ignoring case but not
+    // with it (math vs Math); nil = none
+    function FindModuleCaseTwin(const AModuleName: string): TPCModule;
     // The module (registered or rejected) whose SourceFile is AFilename, compared with
     // TUtils.SamePath; nil = none. Import identity (research\cppmix\parser-core.md)
     function FindModuleByFile(const AFilename: string): TPCModule;
@@ -2329,6 +2340,13 @@ type
     // module order; per module its @linklibrary directives, then its external
     // clauses in tree order); False = no module names it
     function LocateLibrary(const ALibrary: string; out AOutFilename: string;
+      out AOutLine: UInt64; out AOutColumn: UInt64): Boolean;
+    // TPCSourceFileLocator's signature (PaskalCPP.BuildOutput): True = a
+    // module names ASourceFile (resolved and absolute) in an @addsourcefile SEM
+    // did not set aside, and AOut* hold its value's location, first in module
+    // order then source order (the order the Compiler hands them to the
+    // build, TPCCompiler.DoApplyDirectives); False = no module names it
+    function LocateSourceFile(const ASourceFile: string; out AOutFilename: string;
       out AOutLine: UInt64; out AOutColumn: UInt64): Boolean;
     // PLAN-RESDATA A4b: the @addresdata entry adding AKey (exact case, as SEM
     // compares keys), first in module order; nil = no module of this build adds it
@@ -6677,6 +6695,8 @@ begin
 end;
 
 procedure TPCAst.AddModule(const AModule: TPCModule);
+var
+  LTwin: TPCModule;
 begin
   // The rejected module stays owned by the arena like any other node. A nameless
   // module is never a duplicate: its header error is already reported, and it must
@@ -6688,7 +6708,33 @@ begin
     FRejectedModules.Add(AModule);
     Exit;
   end;
+  // PaskalCPP is case-sensitive, so math and Math are two names, but their
+  // generated files (math.pcpp.h, Math.pcpp.h) are one file on Windows: the
+  // second is rejected at its header, the same way as a duplicate
+  if AModule.ModuleName <> '' then
+  begin
+    LTwin := FindModuleCaseTwin(AModule.ModuleName);
+    if LTwin <> nil then
+    begin
+      FErrors.Add(AModule.Range, esError, PC_ERR_AST_002, RSAstCaseTwinModule,
+        [AModule.ModuleName, LTwin.ModuleName, LTwin.SourceFile]);
+      FRejectedModules.Add(AModule);
+      Exit;
+    end;
+  end;
   FModules.Add(AModule);
+end;
+
+function TPCAst.FindModuleCaseTwin(const AModuleName: string): TPCModule;
+var
+  LModule: TPCModule;
+begin
+  Result := nil;
+  for LModule in FModules do
+  begin
+    if SameText(LModule.ModuleName, AModuleName) and (LModule.ModuleName <> AModuleName) then
+      Exit(LModule);
+  end;
 end;
 
 function TPCAst.FindModule(const AModuleName: string): TPCModule;
@@ -8026,6 +8072,59 @@ begin
 
     if LRange.Filename <> '' then
     begin
+      AOutFilename := LRange.Filename;
+      AOutLine := LRange.StartLine;
+      AOutColumn := LRange.StartColumn;
+      Exit(True);
+    end;
+  end;
+end;
+
+class function TPCAst.DoNamesSourceFile(const ADirective: TPCDirective;
+  const ASourceFile: string): Boolean;
+var
+  LResolved: string;
+begin
+  // An @addsourcefile the build was handed (TPCCompiler.DoApplyDirective:
+  // its value, resolved by the build as here) naming ASourceFile
+  Result := False;
+  if (ADirective.DirectiveKind <> bdAddSourceFile) or ADirective.ResolvedNoEffect or
+    (ADirective.Args.Count = 0) or (ADirective.Args[0].ResolvedText = '') then
+    Exit;
+
+  // A value no path routine takes was refused by the build (ZB0020): it
+  // names no TU
+  try
+    LResolved := TUtils.ResolvePath(ADirective.Args[0].ResolvedText);
+  except
+    on Exception do
+      Exit(False);
+  end;
+  Result := TUtils.SamePath(LResolved, ASourceFile);
+end;
+
+function TPCAst.LocateSourceFile(const ASourceFile: string; out AOutFilename: string;
+  out AOutLine: UInt64; out AOutColumn: UInt64): Boolean;
+var
+  LIndex: Integer;
+  LDirective: TPCDirective;
+  LRange: TSourceRange;
+begin
+  AOutFilename := '';
+  AOutLine := 0;
+  AOutColumn := 0;
+  Result := False;
+  if ASourceFile = '' then
+    Exit;
+
+  for LIndex := 0 to ModuleCount() - 1 do
+  begin
+    for LDirective in ModuleAt(LIndex).Directives do
+    begin
+      if not DoNamesSourceFile(LDirective, ASourceFile) then
+        Continue;
+
+      LRange := LDirective.Args[0].Range;
       AOutFilename := LRange.Filename;
       AOutLine := LRange.StartLine;
       AOutColumn := LRange.StartColumn;

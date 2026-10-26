@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_identifiers_err_char_utf8.pcpp - Lexical: a non-ASCII character
+
+  Break step of lex_identifiers: a character outside ASCII starts no token
+  where an identifier or operator could start, so the euro sign is one
+  LX0004 for all three of its bytes. The string before it holds a two-byte
+  character: the column is a byte column (clang's unit), so the euro sign's
+  column counts both bytes of that e-acute.
+*******************************************************************************/
+
+module exe lex_identifiers_err_char_utf8;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  println("é"); € // ERROR LX0004@17: Invalid character in source
+end.

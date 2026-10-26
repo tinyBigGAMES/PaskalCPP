@@ -1,0 +1,140 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_routine.pcpp - Type: routine types
+
+  A routine type is a type expression, so it is written wherever a type
+  goes, named or inline: a record field (named TUnary, inline, a procedure
+  type), an array element, a variable, a parameter, a return type, a ptr to
+  it; routine clink(...) is the C linkage type. A routine value assigned,
+  passed or returned must match the type's parameters, modes, result and
+  linkage exactly (the break steps); an overload set gives the member of
+  that signature. A routine-typed field is called with . or -> like a
+  routine, with exactly its parameters (a var parameter takes a variable);
+  nil compares.
+*******************************************************************************/
+
+module exe type_routine;
+
+/*
+  @@test
+    kind run
+    expect
+    | fields 10 25
+    | through a pointer 9
+    | array 8 16
+    | returned 36 12
+    | parameter 14
+    | clink 6
+    | overload 30
+    | var 8
+    | nil true
+    | done ok
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+type
+  TUnary = routine(AN: int32): int32;
+  TOps = record
+    Named: TUnary;
+    Twice: routine(AN: int32): int32;
+    OnDone: routine(const AS: string);
+  end;
+  TTable = array[0..1] of routine(AN: int32): int32;
+  TBump = routine(var AN: int32);
+
+routine Over(AN: int32): int32;
+begin
+  return AN * 10;
+end;
+
+routine Over(const AS: string): int32;
+begin
+  return 0;
+end;
+
+routine Bump(var AN: int32);
+begin
+  AN := AN + 1;
+end;
+
+routine Double(AN: int32): int32;
+begin
+  return AN * 2;
+end;
+
+routine Square(AN: int32): int32;
+begin
+  return AN * AN;
+end;
+
+routine Shout(const AS: string);
+begin
+  println("done {}", AS);
+end;
+
+routine clink Triple(AN: int32): int32;
+begin
+  return AN * 3;
+end;
+
+routine Apply(AF: routine(AN: int32): int32; AN: int32): int32;
+begin
+  return AF(AN);
+end;
+
+routine Pick(AI: int32): routine(AN: int32): int32;
+begin
+  if AI = 0 then
+    return Double;
+  end;
+  return Square;
+end;
+
+var
+  LOps: TOps;
+  LT: TTable;
+  LF: routine(AN: int32): int32;
+  LC: routine clink(AN: int32): int32;
+  LPF: ptr to TOps;
+  LB: TBump;
+  LN: int32;
+
+begin
+  LOps.Named := Double;
+  LOps.Twice := Square;
+  LOps.OnDone := Shout;
+  println("fields {} {}", LOps.Named(5), LOps.Twice(5));
+  LPF := address of LOps;
+  println("through a pointer {}", LPF->Twice(3));
+  LT[0] := Double;
+  LT[1] := Square;
+  println("array {} {}", LT[0](4), LT[1](4));
+  LF := Pick(1);
+  println("returned {} {}", LF(6), Apply(Pick(0), 6));
+  println("parameter {}", Apply(Double, 7));
+  LC := Triple;
+  println("clink {}", LC(2));
+  LF := Over;
+  println("overload {}", LF(3));
+  LB := Bump;
+  LN := 7;
+  LB(LN);
+  println("var {}", LN);
+  LF := nil;
+  println("nil {}", LF = nil);
+  LOps.OnDone("ok");
+end.

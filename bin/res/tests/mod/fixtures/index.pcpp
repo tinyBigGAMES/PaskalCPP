@@ -1,0 +1,27 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  index.pcpp - Module fixture: a unit named index, a name C and C++
+  headers also use (mod_import_named_index imports it).
+*******************************************************************************/
+
+module unit index;
+
+exported routine Twice(const AX: int32): int32;
+begin
+  return AX * 2;
+end;
+
+end.

@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_relational_err_cpp_equal.pcpp - Expr: relational, cpp equal
+
+  Break step of expr_relational: C++ == (PR0039).
+*******************************************************************************/
+
+module exe expr_relational_err_cpp_equal;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int32;
+  LM: int32;
+
+begin
+  LN := 1;
+  LM := 2;
+  if LN == LM then // ERROR PR0039@9: is C++: PaskalCPP writes
+  end;
+end.

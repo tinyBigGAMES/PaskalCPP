@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_routine_err_return_value.pcpp - Decl: routine, return value
+
+  Break step of decl_routine: return with no value in a function: a function
+  returns a value.
+*******************************************************************************/
+
+module exe decl_routine_err_return_value;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine Three(): int32;
+begin
+  return; // ERROR SM0610@3
+end;
+
+begin
+  println("{}", Three());
+end.

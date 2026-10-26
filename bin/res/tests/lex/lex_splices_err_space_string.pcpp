@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_splices_err_space_string.pcpp - Lexical: a blank after a splice in a string
+
+  Break step of lex_splices: a blank between a backslash and its newline
+  inside a string still makes a splice, LX0201, a warning at the
+  backslash: "a" + "b" still joins and the module builds. The marked line
+  ends in the splice, so its marker is a block-comment marker.
+  Its bytes are part of the test (see above): edit it with an editor
+  that keeps them as they are.
+*******************************************************************************/
+
+module exe lex_splices_err_space_string;
+
+/*
+  @@test
+    kind build
+  @@end
+*/
+
+begin
+  println(/* // WARN LX0201@41 // */ "a\ 
+b");
+end.

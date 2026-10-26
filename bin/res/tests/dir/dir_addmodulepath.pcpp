@@ -1,0 +1,52 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addmodulepath.pcpp - Directive: @addmodulepath
+
+  @addmodulepath "<folder>"; adds a folder where import looks for units
+  (BNF.md sec 1 and 2). The folder must exist; only the main module sets it.
+  import looks in the importing file's own folder first, then in the module
+  paths in the order they were added; every imported unit searches the same
+  list. One folder named again (in any spelling) is the same folder. This
+  program adds fixtures\ twice, in two spellings, and imports:
+    dir_addmodulepath_lib      only in fixtures\: found through the path
+    dir_addmodulepath_unit     beside this file; it imports dir_addmodulepath_lib
+                               too, through the main module's path
+    dir_addmodulepath_shadow   in both folders: the copy beside this file wins
+                               (Folder() = 1; the fixtures\ copy returns 2)
+*******************************************************************************/
+
+module exe dir_addmodulepath;
+
+/*
+  @@test
+    kind run
+    expect
+    | dir_addmodulepath_lib.Value() = 40
+    | dir_addmodulepath_unit.FromUnit() = 41
+    | dir_addmodulepath_shadow.Folder() = 1
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/dir/fixtures";
+@addmodulepath "$P:res\\tests\\dir\\fixtures\\";
+import dir_addmodulepath_unit, dir_addmodulepath_lib, dir_addmodulepath_shadow;
+
+begin
+  println("dir_addmodulepath_lib.Value() = {}", dir_addmodulepath_lib.Value());
+  println("dir_addmodulepath_unit.FromUnit() = {}", dir_addmodulepath_unit.FromUnit());
+  println("dir_addmodulepath_shadow.Folder() = {}", dir_addmodulepath_shadow.Folder());
+end.

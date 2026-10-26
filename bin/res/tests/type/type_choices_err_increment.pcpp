@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_choices_err_increment.pcpp - Type: ++ on a choice value
+
+  Break step of type_choices: nor ++ (SM0250).
+*******************************************************************************/
+
+module exe type_choices_err_increment;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TColor = choices(cRed, cGreen, cBlue);
+
+var
+  LC: TColor;
+
+begin
+  LC++; // ERROR SM0250@3: operator '++' does not take 'TColor'
+end.

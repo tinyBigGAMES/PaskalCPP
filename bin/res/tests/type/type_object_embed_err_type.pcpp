@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_embed_err_type.pcpp - Type: object embed, type
+
+  Break step of type_object_embed: an embed of int32: an embed is a record, an
+  overlay or an object (SM0369).
+*******************************************************************************/
+
+module exe type_object_embed_err_type;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBox = object
+    embed N: int32; // ERROR SM0369@14: embed 'N' holds 'int32'
+  end;
+
+begin
+end.

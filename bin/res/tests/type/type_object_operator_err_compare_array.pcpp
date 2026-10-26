@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_operator_err_compare_array.pcpp - Type: object operator, compare array
+
+  Break step of type_object_operator: two arrays of objects whose type
+  declares no <> (SM0252).
+*******************************************************************************/
+
+module exe type_object_operator_err_compare_array;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TTicket = object
+    Seat: int32;
+  end;
+
+var
+  LA: array[0..1] of TTicket;
+  LB: array[0..1] of TTicket;
+  LE: bool;
+begin
+  LE := LA <> LB; // ERROR SM0252
+end.

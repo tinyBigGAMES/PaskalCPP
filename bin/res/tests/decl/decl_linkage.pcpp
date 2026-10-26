@@ -1,0 +1,152 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_linkage.pcpp - Declaration: routine linkage (clink, cpplink)
+
+  routine [clink | cpplink] name ... (BNF.md sec 3). cpplink is the default:
+  C++ linkage, a mangled name (Twice has no linkage word, Tenfold spells
+  cpplink). clink gives a routine C linkage (extern "C", its plain name):
+  decl\fixtures\decl_linkage_c.c calls decl_linkage_triple by that name, so
+  the program links only because the routine is clink. Linkage is not
+  visibility: `exported` decides who may name a routine in PaskalCPP, clink
+  makes it a C symbol either way. decl_linkage_quad is private and
+  decl_linkage_half is a private forward + full, and C calls both by their
+  plain names too. PaskalCPP calls a clink routine as any other, and binds a
+  C routine (decl_linkage_from_c and its siblings) with clink + external. C
+  has no overloads: an overloaded clink routine gets C++ linkage, with a
+  warning (decl_linkage_err_overload). C has no references either: under
+  clink a `const` parameter is passed by value whatever its type (`var`
+  stays a reference), so decl_linkage_sum (a const record),
+  decl_linkage_len (a const C typedef) and the routine type PairFn match
+  the C signatures: C calls both routines with values, calls
+  decl_linkage_sum through a PairFn, and PaskalCPP calls C's
+  decl_linkage_c_product through one.
+*******************************************************************************/
+
+module exe decl_linkage;
+
+/*
+  @@test
+    kind run
+    expect
+    | Twice(21) = 42
+    | Tenfold(4) = 40
+    | decl_linkage_triple(2) = 6
+    | decl_linkage_from_c(5) = 16
+    | decl_linkage_quad_from_c(5) = 21
+    | decl_linkage_half_from_c(8) = 5
+    | decl_linkage_half(10) = 5
+    | decl_linkage_sum_from_c(3, 4) = 7
+    | decl_linkage_len_from_c() = 4
+    | decl_linkage_call_from_c(decl_linkage_sum, 5, 6) = 11
+    | decl_linkage_c_product(6, 7) = 42
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addsourcefile "$P:res/tests/decl/fixtures/decl_linkage_c.c";
+
+routine Twice(AN: int32): int32;
+begin
+  return AN * 2;
+end;
+
+routine cpplink Tenfold(AN: int32): int32;
+begin
+  return AN * 10;
+end;
+
+exported routine clink decl_linkage_triple(AN: int32): int32;
+begin
+  return AN * 3;
+end;
+
+// Private, still a C symbol: decl_linkage_c.c calls it by its plain name
+routine clink decl_linkage_quad(AN: int32): int32;
+begin
+  return AN * 4;
+end;
+
+// A private forward: the prototype and the full carry one linkage, so the
+// call below (before the full) and C's call both reach one C symbol
+forward routine clink decl_linkage_half(AN: int32): int32;
+
+routine clink decl_linkage_from_c(AN: int32): int32; external;
+routine clink decl_linkage_quad_from_c(AN: int32): int32; external;
+routine clink decl_linkage_half_from_c(AN: int32): int32; external;
+
+routine ShowHalf(AN: int32);
+begin
+  println("decl_linkage_half({}) = {}", AN, decl_linkage_half(AN));
+end;
+
+routine clink decl_linkage_half(AN: int32): int32;
+begin
+  return AN div 2;
+end;
+
+// C passes a record and a C typedef by value. Under C linkage a const
+// parameter is by value too (C has no references), whatever its type, so
+// these routines and PairFn have exactly the C signatures decl_linkage_c.c
+// declares; cpplink keeps passing a const record by const reference
+#include <cstring>
+typedef const char* decl_linkage_text;
+
+type
+  TPair = record
+    X: int32;
+    Y: int32;
+  end;
+  PairFn = routine clink(const AP: TPair): int32;
+
+routine clink decl_linkage_sum(const AP: TPair): int32;
+begin
+  return AP.X + AP.Y;
+end;
+
+routine clink decl_linkage_len(const AT: decl_linkage_text): int32;
+begin
+  return static_cast<int32_t>(std::strlen(AT));
+end;
+
+routine clink decl_linkage_sum_from_c(AX: int32; AY: int32): int32; external;
+routine clink decl_linkage_len_from_c(): int32; external;
+routine clink decl_linkage_call_from_c(const AFn: PairFn; AX: int32; AY: int32): int32; external;
+routine clink decl_linkage_c_product_fn(): PairFn; external;
+
+routine ShowByValue();
+var
+  LPair: TPair;
+  LProduct: PairFn;
+begin
+  println("decl_linkage_sum_from_c(3, 4) = {}", decl_linkage_sum_from_c(3, 4));
+  println("decl_linkage_len_from_c() = {}", decl_linkage_len_from_c());
+  println("decl_linkage_call_from_c(decl_linkage_sum, 5, 6) = {}", decl_linkage_call_from_c(decl_linkage_sum, 5, 6));
+  LPair.X := 6;
+  LPair.Y := 7;
+  LProduct := decl_linkage_c_product_fn();
+  println("decl_linkage_c_product(6, 7) = {}", LProduct(LPair));
+end;
+
+begin
+  println("Twice(21) = {}", Twice(21));
+  println("Tenfold(4) = {}", Tenfold(4));
+  println("decl_linkage_triple(2) = {}", decl_linkage_triple(2));
+  println("decl_linkage_from_c(5) = {}", decl_linkage_from_c(5));
+  println("decl_linkage_quad_from_c(5) = {}", decl_linkage_quad_from_c(5));
+  println("decl_linkage_half_from_c(8) = {}", decl_linkage_half_from_c(8));
+  ShowHalf(10);
+  ShowByValue();
+end.

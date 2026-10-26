@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_casts_err_alias_args.pcpp - Expr: casts, alias args
+
+  Break step of expr_casts: an alias cast with two arguments (SM0412).
+*******************************************************************************/
+
+module exe expr_casts_err_alias_args;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TSmall = int16;
+
+var
+  LN: int32;
+
+begin
+  LN := TSmall(1, 2); // ERROR SM0412@9: takes exactly one argument, given 2
+end.

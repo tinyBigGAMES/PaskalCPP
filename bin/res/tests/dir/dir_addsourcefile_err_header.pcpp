@@ -1,0 +1,45 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addsourcefile_err_header.pcpp - pcpp: a header error seen by two translation units
+
+  A cli test: pcpp runs itself with the args (in the suite's output root,
+  -o "$P:output" so the build lands there), on the fixture named; its
+  output and exit code are the check. Break step of dir_addsourcefile_header: the error is one report.
+*******************************************************************************/
+
+module exe dir_addsourcefile_err_header;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner <DIR>/fixtures/dir_cli_shared_error.pcpp -o $P:output"
+    exitcode 1
+    expect
+    | Compiling <DIR>/fixtures/dir_cli_shared_error.pcpp
+    | Target platform: x86_64-windows-gnu
+    | Optimize level: debug
+    | Subsystem: Console
+    | Saving build file...
+    | Building dir_cli_shared_error...
+    | Build failed with exit code 1.
+    | [ERROR] <DIR>/fixtures/dir_cli_shared_error.h(23,2) ZB0016: dir_cli_shared: one header error
+    |   <DIR>/fixtures/dir_cli_shared_error.cpp(22,10): Note: in file included from <DIR>/fixtures/dir_cli_shared_error.cpp:22:
+    | Failed.
+  @@end
+*/
+
+begin
+end.

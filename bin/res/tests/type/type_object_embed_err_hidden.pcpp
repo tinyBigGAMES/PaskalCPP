@@ -1,0 +1,43 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_embed_err_hidden.pcpp - Type: object embed, hidden
+
+  Break step of type_object_embed: a hidden member of the embedded type: it
+  stays hidden (SM0019).
+*******************************************************************************/
+
+module exe type_object_embed_err_hidden;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TCounter = object
+    hidden H: int32;
+  end;
+  TBox = object
+    embed C: TCounter;
+    method Put();
+    begin
+      self.H := 1; // ERROR SM0019@12: 'H' is hidden in 'TCounter'
+    end;
+  end;
+
+begin
+end.

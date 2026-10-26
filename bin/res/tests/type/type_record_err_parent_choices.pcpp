@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_err_parent_choices.pcpp - Type: record, parent choices
+
+  Break step of type_record: a choices type as a record's parent (SM0308).
+*******************************************************************************/
+
+module exe type_record_err_parent_choices;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TC = choices(cA, cB);
+  TR = record(TC) // ERROR SM0308@15: 'TC' cannot be the parent of a record
+    B: int32;
+  end;
+
+begin
+end.

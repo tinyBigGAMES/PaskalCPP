@@ -1,0 +1,64 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_target_linux.pcpp - Directive: @target, the Linux form
+
+  The rules are dir_target's. This file names Linux in three parts
+  (arch-os-env: LLVM's vendor for Linux is unknown) and imports the unit
+  fixtures\dir_target_linux_unit, which has no @target and builds for the
+  main module's target.
+*******************************************************************************/
+
+module exe dir_target_linux;
+
+/*
+  @@test
+    kind run
+    targets x86_64-linux-gnu
+    expect
+    | PaskalCPP builds for: x86_64-linux-gnu
+    | clang compiles for: __linux__
+    | in the unit: x86_64-linux-gnu
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@target "x86_64-linux-gnu";
+@addmodulepath "$P:res/tests/dir/fixtures";
+import dir_target_linux_unit;
+
+// The OS macro clang defines for the target it compiles for
+static const char* dir_target_linux_os()
+{
+  return ""
+#ifdef _WIN32
+  " _WIN32"
+#endif
+#ifdef __linux__
+  " __linux__"
+#endif
+  ;
+}
+
+begin
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  println("PaskalCPP builds for: x86_64-windows-gnu");
+@endif
+@ifdef TARGET_X86_64_LINUX_GNU
+  println("PaskalCPP builds for: x86_64-linux-gnu");
+@endif
+  println("clang compiles for:{}", cpp("dir_target_linux_os()"));
+  dir_target_linux_unit.ShowTarget();
+end.

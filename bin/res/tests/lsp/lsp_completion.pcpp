@@ -1,0 +1,125 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lsp_completion.pcpp - LSP compliance: completion (Ctrl+Space, '.', '->')
+
+  Typing a name, or '.' / '->' after one, opens a list of what can be
+  written there. PaskalCPP names come first; then intrinsics, then the names
+  the imported units export (bare when one unit exports the name; one entry
+  per unit, written unit.Name, when several do), builtin types and keywords.
+  C/C++ names are never listed (C++ is clang's).
+
+  How to check: put the cursor where a CHECK line says (on the code line
+  below it), press Ctrl+Space, and compare the TOP of the list (the
+  PaskalCPP names) with the text after "->". Matching is case-sensitive.
+  Needs lsp_unit.pcpp in the same folder.
+*******************************************************************************/
+
+module exe lsp_completion;
+
+/*
+  @@test
+    kind manual
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/lsp/fixtures";
+import lsp_unit;
+
+#include <cstdio>
+
+type
+  TBase = object
+    Z: int32;
+    hidden H: int32;
+  end;
+  TPoint = object(TBase)
+    X: int32;
+    Y: int32;
+    method Move(const ADX: int32);
+    begin
+      // CHECK: right after the first "self." -> X, Y, Move, then Z and H
+      //        (the parent's; H is hidden, reached here through self). A
+      //        name typed alone here lists no member: members are reached
+      //        through self
+      self.X := self.X + ADX;
+    end;
+  end;
+  TCol = choices(cRed, cGreen, cBlue);
+
+var
+  GPoint: TPoint;
+  GPtr: ptr to TPoint;
+  GCount: int32;
+  GColor: TCol;
+
+routine Sum(const AFrom: int32; const ATo: int32): int32;
+var
+  LTotal: int32;
+  LStep: int32;
+  GCount: int32;
+begin
+  LStep := 1;
+  GCount := 0;
+  // CHECK: after the L of the first LTotal -> LTotal, LStep (the locals)
+  LTotal := AFrom + ATo;
+  // CHECK: after the G of GCount -> GCount ONCE (the local hides the
+  //        global), GPoint, GPtr, GColor
+  GCount := GCount + LStep;
+  // CHECK: after the A of AFrom -> AFrom, ATo (the parameters)
+  return LTotal + AFrom;
+end;
+
+routine Reset();
+begin
+  GCount := 0;
+end;
+
+begin
+  // CHECK: right after "GPoint." -> X, Y, Move (inserted as Move(ADX)),
+  //        then Z (from the parent object TBase); not H (hidden: only the
+  //        methods of TBase and of its descendants reach it)
+  GPoint.X := 1;
+
+  GPtr := address of GPoint;
+  // CHECK: right after "GPtr->" -> X, Y, Move, Z (the object pointed to)
+  GPtr->Y := 2;
+  // CHECK: right after "GPtr^." -> X, Y, Move, Z (the same object, Pascal
+  //        form: ^ dereferences, . picks the member)
+  GPtr^.Y := 3;
+
+  // CHECK: right after "lsp_unit." -> Twice (only what the unit exports)
+  GCount := lsp_unit.Twice(GPoint.X);
+
+  // CHECK: after the Tw of Twice -> Twice: lsp_unit exports it and no other
+  //        imported unit does, so it is written bare; choosing it writes
+  //        Twice(AX)
+  GCount := Twice(GCount);
+
+  // CHECK: right after "TCol." -> cRed, cGreen, cBlue
+  GColor := TCol.cGreen;
+
+  // CHECK: after the Su of Sum -> Sum; choosing it writes Sum(AFrom, ATo)
+  //        with the cursor on AFrom (Tab moves to ATo)
+  GCount := Sum(1, 2);
+
+  // CHECK: after the Re of Reset -> Reset; choosing it writes Reset with
+  //        no argument placeholders (it has no parameters)
+  Reset();
+
+  // CHECK: inside the string, after "G" -> no list (not code)
+  puts("Gone");
+  // CHECK: after "pu" of puts above -> no puts (a C/C++ name)
+end.

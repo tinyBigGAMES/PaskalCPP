@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_scope_err_dup_param.pcpp - Decl: scope, dup param
+
+  Break step of decl_scope: two parameters with one name.
+*******************************************************************************/
+
+module exe decl_scope_err_dup_param;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine Sum(AN: int32; AN: int32): int32; // ERROR SM0004@24
+begin
+  return AN;
+end;
+
+begin
+  println("{}", Sum(1, 2));
+end.

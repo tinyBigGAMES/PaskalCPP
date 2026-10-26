@@ -1,0 +1,27 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_cli_exitcode.pcpp - Build-kind fixture: a program that ends with exit
+  code 3 (exe_cli_run_exitcode runs it).
+*******************************************************************************/
+
+module exe exe_cli_exitcode;
+
+#include <cstdlib>
+
+begin
+  println("exe_cli_exitcode ends with 3");
+  cpp("std::exit(3)");
+end.

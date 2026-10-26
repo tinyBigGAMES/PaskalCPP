@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_comments_err_unterminated.pcpp - Lexical: a block comment never closed
+
+  Break step of lex_comments: a block comment that reaches the end of the
+  file is LX0003, reported where it starts. The marker on that line sits
+  inside what the lexer could not close; the suite reads it there.
+*******************************************************************************/
+
+module exe lex_comments_err_unterminated;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  /* never closed // ERROR LX0003@3: Unterminated block comment
+end.

@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_choices_err_cpp_value.pcpp - Type: a value's number only C++ computes
+
+  Break step of type_choices: a value's number is a PaskalCPP constant; one
+  only C++ computes has none PaskalCPP can write (SM0202).
+*******************************************************************************/
+
+module exe type_choices_err_cpp_value;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TC = choices(cA = cpp("5"), cB); // ERROR SM0202@21: a choice value must be a constant
+
+begin
+end.

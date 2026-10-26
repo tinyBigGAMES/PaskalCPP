@@ -1,0 +1,67 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dbg_dll.pcpp - Debugger: a dll under its host
+
+  Debugging a dll: breakpoints in the dll stop while a host exe that loads it
+  runs. dbg_dll_host.pcpp is the host; it loads the dll from repo\bin\output
+  and calls DllAdd(2, 3).
+
+  How to check, from repo\bin:
+    First build the host once:
+            pcpp res\tests\dbg\dbg_dll_host.pcpp
+    REPL:   pcpp res\tests\dbg\dbg_dll.pcpp -d --host output\bin\dbg_dll_host.exe
+            then type each step's words
+    Editor: open res\tests\dbg\dbg_dll.pcpp, F5: it asks for the host exe,
+            pick output\bin\dbg_dll_host.exe
+  Each step: what to type, then "->" what both front-ends show.
+
+  Keys (REPL word = editor key):
+    c = F5 (continue)   n = F10 (over)   s = F11 (into)
+    finish = Shift+F11 (out)   q = Shift+F5 (stop)
+    b N = click the gutter left of line N
+    bt = the CALL STACK   f N = click CALL STACK row N (0 = top)
+    locals = the VARIABLES pane   p X = a WATCH row for X (hover is the same)
+    the program's output and keyboard = the console the REPL runs in /
+    the editor's TERMINAL tab
+
+  Steps:
+   1. (start)          -> REPL: held at entry (no breakpoint)
+      b 63           -> breakpoint in DllAdd (editor: before F5)
+   2. c                -> stops at 63 in DllAdd (breakpoint)
+      locals           -> Params: AA = 2, AB = 3;  Locals: LSum = 0
+   3. n                -> 64;  p LSum -> 5
+      bt               -> DllAdd at 64, then the host's frames
+   4. c                -> the host prints "host got 5", the program ends
+*******************************************************************************/
+
+module dll dbg_dll;
+
+/*
+  @@test
+    kind manual
+    targets x86_64-windows-gnu
+  @@end
+*/
+
+exported routine clink DllAdd(AA: int32; AB: int32): int32;
+var
+  LSum: int32;
+begin
+  LSum := AA + AB;
+  return LSum;
+end;
+
+end.

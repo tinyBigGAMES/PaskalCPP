@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_qual_err_shadowed.pcpp - Module: a local that hides the module name
+
+  Break step of mod_qual: inside R the local mod_qual_unit is an int32, so
+  mod_qual_unit.TPt no longer names the unit's type.
+*******************************************************************************/
+
+module exe mod_qual_err_shadowed;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_qual_unit;
+
+routine R();
+var
+  mod_qual_unit: int32 = 1;
+  LPt: mod_qual_unit.TPt; // ERROR SM0007@8
+begin
+end;
+
+begin
+end.

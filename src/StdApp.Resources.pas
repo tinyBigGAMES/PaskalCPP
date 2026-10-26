@@ -198,6 +198,12 @@ resourcestring
   RSZigBuildDiagFilePrepare = 'Cannot prepare the diagnostics file %s: %s';
   { RSZigBuildDiagFileIsDir }
   RSZigBuildDiagFileIsDir = 'a directory is in the way';
+  { RSZigBuildDiagCacheOpen }
+  RSZigBuildDiagCacheOpen = 'Cannot open the kept diagnostics in %s (files zig reuses from its cache may report nothing): %s';
+  { RSZigBuildDiagCacheUnit }
+  RSZigBuildDiagCacheUnit = 'Cannot keep or restore the diagnostics of %s (it may report nothing when zig reuses it from its cache): %s';
+  { RSZigBuildDiagCacheMissed }
+  RSZigBuildDiagCacheMissed = '%s was reused from zig''s cache with no kept diagnostics: its warnings are not shown';
   { RSZigBuildClearFailed }
   RSZigBuildClearFailed = 'Failed to clear %s: %s';
   { RSZigBuildClearStillPresent }
@@ -230,6 +236,10 @@ resourcestring
   RSZigBuildBadTarget = 'Unknown target "%s": a target is <arch>-<os>[-<abi>] in zig''s names, e.g. x86_64-windows-gnu';
   { RSZigBuildUnknownLine }
   RSZigBuildUnknownLine = 'Line %d of %s is not a line PaskalCPP writes; it is ignored: %s';
+  { RSZigBuildCompanionIncomplete }
+  RSZigBuildCompanionIncomplete = '%s declares a companion library without its name or its source file; the companion is ignored';
+  { RSZigBuildCompanionName }
+  RSZigBuildCompanionName = 'The program cannot be named "%s": the library built beside it has that name';
   { RSZigBuildConfigLoadFailed }
   RSZigBuildConfigLoadFailed = 'Cannot read %s (left unchanged; using the default toolchain path): %s';
   { RSZigBuildConfigSaveFailed }
@@ -371,6 +381,8 @@ resourcestring
 
   { RSAstDuplicateModule }
   RSAstDuplicateModule = 'Module "%s" is declared more than once';
+  { RSAstCaseTwinModule }
+  RSAstCaseTwinModule = 'Module "%s" differs only in case from module "%s" (%s): two modules cannot share a name';
 
   { RSAstNotBuiltinToken }
   RSAstNotBuiltinToken = 'Internal error: %s is not a builtin type token';
@@ -1451,10 +1463,6 @@ resourcestring
 
   { RSCmpInternalError }
   RSCmpInternalError = 'internal error: %s';
-  { RSCmpRemovedStaleRuntime }
-  RSCmpRemovedStaleRuntime = 'Removed %s: this lib no longer uses the runtime';
-  { RSCmpStaleRuntime }
-  RSCmpStaleRuntime = 'cannot remove the stale runtime library %s (this lib no longer uses the runtime): %s';
   { RSCmpLibraryUnreadable }
   RSCmpLibraryUnreadable = 'cannot read the library %s for the built-in data keys it holds: %s';
   { RSCmpExeIconFailed }
@@ -1590,6 +1598,9 @@ resourcestring
 
   { RSPcCliHelpProgress }
   RSPcCliHelpProgress = 'Draw the build progress in place even when output is piped (the editor passes this)';
+
+  { RSPcCliHelpNoBanner }
+  RSPcCliHelpNoBanner = 'Print no banner (version, copyright): for scripts and tests';
 
   { RSPcCliHelpEditor }
   RSPcCliHelpEditor = 'Start the PaskalCPP Editor with the files given';
@@ -1997,6 +2008,270 @@ resourcestring
   RSPcDevDistroUpdated = 'Version %s set in %s (was %s)';
   { RSPcDevDistroCurrent }
   RSPcDevDistroCurrent = 'Version %s already set in %s';
+
+  // TestSuite Messages (PaskalCPP.TestSuite, .Types, .Spec, .Case)
+  { RSTstMarkerText }
+  RSTstMarkerText = '%s(%d) %s %s';
+  { RSTstReportText }
+  RSTstReportText = '%s(%d,%d) %s %s';
+  { RSTstNoLine }
+  RSTstNoLine = '(no line)';
+  { RSTstLineDiffers }
+  RSTstLineDiffers = 'line %d differs:'#10'  want: %s'#10'  got:  %s';
+  { RSTstCheckOutsideRun }
+  RSTstCheckOutsideRun = 'Test class %s: a check outside a running test (%s)';
+  { RSTstPhaseRaised }
+  RSTstPhaseRaised = '%s raised %s: %s';
+  { RSTstPhaseSetupClass }
+  RSTstPhaseSetupClass = 'SetupClass';
+  { RSTstPhaseTeardownClass }
+  RSTstPhaseTeardownClass = 'TeardownClass';
+  { RSTstPhaseSetup }
+  RSTstPhaseSetup = 'Setup';
+  { RSTstPhaseTest }
+  RSTstPhaseTest = 'The test';
+  { RSTstPhaseTeardown }
+  RSTstPhaseTeardown = 'Teardown';
+  { RSTstNoChecks }
+  RSTstNoChecks = 'The test checked nothing and skipped nothing';
+  { RSTstNoFolder }
+  RSTstNoFolder = 'No folder is set for %s';
+  { RSTstPathFailed }
+  RSTstPathFailed = 'Path %s cannot be resolved: %s';
+  { RSTstPathOutside }
+  RSTstPathOutside = 'Path %s leaves %s or the repo';
+  { RSTstWantGot }
+  RSTstWantGot = '%s: want %s, got %s';
+  { RSTstWantGotText }
+  RSTstWantGotText = '%s: want "%s", got "%s"';
+  { RSTstWantGotNear }
+  RSTstWantGotNear = '%s: want %s (within %s), got %s';
+  { RSTstBadExpected }
+  RSTstBadExpected = '%s: malformed expected report [%s] (form: <line> <WORD> <CODE>[@<col>][: text])';
+  { RSTstUnexpectedReports }
+  RSTstUnexpectedReports = '  reports no marker expects:';
+  { RSTstMissingReports }
+  RSTstMissingReports = '  markers no report hits:';
+  { RSTstNotRaised }
+  RSTstNotRaised = '%s: %s was not raised';
+  { RSTstRaisedOther }
+  RSTstRaisedOther = '%s: want %s, raised %s';
+  { RSTstFileUnreadable }
+  RSTstFileUnreadable = 'Test file %s has no text to read: %s';
+  { RSTstMarkerInLineComment }
+  RSTstMarkerInLineComment = '%s belongs in a /* */ block comment, not in a // comment';
+  { RSTstSecondSpec }
+  RSTstSecondSpec = 'A file holds one test spec; the first starts at line %d';
+  { RSTstNoSpecEnd }
+  RSTstNoSpecEnd = 'The test spec has no %s before its comment ends';
+  { RSTstUnknownKey }
+  RSTstUnknownKey = 'Unknown test spec key "%s" (keys: %s)';
+  { RSTstDuplicateKey }
+  RSTstDuplicateKey = 'Test spec key "%s" is given twice';
+  { RSTstBadValue }
+  RSTstBadValue = 'Test spec key "%s" does not take "%s" (%s)';
+  { RSTstMissingValue }
+  RSTstMissingValue = 'Test spec key "%s" needs %s';
+  { RSTstBadEscape }
+  RSTstBadEscape = 'Quoted value: the only escapes are \" and \\';
+  { RSTstUnterminated }
+  RSTstUnterminated = 'Quoted value has no closing quote on its line';
+  { RSTstSpecInConditional }
+  RSTstSpecInConditional = 'A test spec cannot sit inside a conditional region';
+  { RSTstSpecInCppBlock }
+  RSTstSpecInCppBlock = 'A test spec cannot sit inside a cppstart block';
+  { RSTstNoKind }
+  RSTstNoKind = 'The test spec has no kind (one of: %s)';
+  { RSTstKeyNotForKind }
+  RSTstKeyNotForKind = 'Test spec key "%s" does not apply to kind %s';
+  { RSTstLineOutsideExpect }
+  RSTstLineOutsideExpect = 'An output line (| text) belongs under expect';
+  { RSTstExpectFileMissing }
+  RSTstExpectFileMissing = 'expectfile %s does not exist';
+  { RSTstStdinMissing }
+  RSTstStdinMissing = 'stdin %s does not exist';
+  { RSTstBadMarker }
+  RSTstBadMarker = 'Malformed report marker: %s (form: WORD CODE[@col][: text])';
+  { RSTstValueOneOf }
+  RSTstValueOneOf = 'one of: %s';
+  { RSTstValueList }
+  RSTstValueList = 'at least one value';
+  { RSTstValueTwice }
+  RSTstValueTwice = 'listed twice';
+  { RSTstValueDefine }
+  RSTstValueDefine = 'NAME or NAME=VALUE';
+  { RSTstValueLines }
+  RSTstValueLines = 'output lines (| text) under it';
+  { RSTstValuePath }
+  RSTstValuePath = 'a file path';
+  { RSTstValueQuoted }
+  RSTstValueQuoted = 'a quoted value';
+  { RSTstValueBareWord }
+  RSTstValueBareWord = 'a bare word, not a quoted value';
+  { RSTstValueInteger }
+  RSTstValueInteger = 'a whole number, 0 or more';
+  { RSTstRootMissing }
+  RSTstRootMissing = 'Test folder not found: %s';
+  { RSTstDuplicateStem }
+  RSTstDuplicateStem = 'Test name %s is taken: %s has it too';
+  { RSTstDuplicateId }
+  RSTstDuplicateId = 'Test id %s is given twice';
+  { RSTstMissingDep }
+  RSTstMissingDep = '%s depends on %s, which is no test';
+  { RSTstDepNotBuildable }
+  RSTstDepNotBuildable = '%s depends on %s, a test of kind %s: a dependency is kind dep or build';
+  { RSTstDepCycle }
+  RSTstDepCycle = 'Dependency cycle: %s';
+  { RSTstCellConflict }
+  RSTstCellConflict = '%s runs in %s, which its dependency %s does not build in';
+  { RSTstOrphanDep }
+  RSTstOrphanDep = '%s is kind dep, but no test depends on it';
+  { RSTstDepFailed }
+  RSTstDepFailed = 'dependency %s builds in %s';
+  { RSTstCellOverridden }
+  RSTstCellOverridden = 'the file sets its own %s (%s), not the cell''s (%s): list it in the spec';
+  { RSTstWrongModuleKind }
+  RSTstWrongModuleKind = 'a test of kind %s builds module kind %s, not %s';
+  { RSTstErrorNoMarker }
+  RSTstErrorNoMarker = 'an error test marks at least one ERROR or FATAL report';
+  { RSTstOnlyErrorKind }
+  RSTstOnlyErrorKind = 'only an error test expects ERROR or FATAL reports';
+  { RSTstReportsMarked }
+  RSTstReportsMarked = 'every report has its marker';
+  { RSTstMarkersReported }
+  RSTstMarkersReported = 'every marker is reported';
+  { RSTstBuildsAsMarked }
+  RSTstBuildsAsMarked = 'builds: %s, as its markers say';
+  { RSTstMarkersUnread }
+  RSTstMarkersUnread = 'the markers of %s cannot be read';
+  { RSTstNoWsl }
+  RSTstNoWsl = 'WSL is not available: a Linux program cannot run here';
+  { RSTstRuns }
+  RSTstRuns = 'runs';
+  { RSTstRunRaised }
+  RSTstRunRaised = 'runs (%s)';
+  { RSTstExitCode }
+  RSTstExitCode = 'exit code %d (got %d)';
+  { RSTstOutputAsExpected }
+  RSTstOutputAsExpected = 'output as expected';
+  { RSTstExpectFileUnread }
+  RSTstExpectFileUnread = 'expected output %s cannot be read: %s';
+  { RSTstStdinUnread }
+  RSTstStdinUnread = 'stdin %s cannot be opened: %s';
+  { RSTstNoResultsLine }
+  RSTstNoResultsLine = 'prints its Results: line';
+  { RSTstZeroTests }
+  RSTstZeroTests = 'runs at least one test (Results: %d total)';
+  { RSTstTestsFailed }
+  RSTstTestsFailed = 'every unit test passes (%d of %d failed)';
+  { RSTstTestsExit }
+  RSTstTestsExit = 'exit code is the failed count %d (got %d)';
+  { RSTstBuildOutput }
+  RSTstBuildOutput = 'build output (last lines):';
+  { RSTstStatusPass }
+  RSTstStatusPass = 'PASS';
+  { RSTstStatusFail }
+  RSTstStatusFail = 'FAIL';
+  { RSTstStatusSkip }
+  RSTstStatusSkip = 'SKIP';
+  { RSTstResultLine }
+  RSTstResultLine = '%s  %s  [%s]  (%d ms)';
+  { RSTstSkipReason }
+  RSTstSkipReason = '      skipped: %s';
+  { RSTstCheckOk }
+  RSTstCheckOk = 'ok';
+  { RSTstCheckFail }
+  RSTstCheckFail = 'FAIL';
+  { RSTstCheckLine }
+  RSTstCheckLine = '      %s %s';
+  { RSTstSummaryTitle }
+  RSTstSummaryTitle = 'Test suite summary';
+  { RSTstSummaryCell }
+  RSTstSummaryCell = '  %s: %d passed, %d failed, %d skipped';
+  { RSTstSummaryTotal }
+  RSTstSummaryTotal = 'Total: %d passed, %d failed, %d skipped (%d ms)';
+  { RSTstSummaryFailures }
+  RSTstSummaryFailures = 'Failed cells:';
+  { RSTstSummaryFailure }
+  RSTstSummaryFailure = '  %s [%s]';
+  { RSTstAllPassed }
+  RSTstAllPassed = 'ALL PASSED';
+  { RSTstSomeFailed }
+  RSTstSomeFailed = 'FAILED';
+  { RSTstBundleUnread }
+  RSTstBundleUnread = 'Fixture bundle %s cannot be read: %s';
+  { RSTstBundleRow }
+  RSTstBundleRow = 'Fixture bundle %s: line %d is no bundle row (path TAB t|b|d TAB data)';
+  { RSTstScratchUnwritten }
+  RSTstScratchUnwritten = 'Scratch file %s cannot be written: %s';
+  { RSTstSummaryStopped }
+  RSTstSummaryStopped = 'STOPPED after %d of %d cell(s)';
+  { RSTstStopNotice }
+  RSTstStopNotice = 'Stop pressed: the running test finishes, nothing more starts (press again to end it now)';
+  { RSTstForceNotice }
+  RSTstForceNotice = 'Stop pressed again: the running test''s processes were ended';
+  { RSTstStoppedReason }
+  RSTstStoppedReason = 'stopped: its processes were ended by a second stop press';
+  { RSTstStopFileFailed }
+  RSTstStopFileFailed = 'The stop file %s cannot be used: %s (Ctrl+Shift+Alt+X still stops the run)';
+  { RSTstNothingSelected }
+  RSTstNothingSelected = 'No test matches the selection';
+  { RSTstNoFailures }
+  RSTstNoFailures = 'The last run had no failed cells: nothing to run';
+  { RSTstDiscoveryFailed }
+  RSTstDiscoveryFailed = 'Test discovery found %d error(s): nothing was run';
+  { RSTstResultsWriteFailed }
+  RSTstResultsWriteFailed = 'Cannot write the results file %s: %s';
+  { RSTstNoResultsFile }
+  RSTstNoResultsFile = 'No results of a last run to take the failed cells from: %s';
+  { RSTstListLine }
+  RSTstListLine = '%s  %s  %d cell(s)';
+  { RSTstListDeps }
+  RSTstListDeps = '    deps: %s';
+  { RSTstListCell }
+  RSTstListCell = '    %s';
+  { RSTstListCount }
+  RSTstListCount = '%d test(s); %d file(s) without a spec';
+  { RSTstBadArg }
+  RSTstBadArg = 'Unknown argument: %s';
+  { RSTstArgNeedsValue }
+  RSTstArgNeedsValue = '%s needs a value';
+  { RSTstBadArgValue }
+  RSTstBadArgValue = '%s does not take %s (%s)';
+  { RSTstUnknownId }
+  RSTstUnknownId = '%s names no test';
+  { RSTstBadRange }
+  RSTstBadRange = '-from %s comes after -to %s in id order';
+  { RSTstHelpTitle }
+  RSTstHelpTitle = 'PaskalCPP test suite';
+  { RSTstHelpUsage }
+  RSTstHelpUsage = 'USAGE: testbed <selection> [options]';
+  { RSTstHelpAll }
+  RSTstHelpAll = '  -all                 every test';
+  { RSTstHelpIds }
+  RSTstHelpIds = '  <id> | <glob>        the tests whose id matches (mod.*, *.kinds)';
+  { RSTstHelpList }
+  RSTstHelpList = '  -list [glob]         list the tests, run nothing';
+  { RSTstHelpFromTo }
+  RSTstHelpFromTo = '  -from <id> -to <id>  the tests from one id to another, in id order';
+  { RSTstHelpTarget }
+  RSTstHelpTarget = '  -t <triple>          only cells for this target (repeatable)';
+  { RSTstHelpOpt }
+  RSTstHelpOpt = '  -opt <level>         only cells at this optimize level (repeatable)';
+  { RSTstHelpGui }
+  RSTstHelpGui = '  -gui | -console      only gui / console cells';
+  { RSTstHelpKind }
+  RSTstHelpKind = '  -kind <kind>         only tests of this kind (repeatable)';
+  { RSTstHelpFailed }
+  RSTstHelpFailed = '  -failed              the cells that failed in the last run';
+  { RSTstHelpVerbose }
+  RSTstHelpVerbose = '  -v                   every check, the passed ones too';
+  { RSTstHelpHelp }
+  RSTstHelpHelp = '  -h                   this help';
+  { RSTstHelpStop }
+  RSTstHelpStop = 'Stop a run: Ctrl+Shift+Alt+X (from any window) or make output\%s; the running test finishes and nothing more starts. Press again to end the running test now.';
+  { RSTstHelpExit }
+  RSTstHelpExit = 'Exit code: 0 = every selected cell passed, 1 = a failure, 2 = bad arguments, 3 = stopped';
 
 implementation
 

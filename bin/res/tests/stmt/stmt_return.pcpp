@@ -1,0 +1,76 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_return.pcpp - Statement: return
+
+  return [V]; (BNF.md sec 5): a function returns a value of its return type
+  and every path of its body ends in a return; a procedure returns none, and
+  return leaves it early, from inside loops and matches too.
+*******************************************************************************/
+
+module exe stmt_return;
+
+/*
+  @@test
+    kind run
+    expect
+    | value 42
+    | first even 4
+    | early yes
+    | arm two
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+routine Answer(): int32;
+begin
+  return 42;
+end;
+
+routine FirstEven(AFrom: int32): int32;
+var
+  LI: int32;
+begin
+  for LI := AFrom to 100 do
+    if LI mod 2 = 0 then
+      return LI;
+    end;
+  end;
+  return -1;
+end;
+
+routine Early(AQuit: bool);
+begin
+  if AQuit then
+    println("early yes");
+    return;
+  end;
+  println("never");
+end;
+
+routine Arm(AN: int32): string;
+begin
+  match AN of
+    2: return "two";
+  end;
+  return "other";
+end;
+
+begin
+  println("value {}", Answer());
+  println("first even {}", FirstEven(3));
+  Early(true);
+  println("arm {}", Arm(2));
+end.

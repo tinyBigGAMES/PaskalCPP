@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_splices_err_escape.pcpp - Lexical: an escape that takes a spliced quote
+
+  Break step of lex_splices: splices go before escapes, so of the two
+  backslashes ending the string's first line the second is the splice and
+  the first escapes the quote on the next line: the string never closes,
+  LX0001, where it starts. The marked line ends in the splice, so its
+  marker is a block-comment marker.
+*******************************************************************************/
+
+module exe lex_splices_err_escape;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  println(/* // ERROR LX0001@39 // */ "a\\
+");
+end.

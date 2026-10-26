@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_pointer_err_integer.pcpp - Type: 0 into a pointer
+
+  Break step of type_pointer: 0 is no pointer, the null pointer is nil
+  (SM0200).
+*******************************************************************************/
+
+module exe type_pointer_err_integer;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LP: ptr to int32;
+
+begin
+  LP := 0; // ERROR SM0200@9: 'int32' does not convert implicitly to 'ptr to int32'
+end.

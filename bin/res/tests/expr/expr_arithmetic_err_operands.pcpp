@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_arithmetic_err_operands.pcpp - Expr: arithmetic, operands
+
+  Break step of expr_arithmetic: a string times an int32 (SM0250).
+*******************************************************************************/
+
+module exe expr_arithmetic_err_operands;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LS: string;
+
+begin
+  LS := "a";
+  LS := LS * 2; // ERROR SM0250@9: operator '*' does not take
+end.

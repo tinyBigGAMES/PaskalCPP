@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_cli_shared_level.pcpp - Directive fixture: a program whose
+  emitted C++ and @addsourcefile file both include dir_cli_shared_level.h.
+*******************************************************************************/
+
+module exe dir_cli_shared_level;
+@addincludepath "$P:res/tests/dir/fixtures";
+@addsourcefile "$P:res/tests/dir/fixtures/dir_cli_shared_level_c.c";
+@addsourcefile "$P:res/tests/dir/fixtures/dir_cli_shared_level.cpp";
+
+#include "dir_cli_shared_level.h"
+
+routine clink dir_cli_shared_b(): int32; external;
+
+begin
+  println("{}", dir_cli_shared_b());
+end.

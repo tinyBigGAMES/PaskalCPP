@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_choices_err_no_value.pcpp - Type: a value its type does not have
+
+  Break step of type_choices: the type has no value of that name (SM0010).
+*******************************************************************************/
+
+module exe type_choices_err_no_value;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TColor = choices(cRed, cGreen, cBlue);
+
+var
+  LC: TColor;
+
+begin
+  LC := TColor.cPink; // ERROR SM0010@9: choices 'TColor' has no value 'cPink'
+end.

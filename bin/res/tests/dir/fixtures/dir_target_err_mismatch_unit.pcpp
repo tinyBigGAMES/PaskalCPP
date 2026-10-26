@@ -1,0 +1,24 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_target_err_mismatch_unit.pcpp - Directive fixture: the unit
+  dir_target_err_mismatch imports; it names Linux while the main module
+  names Windows.
+*******************************************************************************/
+
+module unit dir_target_err_mismatch_unit;
+@target "x86_64-linux-gnu"; // ERROR CD0012@9: differs from the main module target
+
+end.

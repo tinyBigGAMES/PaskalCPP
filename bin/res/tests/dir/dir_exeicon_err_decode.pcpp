@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_exeicon_err_decode.pcpp - Directive: an icon file that holds no image
+
+  Break step of dir_exeicon and dir_exeicon_linux: the file exists (this very
+  file) but holds no image. The compiler decodes the icon before the build
+  on every target (on Linux to build it in, on Windows before the exe is
+  stamped), so the mistake is the same report at the same place on both, and
+  nothing is built (the report names the file and the decoder's reason).
+*******************************************************************************/
+
+module exe dir_exeicon_err_decode;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@exeicon "$P:res/tests/dir/dir_exeicon_err_decode.pcpp"; // ERROR CMP0008@10: cannot build the icon
+
+begin
+end.

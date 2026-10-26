@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_overlay_err_string.pcpp - Type: overlay, string
+
+  Break step of type_overlay: an overlay is plain data: a field holds no
+  string (it owns its text; SM0313).
+*******************************************************************************/
+
+module exe type_overlay_err_string;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TV = overlay
+    A: int32;
+    S: string; // ERROR SM0313@5: cannot share an overlay's storage
+  end;
+
+begin
+end.

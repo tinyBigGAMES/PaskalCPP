@@ -1,0 +1,43 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  test_mode_off.pcpp - Unit testing compliance: @unitTestMode off
+
+  With @unitTestMode off, or without the directive, test blocks are checked
+  but not compiled in: the body runs and no test does (this one would fail).
+  The break step test_asserts_err_type shows a test is still checked.
+*******************************************************************************/
+
+module exe test_mode_off;
+
+/*
+  @@test
+    kind run
+    expect
+    | the body runs
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@unitTestMode off;
+
+begin
+  println("the body runs");
+end.
+
+test "would fail"
+begin
+  testFail("never runs");
+end;

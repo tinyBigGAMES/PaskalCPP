@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_operator_err_anonymous.pcpp - Type: object operator, anonymous
+
+  Break step of type_object_operator: a record holding an operator written as
+  a variable's type, not in a type block: reported once, nothing inside it is
+  judged (PR0026).
+*******************************************************************************/
+
+module exe type_object_operator_err_anonymous;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  GV: record // ERROR PR0026
+    X: int32;
+    operator +(const A: int32; const B: int32): int32;
+    begin
+      return A + B;
+    end;
+  end;
+
+begin
+end.

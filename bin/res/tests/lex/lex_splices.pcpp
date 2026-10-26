@@ -1,0 +1,111 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_splices.pcpp - Lexical: line splices
+
+  A backslash right before a newline is a line splice (BNF.md sec 9): it is
+  removed before tokens are read, so it joins an identifier (LVa + lue is
+  LValue), a number (12 + 34 is 1234), a string, and a // comment with the
+  next line (the println on that next line is part of the comment). Newlines
+  themselves (CR LF, a lone CR) are lex_newlines.
+
+  It joins everything else too: two splices in a row; a keyword (con +
+  st); an operator (< + < is <<); the openers of a // and a block comment;
+  a string's u8 prefix and a raw string's R prefix (the raw body keeps its
+  splice as text: a raw string is never spliced inside); a directive's
+  name (@if + def); cppend (cpp + end closes the block); a line holding
+  only a splice before a # line (the # is still first on its logical
+  line); a # line's own text (#def + ine). Splices go before escapes, so a
+  backslash before a splice escapes what comes after the splice ("a\\"
+  with the splice between its two backslashes). The file's last line ends
+  in a splice: one before the final newline is fine.
+*******************************************************************************/
+
+module exe lex_splices;
+
+/*
+  @@test
+    kind run
+    expect
+    | 7
+    | 1234
+    | abcd
+    | after the comment
+    | two 7
+    | keyword 3
+    | shift 8
+    | u8 2
+    | a\
+    | b
+    | escaped a\
+    | before 3
+    | inside 4
+    | cppend 5
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+con\
+st
+  LK: int32 = 3;
+
+var
+  LValue: int32 = 7;
+
+\
+#define LX_BEFORE 3
+#def\
+ine LX_INSIDE 4
+
+cppstart source
+int GSpliced = 5;
+cpp\
+end;
+
+begin
+  println("{}", LVa\
+lue);
+  println("{}", 12\
+34);
+  println("ab\
+cd");
+  // a comment that goes on \
+  println("swallowed by the comment");
+  println("after the comment");
+  println("two {}", LV\
+\
+alue);
+  println("keyword {}", LK);
+  println("shift {}", 1 <\
+< 3);
+  /\
+/ a line comment opened across a splice
+  /\
+* a block comment opened across a splice */
+  println("u8 {}", len(u\
+8"ab"));
+  println("{}", R\
+"(a\
+b)");
+  println("escaped {}", "a\\
+\");
+@if\
+def LX_NOT_DEFINED
+  println("never printed");
+@endif
+  println("before {}", LX_BEFORE);
+  println("inside {}", LX_INSIDE);
+  println("cppend {}", GSpliced);
+end.\

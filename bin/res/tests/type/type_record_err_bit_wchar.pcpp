@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_err_bit_wchar.pcpp - Type: record, bit wchar
+
+  Break step of type_record: wchar : 17: a wchar bitfield is 1 .. 16 on every
+  target (SM0315).
+*******************************************************************************/
+
+module exe type_record_err_bit_wchar;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TR = record
+    B: wchar : 17; // ERROR SM0315@16: bitfield width 17 outside 1..16
+  end;
+
+begin
+end.

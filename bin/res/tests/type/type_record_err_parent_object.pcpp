@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_err_parent_object.pcpp - Type: record, parent object
+
+  Break step of type_record: an object as a record's parent (SM0308).
+*******************************************************************************/
+
+module exe type_record_err_parent_object;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TO = object
+    A: int32;
+  end;
+  TR = record(TO) // ERROR SM0308@15: 'TO' cannot be the parent of a record
+    B: int32;
+  end;
+
+begin
+end.

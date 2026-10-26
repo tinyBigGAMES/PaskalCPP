@@ -1,0 +1,32 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_subsystem_err_dll.pcpp - Directive: @subsystem gui on a dll
+
+  Break step of dir_subsystem: gui on a module that is not an exe is a
+  warning (the setting is not used, the build goes on), on both targets.
+*******************************************************************************/
+
+module dll dir_subsystem_err_dll;
+
+/*
+  @@test
+    kind build
+  @@end
+*/
+
+@subsystem gui; // WARN SM0103@1: a module that is not an exe
+
+end.

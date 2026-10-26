@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_cppdefine_err_lines.pcpp - Directive: an @cppdefine value of more than one line
+
+  Break step of dir_cppdefine: a macro value is one line (a line break in it
+  would end the -D argument's macro early).
+*******************************************************************************/
+
+module exe dir_cppdefine_err_lines;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@cppdefine "DIR_CPPDEF_TWO" "a\nb"; // ERROR SM0117@29
+
+begin
+end.

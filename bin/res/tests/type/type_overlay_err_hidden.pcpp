@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_overlay_err_hidden.pcpp - Type: overlay, hidden
+
+  Break step of type_overlay: an overlay is plain data: no hidden members
+  (PR0034).
+*******************************************************************************/
+
+module exe type_overlay_err_hidden;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TV = overlay
+    hidden A: int32; // ERROR PR0034@5: 'hidden' is not allowed in an overlay
+    B: float32;
+  end;
+
+begin
+end.

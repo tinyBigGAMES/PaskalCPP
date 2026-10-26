@@ -1,0 +1,59 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  cpp_block.pcpp - C++ integration compliance: cppstart ... cppend
+
+  A cppstart block (BNF.md sec 10) is C++ PaskalCPP does not parse, copied
+  as written: macro-driven code at module level (header or source), C++
+  statements in a body (source only, in place). A cppend inside a C++
+  string or comment does not end the block.
+*******************************************************************************/
+
+module exe cpp_block;
+
+/*
+  @@test
+    kind run
+    expect
+    | made 5
+    | counted 10
+    | text cppend stays
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+cppstart header
+#define MAKE_GETTER(N, V) inline int Get##N() { return V; }
+cppend;
+
+cppstart source
+MAKE_GETTER(Five, 5)
+cppend;
+
+var
+  LSum: int32;
+
+begin
+  println("made {}", GetFive());
+  LSum := 0;
+  cppstart source
+  for (int LI = 1; LI <= 4; ++LI) { LSum += LI; } // cppend in a comment
+  cppend;
+  println("counted {}", LSum);
+  cppstart source
+  const char* LText = "cppend stays";
+  cppend;
+  println("text {}", cpp("LText"));
+end.

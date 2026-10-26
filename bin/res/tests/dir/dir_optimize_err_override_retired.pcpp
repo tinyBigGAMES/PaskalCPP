@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_optimize_err_override_retired.pcpp - pcpp: a retired -opt level
+
+  A cli test: pcpp runs itself with the args (in the suite's output root,
+  -o "$P:output" so the build lands there), on the fixture named; its
+  output and exit code are the check. Break step of dir_optimize_override: a retired spelling is an error
+  naming the new one (as @optimize, dir_optimize_err_retired).
+*******************************************************************************/
+
+module exe dir_optimize_err_override_retired;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner <DIR>/fixtures/dir_cli_retired.pcpp -opt release_fast -o $P:output"
+    exitcode 1
+    expect
+    | Compiling <DIR>/fixtures/dir_cli_retired.pcpp
+    | [ERROR] CMP0001: 'release_fast' is no longer a value of option optimize: write 'fast'
+    | Failed.
+  @@end
+*/
+
+begin
+end.

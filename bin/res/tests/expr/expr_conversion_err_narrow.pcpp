@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_conversion_err_narrow.pcpp - Expr: conversion, narrow
+
+  Break step of expr_conversion: an int32 variable into an int8 (SM0200).
+*******************************************************************************/
+
+module exe expr_conversion_err_narrow;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LI8: int8;
+  LBig: int32;
+
+begin
+  LBig := 1000;
+  LI8 := LBig; // ERROR SM0200@10: does not convert implicitly to 'int8'
+end.

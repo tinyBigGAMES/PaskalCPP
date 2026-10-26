@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_cli_errors.pcpp - Build-kind compliance: an unknown option
+
+  An option pcpp does not know is a usage error: exit 2, and the hint to run
+  pcpp -h. This file itself is never compiled.
+*******************************************************************************/
+
+module exe exe_cli_errors;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner --bogus"
+    exitcode 2
+    expect
+    | Error: Unknown flag: --bogus
+    | 
+    | Run pcpp -h to see available options
+  @@end
+*/
+
+begin
+end.

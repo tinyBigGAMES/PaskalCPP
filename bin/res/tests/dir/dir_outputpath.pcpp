@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_outputpath.pcpp - Directive: @outputpath
+
+  @outputpath "<path>"; sets the folder the build writes to (the generated
+  C++, zig's folders, the program), in the main module only (BNF.md sec 2).
+  It resolves once, as every path directive ($P: = the folder pcpp.exe is
+  in), so the CLI and the editor build in the same place. pcpp -o wins over
+  it; without either the folder is output. This file names output itself
+  ($P:output): every build writes there, never into a subfolder of it.
+*******************************************************************************/
+
+module exe dir_outputpath;
+
+/*
+  @@test
+    kind run
+    expect
+    | built where the source says
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@outputpath "$P:output";
+
+begin
+  println("built where the source says");
+end.

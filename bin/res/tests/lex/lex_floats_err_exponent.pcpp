@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_floats_err_exponent.pcpp - Lexical: an exponent with no digits
+
+  Break step of lex_floats: an e with no digits after it leaves no valid
+  number, LX0005 (the message shows the literal as written).
+*******************************************************************************/
+
+module exe lex_floats_err_exponent;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LF: float64;
+
+begin
+  LF := 0.0;
+  LF := 1.5e; // ERROR LX0005@9: Malformed numeric literal: 1.5e
+end.

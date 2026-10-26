@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_cpp_err_new_primitive.pcpp - Expr: cpp, new primitive
+
+  Break step of expr_cpp: new of a PaskalCPP type (PR0027).
+*******************************************************************************/
+
+module exe expr_cpp_err_new_primitive;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LP: int*;
+
+begin
+  LP := new int32(5); // ERROR PR0027@13: new takes a C++ type name
+end.

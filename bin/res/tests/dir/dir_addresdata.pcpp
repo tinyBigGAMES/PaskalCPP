@@ -1,0 +1,44 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addresdata.pcpp - Directive: @addresdata
+
+  @addresdata "<key>" "<path>"; builds the file at <path> into the program
+  under <key>, the same on every target (BNF.md sec 2). Any module may give
+  it, as many times as it needs. The key is text, read as written; the path
+  resolves once, as every path directive ($P: = the folder pcpp.exe is in).
+  fixtures\dir_addresdata_hello.txt is the data it adds, under five keys.
+  Keys are exact case: "Hello" is not "hello", and "PCPP/x" is not the
+  compiler's pcpp/ prefix. A key holding '"' and '\' is written into the
+  generated C++ escaped (the build compiles it). Reading the entries back is
+  the std area's (std ResData).
+*******************************************************************************/
+
+module exe dir_addresdata;
+
+/*
+  @@test
+    kind build
+  @@end
+*/
+
+@addresdata "hello" "$P:res/tests/dir/fixtures/dir_addresdata_hello.txt";
+@addresdata "texts/hello again" "$P:res/tests/dir/fixtures/dir_addresdata_hello.txt";
+@addresdata "Hello" "$P:res/tests/dir/fixtures/dir_addresdata_hello.txt";
+@addresdata "PCPP/x" "$P:res/tests/dir/fixtures/dir_addresdata_hello.txt";
+@addresdata "q\"b\\s" "$P:res/tests/dir/fixtures/dir_addresdata_hello.txt";
+
+begin
+end.

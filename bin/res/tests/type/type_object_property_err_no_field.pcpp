@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property_err_no_field.pcpp - Type: object property, no field
+
+  Break step of type_object_property: a binding names a field of the object
+  (SM0371).
+*******************************************************************************/
+
+module exe type_object_property_err_no_field;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBox = object
+    FN: int32;
+    property N: int32 read FM; // ERROR SM0371@28: which is no field of 'TBox'
+  end;
+
+begin
+end.

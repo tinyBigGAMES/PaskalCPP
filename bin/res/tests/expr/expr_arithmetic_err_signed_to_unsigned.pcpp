@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_arithmetic_err_signed_to_unsigned.pcpp - Expression: a negative constant mixed with an unsigned operand
+
+  Break step of expr_arithmetic: the signed constant would convert to the
+  unsigned type (its value changes); write the cast that says so.
+*******************************************************************************/
+
+module exe expr_arithmetic_err_signed_to_unsigned;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+const
+  KNeg: int32 = -2;
+
+var
+  GU: uint32 = 5;
+  GR: uint32;
+
+begin
+  GR := GU * KNeg; // ERROR SM0251@14
+end.

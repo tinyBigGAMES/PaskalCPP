@@ -1,0 +1,63 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_subsystem_linux.pcpp - Directive: @subsystem (Linux)
+
+  @subsystem console | gui; sets a Windows exe's subsystem, exact case
+  (BNF.md sec 2; the default is console). gui applies only to an exe on a
+  Windows target: elsewhere it is a warning and is not used. The program reads
+  the subsystem field of its own PE header. A Linux executable is not a PE
+  file and has no subsystem, so each target has its own file: this one is Linux, dir_subsystem is Windows. The gui
+  subsystem is dir_subsystem_gui.
+*******************************************************************************/
+
+module exe dir_subsystem_linux;
+
+/*
+  @@test
+    kind run
+    targets x86_64-linux-gnu
+    expect
+    | subsystem: none (not a PE file)
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@subsystem console;
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+// The subsystem field of this program's own PE header
+static const char* dir_subsystem_name()
+{
+#ifdef _WIN32
+  const unsigned char* LBase = reinterpret_cast<const unsigned char*>(GetModuleHandleW(nullptr));
+  const IMAGE_DOS_HEADER* LDos = reinterpret_cast<const IMAGE_DOS_HEADER*>(LBase);
+  const IMAGE_NT_HEADERS* LNt = reinterpret_cast<const IMAGE_NT_HEADERS*>(LBase + LDos->e_lfanew);
+  if (LNt->OptionalHeader.Subsystem == IMAGE_SUBSYSTEM_WINDOWS_CUI)
+    return "console";
+  if (LNt->OptionalHeader.Subsystem == IMAGE_SUBSYSTEM_WINDOWS_GUI)
+    return "gui";
+  return "other";
+#else
+  return "none (not a PE file)";
+#endif
+}
+
+begin
+  println("subsystem: {}", cpp("dir_subsystem_name()"));
+end.

@@ -1,0 +1,42 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_linklibrary_err_unreadable.pcpp - Directive: a linked library that cannot be read
+
+  Break step of dir_linklibrary: fixtures\dir_linklibrary_bad.lib (Windows)
+  and fixtures\libdir_linklibrary_bad.a (Linux) are text, not archives. A
+  data key this build does not add (SM0122) makes the compiler read the
+  static libraries it links for theirs: a file that is no archive holds no
+  keys, so no warning comes from that read (CMP0007 is a file that cannot be
+  opened). The linker then rejects the file: its error names the file and is
+  reported at the @linklibrary that names it.
+*******************************************************************************/
+
+module exe dir_linklibrary_err_unreadable;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addlibrarypath "$P:res/tests/dir/fixtures";
+@linklibrary "dir_linklibrary_bad"; // ERROR ZB0016@14
+
+import ResData;
+
+begin
+  println("{}", HasResData("dir_linklibrary_none")); // WARN SM0122
+end.

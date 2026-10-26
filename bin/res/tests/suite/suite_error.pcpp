@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  suite_error.pcpp - Test suite: an error test
+
+  kind error: the module is compiled in every cell and must report exactly
+  the mistakes its markers name, nothing more. A marker is a line comment
+  `// ERROR <code>@<column>: <text>` on the line the report points at: the
+  code and the column must match, the text is the start of the message.
+  With an ERROR marker the module must not build. Here: one name declared
+  twice in one scope.
+*******************************************************************************/
+
+module exe suite_error;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  GCount: int32;
+  GCount: int32; // ERROR SM0004@3: is already declared in this scope
+
+begin
+end.

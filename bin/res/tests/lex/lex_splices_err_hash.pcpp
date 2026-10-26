@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_splices_err_hash.pcpp - Lexical: a # right after a splice
+
+  Break step of lex_splices: a splice joins its line with the next, so a #
+  first on the next physical line is not first on its logical line: it
+  follows LN := 1; and is LX0008 (clang reads it the same way).
+*******************************************************************************/
+
+module exe lex_splices_err_hash;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int32;
+
+begin
+  LN := 1; \
+# // ERROR LX0008@1
+end.

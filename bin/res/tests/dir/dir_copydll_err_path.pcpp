@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_copydll_err_path.pcpp - Directive: a @copydll path no file can have
+
+  Break step of dir_copydll: a '<' in it, so it cannot even be resolved and
+  is not looked for.
+*******************************************************************************/
+
+module exe dir_copydll_err_path;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@copydll "lib<1.dll"; // ERROR PR0022@10: cannot be resolved
+
+begin
+end.

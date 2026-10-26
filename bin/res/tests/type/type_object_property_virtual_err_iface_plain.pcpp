@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_property_virtual_err_iface_plain.pcpp - Type: object property virtual, iface plain
+
+  Break step of type_object_property_virtual: an interface property is
+  implemented virtual (SM0365).
+*******************************************************************************/
+
+module exe type_object_property_virtual_err_iface_plain;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  IA = interface
+    property A: int32 read; write;
+  end;
+  TBox = object implements IA // ERROR SM0365@28: write 'virtual property A'
+    FA: int32;
+    property A: int32 read FA; write FA;
+  end;
+
+begin
+end.

@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_pointer_err_qualified_star.pcpp - Type: M.T* as a pointer type
+
+  Break step of type_pointer: a qualified name takes no C++ '*', write ptr to
+  M.T (PR0028).
+*******************************************************************************/
+
+module exe type_pointer_err_qualified_star;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/type/fixtures";
+
+import type_alias_unit;
+
+var
+  LP: type_alias_unit.TKind*; // ERROR PR0028@28: 'type_alias_unit.TKind' is a qualified PaskalCPP name and takes no C++ '*'; write ptr to type_alias_unit.TKind
+
+begin
+end.

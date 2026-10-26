@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_routine_err_procedure_value.pcpp - Type: a procedure value's call used as a value
+
+  Break step of type_routine: a routine value whose type has no return
+  type gives no value (SM0406).
+*******************************************************************************/
+
+module exe type_routine_err_procedure_value;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LP: routine(AN: int32);
+  LN: int32;
+
+begin
+  LP := nil;
+  LN := LP(1); // ERROR SM0406@9: calls a procedure
+end.

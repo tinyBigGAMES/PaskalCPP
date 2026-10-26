@@ -1,0 +1,44 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  cpp_placement.pcpp - C++ integration compliance: cpp header; and cpp source;
+
+  Plain mixed C++ at module level goes to the source file unless
+  `cpp header;` sends what follows to the header; `cpp source;` switches
+  back (BNF.md sec 10). Both stand at module level only.
+*******************************************************************************/
+
+module exe cpp_placement;
+
+/*
+  @@test
+    kind run
+    expect
+    | header 8
+    | source 9
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+cpp header;
+inline int Quadruple(int AValue) { return AValue * 4; }
+
+cpp source;
+int Triple(int AValue) { return AValue * 3; }
+
+begin
+  println("header {}", Quadruple(2));
+  println("source {}", Triple(3));
+end.

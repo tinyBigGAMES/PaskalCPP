@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_cli_errors_source.pcpp - Build-kind compliance: a source file that does
+  not exist
+
+  A source file that does not exist: exit 2, its full path named. This file
+  itself is never compiled.
+*******************************************************************************/
+
+module exe exe_cli_errors_source;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner <DIR>/fixtures/exe_cli_missing.pcpp"
+    exitcode 2
+    expect
+    | Error: Source file not found: <DIR>/fixtures/exe_cli_missing.pcpp
+  @@end
+*/
+
+begin
+end.

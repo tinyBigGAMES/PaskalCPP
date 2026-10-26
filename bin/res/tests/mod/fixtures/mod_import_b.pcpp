@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_import_b.pcpp - Module fixture: a unit mod_import imports
+
+  It imports mod_import_a itself, so mod_import reaches mod_import_a twice
+  (one unit), and mod_import_err_transitive tries to use mod_import_a
+  through it.
+*******************************************************************************/
+
+module unit mod_import_b;
+import mod_import_a;
+
+exported routine Triple(const AX: int32): int32;
+var
+  LPair: mod_import_a.TPair;
+begin
+  LPair.First := AX;
+  LPair.Second := AX * 2;
+  return mod_import_a.Sum(LPair);
+end;
+
+end.

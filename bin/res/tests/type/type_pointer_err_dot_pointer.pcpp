@@ -1,0 +1,41 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_pointer_err_dot_pointer.pcpp - Type: . on a pointer
+
+  Break step of type_pointer: . on a pointer reaches no field, write LP^.X
+  or LP->X (SM0250).
+*******************************************************************************/
+
+module exe type_pointer_err_dot_pointer;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TPoint = record
+    X: int32;
+  end;
+
+var
+  LP: ptr to TPoint;
+  LX: int32;
+
+begin
+  LX := LP.X; // ERROR SM0250@9: operator '.' does not take 'ptr to TPoint'
+end.

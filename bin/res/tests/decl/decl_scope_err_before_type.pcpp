@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_scope_err_before_type.pcpp - Decl: scope, before type
+
+  Break step of decl_scope: a type used before its declaration.
+*******************************************************************************/
+
+module exe decl_scope_err_before_type;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TFirst = TSecond; // ERROR SM0002@12
+  TSecond = int32;
+
+var
+  GV: TFirst = 1;
+
+begin
+  println("{}", GV);
+end.

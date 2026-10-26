@@ -1,0 +1,54 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_reserved.pcpp - Declaration: reserved names
+
+  Names starting with pcpp_ belong to the compiler (the C++ it writes uses
+  them), so no PaskalCPP declaration may take one: module, const, type,
+  field, choice value, variable, routine, parameter, local (the break
+  steps decl_reserved_err_*). The rule is case-sensitive, as C++ names are:
+  Pcpp_G is free. A name in mixed C++ (struct pcpp_cthing) is C++'s and
+  clang's to judge.
+*******************************************************************************/
+
+module exe decl_reserved;
+
+/*
+  @@test
+    kind run
+    expect
+    | 1 2 3
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+struct pcpp_cthing { int v; };
+
+type
+  TOk = record
+    Pcpp_Field: int32;
+  end;
+
+var
+  Pcpp_G: int32;
+  LC: pcpp_cthing;
+  LR: TOk;
+
+begin
+  Pcpp_G := 1;
+  LC.v := 2;
+  LR.Pcpp_Field := 3;
+  println("{} {} {}", Pcpp_G, LC.v, LR.Pcpp_Field);
+end.

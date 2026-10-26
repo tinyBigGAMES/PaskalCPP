@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_build_errors.pcpp - Build kind: a link error mapped back
+
+  An external routine no library defines fails at the link (ZB0016, the
+  linker's own words), reported at the .pcpp line that calls it (the
+  linker's referenced-by note, mapped like clang's locations). Debug only:
+  the linker reads that line from the objects' debug info, which the other
+  levels strip.
+*******************************************************************************/
+
+module exe exe_build_errors;
+
+/*
+  @@test
+    kind error
+    opt debug
+  @@end
+*/
+
+routine clink exe_missing_symbol(): int32; external;
+
+begin
+  println("{}", exe_missing_symbol()); // ERROR ZB0016: exe_missing_symbol
+end.

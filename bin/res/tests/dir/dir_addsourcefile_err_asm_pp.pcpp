@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addsourcefile_err_asm_pp.pcpp - Directive: an @addsourcefile assembly file with a preprocessor error
+
+  Break step of dir_addsourcefile_asm: a .S is preprocessed first; its #error
+  is reported at the .S file's own line (its marked line).
+*******************************************************************************/
+
+module exe dir_addsourcefile_err_asm_pp;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addsourcefile "$P:res/tests/dir/fixtures/dir_addsourcefile_err_asm_pp.S";
+
+begin
+end.

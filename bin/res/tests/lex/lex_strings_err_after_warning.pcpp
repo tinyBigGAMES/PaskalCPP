@@ -1,0 +1,31 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_strings_err_after_warning.pcpp - Lexer: a string escape mistake
+
+  Break step of lex_strings_escapes: an error after an unknown escape: the error stops it.
+*******************************************************************************/
+
+module exe lex_strings_err_after_warning;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  println("{}", "\q\x100"); // ERROR PR0009@17
+end.

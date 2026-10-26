@@ -1,0 +1,48 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_object_init_err_ambiguous.pcpp - Type: object init, ambiguous
+
+  Break step of type_object_init: arguments two inits take alike: neither has
+  their exact types (SM0352).
+*******************************************************************************/
+
+module exe type_object_init_err_ambiguous;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TA = object
+    K: int64;
+    init(const AX: int64);
+    begin
+      self.K := AX;
+    end;
+    init(const AY: int32);
+    begin
+      self.K := AY;
+    end;
+  end;
+
+var
+  GS: int16 = 1;
+  GA: TA(GS); // ERROR SM0352@9: fit more than one init of 'TA'
+
+begin
+end.

@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_const_err_call.pcpp - Decl: const, call
+
+  Break step of decl_const: a const whose value is a routine call.
+*******************************************************************************/
+
+module exe decl_const_err_call;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+routine Three(): int32;
+begin
+  return 3;
+end;
+
+const
+  CBad: int32 = Three(); // ERROR SM0202@17
+
+begin
+  println("{}", CBad);
+end.

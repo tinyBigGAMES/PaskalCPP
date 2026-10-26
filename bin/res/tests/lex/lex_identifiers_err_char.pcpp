@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_identifiers_err_char.pcpp - Lexical: a character no token starts with
+
+  Break step of lex_identifiers: a backquote starts no PaskalCPP or C++
+  token, LX0004. (A byte that is not UTF-8 is LX0011; a test file must be
+  UTF-8 to be scanned, so that one is the lex area's code test
+  lex.utf8_invalid.)
+*******************************************************************************/
+
+module exe lex_identifiers_err_char;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  ` // ERROR LX0004@3: Invalid character in source
+end.

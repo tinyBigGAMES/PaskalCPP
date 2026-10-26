@@ -1,0 +1,67 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_local_decls.pcpp - Statement: var / const / type blocks as statements
+
+  A var, const or type block is a statement in every statement list
+  (BNF.md sec 5): in a routine or module body, a loop body, a nested
+  begin ... end; block and a match arm, where each keyword takes one item
+  (`1: var LY: int32 = 5;`). Its names are visible from it to the end of
+  its list.
+*******************************************************************************/
+
+module exe stmt_local_decls;
+
+/*
+  @@test
+    kind run
+    expect
+    | body 3 4
+    | type 7
+    | loop 1 2
+    | block 10
+    | arm 5
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+var
+  LI: int32;
+  LK: int32;
+
+begin
+  var LA: int32 = 3;
+  const KB: int32 = 4;
+  println("body {} {}", LA, KB);
+  type TSmall = int8;
+  var LS: TSmall = 7;
+  println("type {}", LS);
+  print("loop");
+  for LI := 1 to 2 do
+    var LD: int32 = LI;
+    print(" {}", LD);
+  end;
+  println("");
+  begin
+    var LE: int32 = 10;
+    println("block {}", LE);
+  end;
+  LK := 1;
+  match LK of
+    1:
+      var LY: int32 = 5;
+      println("arm {}", LY);
+  end;
+end.

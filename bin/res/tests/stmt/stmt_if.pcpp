@@ -1,0 +1,65 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_if.pcpp - Statement: if
+
+  if ... then ... [else ...] end; (BNF.md sec 5): the condition is bool,
+  each branch a statement list, a chain of tests nests an if in the else.
+*******************************************************************************/
+
+module exe stmt_if;
+
+/*
+  @@test
+    kind run
+    expect
+    | positive
+    | zero
+    | negative
+    | nested yes
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+routine Sign(AN: int32);
+begin
+  if AN > 0 then
+    println("positive");
+  else
+    if AN = 0 then
+      println("zero");
+    else
+      println("negative");
+    end;
+  end;
+end;
+
+var
+  LA: bool = true;
+  LB: bool = true;
+
+begin
+  Sign(5);
+  Sign(0);
+  Sign(-5);
+  if LA then
+    if LB and LA then
+      println("nested yes");
+    end;
+  end;
+  if not LA then
+    println("never");
+  end;
+end.

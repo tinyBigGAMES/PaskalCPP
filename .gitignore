@@ -87,6 +87,5 @@ bin/build.toml
 bin/warmup.cmd
 /docs/html
 /projects/pcppdev
-/projects/testbed
 /bin/res/assets
 /bin/assets.zip

@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_pointer_err_deref_value.pcpp - Type: ^ on a value
+
+  Break step of type_pointer: ^ reads through a pointer, an int32 is none
+  (SM0250).
+*******************************************************************************/
+
+module exe type_pointer_err_deref_value;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LV: int32;
+  LX: int32;
+
+begin
+  LX := LV^; // ERROR SM0250@9: operator '^' does not take 'int32'
+end.

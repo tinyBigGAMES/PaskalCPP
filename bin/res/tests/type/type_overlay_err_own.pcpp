@@ -1,0 +1,40 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_overlay_err_own.pcpp - Type: overlay, own
+
+  Break step of type_overlay: an overlay is plain data: it holds no own of an
+  object (SM0357).
+*******************************************************************************/
+
+module exe type_overlay_err_own;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TO = object
+    N: int32;
+  end;
+  TV = overlay
+    A: int32;
+    O: own TO; // ERROR SM0357@8: a record or an overlay holds no object
+  end;
+
+begin
+end.

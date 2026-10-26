@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_comments_err_escaped_end.pcpp - Lexical: a spliced comment closer
+
+  Break step of lex_comments: a line splice between the star and the slash
+  that close a block comment still closes it (splices go before tokens),
+  and is LX0202, a warning at the backslash: the module builds. The marked
+  line ends in the splice, so its marker is a block-comment marker.
+*******************************************************************************/
+
+module exe lex_comments_err_escaped_end;
+
+/*
+  @@test
+    kind build
+  @@end
+*/
+
+begin
+  /* // WARN LX0202@50 // the closer is spliced *\
+/
+end.

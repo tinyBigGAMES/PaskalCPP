@@ -1,0 +1,34 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addsourcefile_err_mixed.pcpp - Directive: a C++ error and an assembly error in one build
+
+  Break step of dir_addsourcefile: both files fail; both errors are
+  reported, each at its own file's marked line.
+*******************************************************************************/
+
+module exe dir_addsourcefile_err_mixed;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addsourcefile "$P:res/tests/dir/fixtures/dir_addsourcefile_err_clang_cpp.C";
+@addsourcefile "$P:res/tests/dir/fixtures/dir_addsourcefile_err_asm.S";
+
+begin
+end.

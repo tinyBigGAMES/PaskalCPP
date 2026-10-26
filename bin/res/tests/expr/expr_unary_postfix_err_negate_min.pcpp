@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  expr_unary_postfix_err_negate_min.pcpp - Expr: unary postfix, negate min
+
+  Break step of expr_unary_postfix: negating the minimum int32 constant
+  (SM0256).
+*******************************************************************************/
+
+module exe expr_unary_postfix_err_negate_min;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+var
+  LN: int32;
+
+begin
+  LN := -(-2147483647 - 1); // ERROR SM0256@9: constant overflows 'int32'
+end.

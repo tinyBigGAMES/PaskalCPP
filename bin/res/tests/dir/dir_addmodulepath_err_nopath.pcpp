@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addmodulepath_err_nopath.pcpp - Directive: a unit imported with no folder for it
+
+  Break step of dir_addmodulepath: dir_addmodulepath_lib (only in fixtures\)
+  imported without @addmodulepath: no folder searched holds it.
+*******************************************************************************/
+
+module exe dir_addmodulepath_err_nopath;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+import dir_addmodulepath_lib; // ERROR PR0012@8
+
+begin
+end.

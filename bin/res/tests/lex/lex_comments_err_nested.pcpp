@@ -1,0 +1,33 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_comments_err_nested.pcpp - Lexical: block comments do not nest
+
+  Break step of lex_comments: a slash-star inside a block comment is only
+  text, so the first star-slash closes the comment. It is LX0203, a
+  warning: the module still builds.
+*******************************************************************************/
+
+module exe lex_comments_err_nested;
+
+/*
+  @@test
+    kind build
+  @@end
+*/
+
+begin
+  /* outer /* inner */ // WARN LX0203@12: '/*' within block comment
+end.

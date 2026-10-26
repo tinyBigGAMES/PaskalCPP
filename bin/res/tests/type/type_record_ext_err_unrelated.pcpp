@@ -1,0 +1,44 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  type_record_ext_err_unrelated.pcpp - Type: record ext, unrelated
+
+  Break step of type_record_ext: a record with the same fields is not an
+  extension: records are named types (SM0200).
+*******************************************************************************/
+
+module exe type_record_ext_err_unrelated;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+type
+  TBase = record
+    A: int32;
+  end;
+  TOther = record
+    A: int32;
+  end;
+
+var
+  LO: TOther;
+  LPB: ptr to TBase;
+
+begin
+  LPB := address of LO; // ERROR SM0200@10: does not convert implicitly
+end.

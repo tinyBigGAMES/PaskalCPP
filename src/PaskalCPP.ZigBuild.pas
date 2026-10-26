@@ -50,6 +50,7 @@ uses
   StdApp.Resources,
   PaskalCPP.Common,
   PaskalCPP.BuildOutput,
+  PaskalCPP.DiagCache,
   PaskalCPP.ZigBuild.Targets;
 
 const
@@ -100,6 +101,10 @@ const
   // A source file whose name the toolchain does not compile (a header, a
   // name clang would take as linker input, PC_SOURCE_EXTS): not stored
   PC_ERR_ZIGBUILD_NOTSOURCE     = 'ZB0033';
+  { PC_ERR_ZIGBUILD_COMPANIONNAME }
+  // The companion library has the main artifact's name: both would be one
+  // file in lib\ (SaveBuildFile, before anything is written)
+  PC_ERR_ZIGBUILD_COMPANIONNAME = 'ZB0035';
   // A requested icon / version info could not be stamped into the artifact:
   // the build stops before publishing (a published copy is always stamped)
   PC_ERR_ZIGBUILD_ICON          = 'ZB0008';
@@ -121,6 +126,11 @@ const
   // read or written (DoRemoveStaleInstalled, DoWriteInstalledRecord): the
   // build goes on
   PC_ERR_ZIGBUILD_WRNSTALEFILE     = 'ZB0034';
+  { PC_ERR_ZIGBUILD_WRNDIAGCACHE }
+  // The kept diagnostics of the TUs zig serves from its cache could not be
+  // opened, kept or restored (TPCDiagCache): the build goes on, a cached TU
+  // may then report nothing
+  PC_ERR_ZIGBUILD_WRNDIAGCACHE     = 'ZB0036';
 
   { PC_ZIG_PROGRESS_MS }
   // While zig prints nothing (a build for a new target / optimize level
@@ -238,6 +248,15 @@ const
   { PC_ZIG_FORM_LIB }
   PC_ZIG_FORM_LIB          = 'const lib = b.addLibrary(.{';
 
+  { PC_ZIG_COMPANION_VAR }
+  // The companion static library's build.zig variable (SetCompanionLib): its
+  // block follows the main artifact's whole, so every line after its
+  // declaration is the companion's (LoadBuildFile)
+  PC_ZIG_COMPANION_VAR     = 'companion';
+
+  { PC_ZIG_FORM_COMPANION }
+  PC_ZIG_FORM_COMPANION    = 'const ' + PC_ZIG_COMPANION_VAR + ' = b.addLibrary(.{';
+
   { PC_ZIG_FORM_LINKAGE_PRE }
   PC_ZIG_FORM_LINKAGE_PRE  = '.linkage = ';
 
@@ -348,6 +367,12 @@ type
   // applies it; SetLibraryLocator hands it over
   TPCLibraryLocator = PaskalCPP.BuildOutput.TPCLibraryLocator;
 
+  { TPCSourceFileLocator }
+  // Where the frontend names a build source file (@addsourcefile): a TU's
+  // diagnostic with no location is reported there; BuildOutput applies it;
+  // SetSourceFileLocator hands it over
+  TPCSourceFileLocator = PaskalCPP.BuildOutput.TPCSourceFileLocator;
+
   { TPCGeneratedFileTest }
   // Which files the frontend generated for this build; BuildOutput drops the
   // frontend's own include steps through them; SetGeneratedFileTest hands it over
@@ -382,6 +407,14 @@ type
     FLinkLibraries: TStringList;
     FDefines: TStringList;
     FUndefines: TStringList;
+    // The companion static library (SetCompanionLib): a second artifact of
+    // the same build.zig, one TU, its own include path and defines (none of
+    // the main artifact's), the main artifact's target / optimize / strip,
+    // installed into lib\. FCompanionName '' = none. Paths stored resolved
+    FCompanionName: string;
+    FCompanionSource: string;
+    FCompanionIncludePath: string;
+    FCompanionDefines: TStringList;
     // Copy-DLL requests (before the build, into the artifact folder) and
     // publish requests (after the stamps): records resolved at registration
     FCopyDLLs: TList<TPCPublishItem>;
@@ -406,9 +439,20 @@ type
     FBuildCommit: TPCBuildOutputCommit;
     FBuildErrors: Integer;
 
+    // The .dia of every TU a compile wrote, replayed for a TU zig serves from
+    // its cache (TPCDiagCache); FDiagCacheFailure = why it could not be
+    // opened for this build.zig ('' = opened)
+    FDiagCache: TPCDiagCache;
+    FDiagCacheFailure: string;
+    // The first zig run of this Process got as far as compiling (it
+    // finished, or a TU wrote its .dia): only then is a TU with no .dia one
+    // zig served from its cache
+    FZigCompiled: Boolean;
+
     // Maps diagnostic locations back to the frontend's source (nil = none)
     FLocationTranslator: TPCLocationTranslator;
     FLibraryLocator: TPCLibraryLocator;
+    FSourceFileLocator: TPCSourceFileLocator;
     FGeneratedFileTest: TPCGeneratedFileTest;
     FFrontendCheck: TPCFrontendCheck;
     FDuplicateSymbolCheck: TPCDuplicateSymbolCheck;
@@ -503,8 +547,15 @@ type
     function DoZigPath(const APath: string): string;
     function DoOptimizeName(const ALevel: TPCOptimizeLevel): string;
     function DoAcceptTarget(const ATarget: string): Boolean;
+    // AInCompanion: the companion's declaration line was read (its block is
+    // the last, so every line after it is the companion's)
     procedure DoLoadLine(const ALine: string; const ALineNo: Integer;
-      const AFilename: string; var ATURoot: string; var ATUIndex: Integer);
+      const AFilename: string; var ATURoot: string; var ATUIndex: Integer;
+      var AInCompanion: Boolean);
+    // A line of the companion's block: its name, include path, TU folder,
+    // TU file, flags (their -D entries are its defines); ATURoot as
+    // DoLoadSourceLine's
+    function DoLoadCompanionLine(const ALine: string; var ATURoot: string): Boolean;
     function DoLoadHeaderLine(const ALine: string): Boolean;
     function DoLoadArtifactLine(const ALine: string): Boolean;
     function DoLoadModuleLine(const ALine: string): Boolean;
@@ -515,6 +566,8 @@ type
       var ATUIndex: Integer): Boolean;
     function GetSourceLanguage(const ASourceFile: string): TPCSourceLanguage;
     procedure DoZigHeader(const ABuilder: TStringBuilder);
+    // An artifact's .root_module lines (the main artifact's and the companion's)
+    procedure DoZigRootModule(const ABuilder: TStringBuilder);
     procedure DoZigArtifact(const ABuilder: TStringBuilder;
       out AArtifactVar: string);
     procedure DoZigSourceGroup(const ABuilder: TStringBuilder;
@@ -522,9 +575,31 @@ type
       const ALanguage: TPCSourceLanguage);
     procedure DoZigSources(const ABuilder: TStringBuilder;
       const AArtifactVar: string);
+    // One TU's addCSourceFiles block (DoZigSourceGroup and the companion)
+    procedure DoZigSourceBlock(const ABuilder: TStringBuilder;
+      const AArtifactVar: string; const ASourceFile: string;
+      const AFlags: string);
+    // The companion's block, after the main artifact's install step; nothing
+    // when none is set
+    procedure DoZigCompanion(const ABuilder: TStringBuilder);
+    // The flag list of one TU group: BuildFlagsString's rules for ALanguage
+    // and ABuildMode, with ADefines / AUndefines (nil = none) as its -D / -U
+    function DoFlagsList(const ALanguage: TPCSourceLanguage;
+      const ABuildMode: TPCBuildMode; const ADefines: TStringList;
+      const AUndefines: TStringList): string;
+    // Every TU build.zig compiles, in its order: the main artifact's sources,
+    // then the companion's (the .dia files of one build)
+    function DoAllSourceFiles(): TArray<string>;
 
     // Per-TU clang serialized diagnostics (see the implementation section of that name)
     function DoDiagFilePath(const ASourceFile: string): string;
+    function DoHeaderListPath(const ADiagPath: string): string;
+    function DoDiagCacheSettle(const AReport: Boolean): TArray<string>;
+    function DoRenewMissed(const AMissed: TArray<string>): Boolean;
+    function DoAnyDiagFile(): Boolean;
+    function DoRenewAfterCutOff(): Boolean;
+    procedure DoDiagCacheEndRun();
+    function DoRunZig(const AZigExe: string; const AZigArgs: string): Boolean;
     function DoDiagFilePrepare(): Boolean;
 
     // Build output (see the implementation section of that name)
@@ -568,6 +643,9 @@ type
     function DoIsWindowsTarget(): Boolean;
     function DoIsLinuxTarget(): Boolean;
     function DoFindLinkFile(const ALibrary: string; out APath: string): Boolean;
+    // Each library this build links, by the file the linker finds for it
+    // (TPCBuildOutputFilter.SetLinkedFiles)
+    function DoLinkedFiles(): TArray<TPCLinkedFile>;
     procedure DoApplyManifest(const AExePath: string);
     function DoApplyIcon(const AExePath: string): Boolean;
     function DoApplyVersionInfo(const AArtifactPath: string): Boolean;
@@ -600,6 +678,9 @@ type
     // Where the frontend names a link library: a library zig cannot find is
     // reported there (nil = without a location)
     procedure SetLibraryLocator(const ALocator: TPCLibraryLocator);
+    // Where the frontend names a build source file: a TU's diagnostic with no
+    // location is reported there (nil = without a location)
+    procedure SetSourceFileLocator(const ALocator: TPCSourceFileLocator);
     // Which files the frontend generated: an include step through one of
     // them is the frontend's own and is not reported (nil = every step kept)
     procedure SetGeneratedFileTest(const ATest: TPCGeneratedFileTest);
@@ -686,6 +767,25 @@ type
     procedure ClearUndefines();
     function HasUndefine(const ADefineName: string): Boolean;
     function GetUndefines(): TStringList;
+
+    // The companion static library: a second artifact of the same build.zig
+    // (one zig project, one cache), its own module with the main artifact's
+    // target, optimize level and strip rule, ASourceFile its one TU (any
+    // source AddSourceFile takes, its language's flags),
+    // AIncludePath its one include path, ADefines its -D entries (NAME or
+    // NAME=VALUE); none of the main artifact's sources, paths or defines
+    // reach it. zig installs it into lib\ (GetLibPrefix + AName +
+    // GetLibExtension) and it joins the record of installed files. Paths
+    // resolve as AddSourceFile's / AddIncludePath's; a file clang does not
+    // compile or a name no file can take is reported and nothing is set
+    procedure SetCompanionLib(const AName: string; const ASourceFile: string;
+      const AIncludePath: string; const ADefines: array of string);
+    procedure ClearCompanionLib();
+    // '' = none set
+    function GetCompanionName(): string;
+    function GetCompanionSource(): string;
+    function GetCompanionIncludePath(): string;
+    function GetCompanionDefines(): TArray<string>;
 
     // Copy DLLs: the DLLs the program loads, deployed beside the artifact
     // (where a built DLL lands) BEFORE the build; a missing or colliding one
@@ -821,7 +921,7 @@ uses
 const
   { PC_ZIG_STRUCTURE_LINES }
   // The lines build.zig carries that hold nothing to read back
-  PC_ZIG_STRUCTURE_LINES: array[0..23] of string = (
+  PC_ZIG_STRUCTURE_LINES: array[0..25] of string = (
     '',
     'const std = @import("std");',
     'pub fn build(b: *std.Build) void {',
@@ -845,7 +945,9 @@ const
     '}).step);',
     'exe.root_module.addCSourceFiles(.{',
     'lib.root_module.addCSourceFiles(.{',
-    'exe.root_module.addRPathSpecial("$ORIGIN");'
+    'exe.root_module.addRPathSpecial("$ORIGIN");',
+    PC_ZIG_COMPANION_VAR + '.root_module.addCSourceFiles(.{',
+    'b.getInstallStep().dependOn(&b.addInstallArtifact(' + PC_ZIG_COMPANION_VAR + ', .{'
   );
 
 function ZigStringLiteral(const AText: string): string;
@@ -1036,6 +1138,10 @@ begin
   FLinkLibraries := TStringList.Create();
   FDefines := TStringList.Create();
   FUndefines := TStringList.Create();
+  FCompanionName := '';
+  FCompanionSource := '';
+  FCompanionIncludePath := '';
+  FCompanionDefines := TStringList.Create();
   FCopyDLLs := TList<TPCPublishItem>.Create();
   FPublishItems := TList<TPCPublishItem>.Create();
   FInstalled := TList<string>.Create();
@@ -1047,8 +1153,13 @@ begin
   FBuildOutput := TPCBuildOutputFilter.Create();
   FBuildCommit := TPCBuildOutputCommit.Create();
   FBuildErrors := 0;
+  // No file I/O here: the store is opened as build.zig is written
+  FDiagCache := TPCDiagCache.Create();
+  FDiagCacheFailure := '';
+  FZigCompiled := False;
   FLocationTranslator := nil;
   FLibraryLocator := nil;
+  FSourceFileLocator := nil;
   FGeneratedFileTest := nil;
   FFrontendCheck := nil;
   FDuplicateSymbolCheck := nil;
@@ -1096,11 +1207,13 @@ begin
   FreeAndNil(FBuildConfig);
   FreeAndNil(FConfigPending);
 
+  FreeAndNil(FDiagCache);
   FreeAndNil(FBuildCommit);
   FreeAndNil(FBuildOutput);
   FreeAndNil(FInstalled);
   FreeAndNil(FPublishItems);
   FreeAndNil(FCopyDLLs);
+  FreeAndNil(FCompanionDefines);
   FreeAndNil(FUndefines);
   FreeAndNil(FDefines);
   FreeAndNil(FLinkLibraries);
@@ -1268,6 +1381,11 @@ end;
 procedure TPCZigBuild.SetLibraryLocator(const ALocator: TPCLibraryLocator);
 begin
   FLibraryLocator := ALocator;
+end;
+
+procedure TPCZigBuild.SetSourceFileLocator(const ALocator: TPCSourceFileLocator);
+begin
+  FSourceFileLocator := ALocator;
 end;
 
 procedure TPCZigBuild.SetGeneratedFileTest(const ATest: TPCGeneratedFileTest);
@@ -1723,6 +1841,80 @@ begin
   Result := FUndefines;
 end;
 
+// Companion static library
+//
+// A second artifact of the main artifact's build.zig (DoZigCompanion): one
+// zig project and one cache for both, so no second build folder exists. The
+// companion's module shares only target, optimize and strip with the main
+// artifact; its TU's flags are its own group's (DoFlagsList with its own
+// defines, never the main artifact's), and its .dia joins the build's
+// (DoAllSourceFiles). zig installs it into lib\ (the layout rule's folder of a
+// static library); DoOwnInstalledNames records it.
+
+procedure TPCZigBuild.SetCompanionLib(const AName: string; const ASourceFile: string;
+  const AIncludePath: string; const ADefines: array of string);
+var
+  LSource: string;
+  LInclude: string;
+  LLanguage: TPCSourceLanguage;
+  LI: Integer;
+begin
+  // Every part is checked before anything is set: a refused part (reported:
+  // the name's, ZB0020, ZB0033) leaves the companion as it was
+  if (AName = '') or (not TPath.HasValidFileNameChars(AName, False)) then
+  begin
+    if Assigned(FErrors) then
+      FErrors.Add(esError, PC_ERR_ZIGBUILD_BADPATH, RSZigBuildBadProjectName, [AName]);
+    Exit;
+  end;
+  if not DoAcceptPath(ASourceFile, '', RSZigBuildWhatSourceFile, LSource) then
+    Exit;
+  if (LSource = '') or (not TPCSourceFiles.LanguageOf(LSource, LLanguage)) then
+  begin
+    if Assigned(FErrors) then
+      FErrors.Add(esError, PC_ERR_ZIGBUILD_NOTSOURCE, RSZigBuildNotSource,
+        [ASourceFile, TPCSourceFiles.ExtensionsText()]);
+    Exit;
+  end;
+  if not DoAcceptPath(AIncludePath, '', RSZigBuildWhatIncludePath, LInclude) then
+    Exit;
+
+  FCompanionName := AName;
+  FCompanionSource := LSource;
+  FCompanionIncludePath := LInclude;
+  FCompanionDefines.Clear();
+  for LI := Low(ADefines) to High(ADefines) do
+    FCompanionDefines.Add(ADefines[LI]);
+end;
+
+procedure TPCZigBuild.ClearCompanionLib();
+begin
+  FCompanionName := '';
+  FCompanionSource := '';
+  FCompanionIncludePath := '';
+  FCompanionDefines.Clear();
+end;
+
+function TPCZigBuild.GetCompanionName(): string;
+begin
+  Result := FCompanionName;
+end;
+
+function TPCZigBuild.GetCompanionSource(): string;
+begin
+  Result := FCompanionSource;
+end;
+
+function TPCZigBuild.GetCompanionIncludePath(): string;
+begin
+  Result := FCompanionIncludePath;
+end;
+
+function TPCZigBuild.GetCompanionDefines(): TArray<string>;
+begin
+  Result := FCompanionDefines.ToStringArray();
+end;
+
 // Copy DLLs
 
 // Copy requests
@@ -2109,9 +2301,13 @@ begin
   // artifact in its folder (the layout rule); on a Windows target an
   // executable's or a DLL's .pdb beside it, at debug only (PC_ZIG_FORM_STRIP
   // strips every other level), and a DLL's import library in lib\. A static
-  // library brings neither; a Linux target only the artifact
+  // library brings neither; a Linux target only the artifact. The companion
+  // static library (SetCompanionLib) lands in lib\ like any static library
   LFolder := DoArtifactSubdir(FBuildMode);
   Result := [LFolder + '/' + GetOutputFilename()];
+  if FCompanionName <> '' then
+    Result := Result + [DoArtifactSubdir(bmLib) + '/' + GetLibPrefix() +
+      FCompanionName + GetLibExtension()];
   if not DoIsWindowsTarget() then
     Exit;
   if (FBuildMode <> bmLib) and (FOptimizeLevel = olDebug) then
@@ -2132,7 +2328,9 @@ begin
   // future update. Every build shares one output folder, and this removal
   // deleted the files other programs had built there (a lib before the
   // program that links it). The record is still reset, so it lists only
-  // what this build installs.
+  // what this build installs. The rework covers the companion library too:
+  // pcpp_runtime's name is shared by every runtime-using lib of one output
+  // folder, so a lib that stopped using the runtime cannot tell whose it is.
   FInstalled.Clear();
   Exit;
 
@@ -2281,6 +2479,7 @@ begin
   ClearLinkLibraries();
   ClearDefines();
   ClearUndefines();
+  ClearCompanionLib();
   ClearCopyDLLs();
   ClearPostBuildCopies();
   FProjectName := PC_DEFAULT_PROJECT_NAME;
@@ -2524,6 +2723,14 @@ begin
 end;
 
 function TPCZigBuild.BuildFlagsString(const ALanguage: TPCSourceLanguage): string;
+begin
+  // The main artifact's groups: its build mode, its defines and undefines
+  Result := DoFlagsList(ALanguage, FBuildMode, FDefines, FUndefines);
+end;
+
+function TPCZigBuild.DoFlagsList(const ALanguage: TPCSourceLanguage;
+  const ABuildMode: TPCBuildMode; const ADefines: TStringList;
+  const AUndefines: TStringList): string;
 var
   LFlags: TStringList;
   LI: Integer;
@@ -2570,7 +2777,7 @@ begin
       LFlags.Add('"-fno-omit-frame-pointer"');
 
       // Hide symbols by default in DLLs to prevent runtime symbol conflicts
-      if FBuildMode = bmDll then
+      if ABuildMode = bmDll then
         LFlags.Add('"-fvisibility=hidden"');
     end;
 
@@ -2579,17 +2786,23 @@ begin
     LFlags.Add('"-Wno-unused-command-line-argument"');
 
     // Add defines (-DNAME or -DNAME=VALUE)
-    for LI := 0 to FDefines.Count - 1 do
+    if ADefines <> nil then
     begin
-      LEntry := FDefines[LI];
-      LFlags.Add(ZigStringLiteral('-D' + LEntry));
+      for LI := 0 to ADefines.Count - 1 do
+      begin
+        LEntry := ADefines[LI];
+        LFlags.Add(ZigStringLiteral('-D' + LEntry));
+      end;
     end;
 
     // Add undefines (-UNAME)
-    for LI := 0 to FUndefines.Count - 1 do
+    if AUndefines <> nil then
     begin
-      LEntry := FUndefines[LI];
-      LFlags.Add(ZigStringLiteral('-U' + LEntry));
+      for LI := 0 to AUndefines.Count - 1 do
+      begin
+        LEntry := AUndefines[LI];
+        LFlags.Add(ZigStringLiteral('-U' + LEntry));
+      end;
     end;
 
     // Stop rule: by default the first error is fatal and clang stops right
@@ -2640,6 +2853,19 @@ begin
   ABuilder.AppendLine();
 end;
 
+procedure TPCZigBuild.DoZigRootModule(const ABuilder: TStringBuilder);
+begin
+  // An artifact's root module (the main artifact's and the companion's):
+  // the build's target, optimize level and strip rule, libc and libc++
+  ABuilder.AppendLine('        .root_module = b.createModule(.{');
+  ABuilder.AppendLine('            .target = target,');
+  ABuilder.AppendLine('            .optimize = optimize,');
+  ABuilder.AppendLine('            ' + PC_ZIG_FORM_STRIP);
+  ABuilder.AppendLine('            .link_libc = true,');
+  ABuilder.AppendLine('            .link_libcpp = true,');
+  ABuilder.AppendLine('        }),');
+end;
+
 procedure TPCZigBuild.DoZigArtifact(const ABuilder: TStringBuilder;
   out AArtifactVar: string);
 var
@@ -2664,13 +2890,7 @@ begin
 
   // Name and root module
   ABuilder.AppendLine('        ' + PC_ZIG_FORM_NAME_PRE + ZigStringLiteral(FProjectName) + ',');
-  ABuilder.AppendLine('        .root_module = b.createModule(.{');
-  ABuilder.AppendLine('            .target = target,');
-  ABuilder.AppendLine('            .optimize = optimize,');
-  ABuilder.AppendLine('            ' + PC_ZIG_FORM_STRIP);
-  ABuilder.AppendLine('            .link_libc = true,');
-  ABuilder.AppendLine('            .link_libcpp = true,');
-  ABuilder.AppendLine('        }),');
+  DoZigRootModule(ABuilder);
   ABuilder.AppendLine('    });');
 
   // GUI subsystem: suppress the console window on Windows (executables only)
@@ -2692,36 +2912,56 @@ procedure TPCZigBuild.DoZigSourceGroup(const ABuilder: TStringBuilder;
 var
   LI: Integer;
   LFlagsStr: string;
-  LDiagPath: string;
 begin
   if AFiles.Count = 0 then
     Exit;
 
   LFlagsStr := BuildFlagsString(ALanguage);
 
+  // The TU's own quote include folders follow the shared flags (DoQuoteFlags)
+  for LI := 0 to AFiles.Count - 1 do
+    DoZigSourceBlock(ABuilder, AArtifactVar, AFiles[LI],
+      LFlagsStr + DoQuoteFlags(AFiles[LI]));
+end;
+
+procedure TPCZigBuild.DoZigSourceBlock(const ABuilder: TStringBuilder;
+  const AArtifactVar: string; const ASourceFile: string; const AFlags: string);
+var
+  LDiagPath: string;
+  LListPath: string;
+  LListFlag: string;
+begin
   // Every TU gets its own block: cc1 takes one serialized-diagnostics file per
   // compile, so each TU carries its own flag (C, C++, LLVM IR, and a .S's
   // preprocessor job). The path is stable, so the flag (part of zig's cache
   // key) does not defeat the cache. The TU is its file name under its own
   // folder as .root: zig refuses an absolute path in .files, and a path on
   // another drive than the build root has no relative form (R30).
-  for LI := 0 to AFiles.Count - 1 do
+  // clang takes the plain spelling (text for another tool)
+  LDiagPath := TUtils.StripLongPathPrefix(DoDiagFilePath(ASourceFile)).Replace('\', '/');
+  // The header list clang writes beside the .dia keys the .dia kept for
+  // zig's cache (TPCDiagCache): the TU's flag text with its target and
+  // optimize level is the rest of the key
+  LListPath := DoHeaderListPath(DoDiagFilePath(ASourceFile));
+  if LListPath <> '' then
   begin
-    // clang takes the plain spelling (text for another tool)
-    LDiagPath := TUtils.StripLongPathPrefix(DoDiagFilePath(AFiles[LI])).Replace('\', '/');
-    ABuilder.AppendLine('    ' + AArtifactVar + '.root_module.addCSourceFiles(.{');
-    ABuilder.AppendLine('        ' + PC_ZIG_FORM_ROOT_PRE +
-      ZigStringLiteral(DoZigPath(TPath.GetDirectoryName(AFiles[LI]))) + PC_ZIG_FORM_ROOT_SUF);
-    ABuilder.AppendLine('        .files = &.{');
-    ABuilder.AppendLine('            ' + ZigStringLiteral(TPath.GetFileName(AFiles[LI])));
-    ABuilder.AppendLine('        },');
-    // The TU's own quote include folders follow the shared flags (DoQuoteFlags)
-    ABuilder.AppendLine('        ' + PC_ZIG_FORM_FLAGS_PRE + LFlagsStr +
-      DoQuoteFlags(AFiles[LI]) +
-      ', "-Xclang", "-serialize-diagnostic-file", "-Xclang", ' +
-      ZigStringLiteral(LDiagPath) + PC_ZIG_FORM_FLAGS_SUF);
-    ABuilder.AppendLine('    });');
-  end;
+    LListFlag := ', "-Xclang", "-header-include-file", "-Xclang", ' +
+      ZigStringLiteral(TUtils.StripLongPathPrefix(LListPath).Replace('\', '/'));
+    FDiagCache.SetUnitKey(DoDiagFilePath(ASourceFile), AFlags + #10 + FTarget +
+      #10 + DoOptimizeName(FOptimizeLevel));
+  end
+  else
+    LListFlag := '';
+  ABuilder.AppendLine('    ' + AArtifactVar + '.root_module.addCSourceFiles(.{');
+  ABuilder.AppendLine('        ' + PC_ZIG_FORM_ROOT_PRE +
+    ZigStringLiteral(DoZigPath(TPath.GetDirectoryName(ASourceFile))) + PC_ZIG_FORM_ROOT_SUF);
+  ABuilder.AppendLine('        .files = &.{');
+  ABuilder.AppendLine('            ' + ZigStringLiteral(TPath.GetFileName(ASourceFile)));
+  ABuilder.AppendLine('        },');
+  ABuilder.AppendLine('        ' + PC_ZIG_FORM_FLAGS_PRE + AFlags +
+    ', "-Xclang", "-serialize-diagnostic-file", "-Xclang", ' +
+    ZigStringLiteral(LDiagPath) + LListFlag + PC_ZIG_FORM_FLAGS_SUF);
+  ABuilder.AppendLine('    });');
 end;
 
 procedure TPCZigBuild.DoZigSources(const ABuilder: TStringBuilder;
@@ -2835,16 +3075,63 @@ begin
   ABuilder.AppendLine('    }).step);');
 end;
 
+procedure TPCZigBuild.DoZigCompanion(const ABuilder: TStringBuilder);
+begin
+  if FCompanionName = '' then
+    Exit;
+
+  // After the main artifact's install step, whole: LoadBuildFile reads every
+  // line after the declaration as the companion's. A static library with
+  // the shared root module, its own include path, its one TU with its own
+  // group's flags (its defines, no undefines, never the main artifact's),
+  // installed where the layout rule puts a static library
+  ABuilder.AppendLine();
+  ABuilder.AppendLine('    ' + PC_ZIG_FORM_COMPANION);
+  ABuilder.AppendLine('        ' + PC_ZIG_FORM_LINKAGE_PRE + '.static,');
+  ABuilder.AppendLine('        ' + PC_ZIG_FORM_NAME_PRE + ZigStringLiteral(FCompanionName) + ',');
+  DoZigRootModule(ABuilder);
+  ABuilder.AppendLine('    });');
+  ABuilder.AppendLine();
+  if FCompanionIncludePath <> '' then
+    ABuilder.AppendLine('    ' + PC_ZIG_COMPANION_VAR + '.' + PC_ZIG_FORM_INCLUDE_PRE +
+      ZigStringLiteral(DoZigPath(FCompanionIncludePath)) + PC_ZIG_FORM_LAZY_SUF);
+  DoZigSourceBlock(ABuilder, PC_ZIG_COMPANION_VAR, FCompanionSource,
+    DoFlagsList(GetSourceLanguage(FCompanionSource), bmLib, FCompanionDefines, nil));
+  ABuilder.AppendLine();
+  ABuilder.AppendLine('    b.getInstallStep().dependOn(&b.addInstallArtifact(' +
+    PC_ZIG_COMPANION_VAR + ', .{');
+  ABuilder.AppendLine('        .dest_dir = .{ .override = .' +
+    DoArtifactSubdir(bmLib) + ' },');
+  ABuilder.AppendLine('    }).step);');
+end;
+
+function TPCZigBuild.DoAllSourceFiles(): TArray<string>;
+begin
+  Result := FSourceFiles.ToStringArray();
+  if FCompanionName <> '' then
+    Result := Result + [FCompanionSource];
+end;
+
 function TPCZigBuild.GenerateBuildZig(): string;
 var
   LBuilder: TStringBuilder;
   LArtifactVar: string;
 begin
+  // The kept diagnostics' store, opened for every build.zig written: its
+  // generation names each TU's header list (DoZigSourceBlock), and a store
+  // cleared since the last one is made again here. No output folder: no
+  // store, the TUs get no header list
+  FDiagCache.Init(TUtils.JoinResolvedPath(FOutputPath, PC_DIAG_FILE_DIR));
+  FDiagCacheFailure := '';
+  if FOutputPath <> '' then
+    FDiagCache.Open(FDiagCacheFailure);
+
   LBuilder := TStringBuilder.Create();
   try
     DoZigHeader(LBuilder);
     DoZigArtifact(LBuilder, LArtifactVar);
     DoZigSources(LBuilder, LArtifactVar);
+    DoZigCompanion(LBuilder);
 
     LBuilder.AppendLine('}');
 
@@ -2903,7 +3190,12 @@ end;
 // preprocessor's diagnostics, and cc1as takes no such option (probed,
 // scripts\zb_e\a1b\r38c\). A TU served from zig's cache writes nothing, so
 // every TU file is deleted before the build: a file absent afterwards means
-// "not compiled in this build, nothing to report".
+// "not compiled in this build". Its diagnostics are those of the compile
+// that made the object zig reused: TPCDiagCache keeps every .dia a compile
+// writes under the state that produced it (flags, target, optimize level,
+// the bytes of the source and of every header clang listed) and copies the
+// matching one back before the commit reads the .dia files
+// (DoDiagCacheSettle), so a rebuild reports what the first build did.
 
 function TPCZigBuild.DoDiagFilePath(const ASourceFile: string): string;
 var
@@ -2923,9 +3215,88 @@ begin
     TPath.GetFileName(LSource) + '.' + LKey + PC_DIAG_FILE_EXT);
 end;
 
+function TPCZigBuild.DoHeaderListPath(const ADiagPath: string): string;
+begin
+  // '' when the store is not open (no output folder, or it could not be
+  // opened: reported by DoDiagFilePrepare); the TU then has no header list
+  // and nothing of it is kept
+  if FDiagCache.IsOpen() then
+    Result := FDiagCache.HeaderListPath(ADiagPath)
+  else
+    Result := '';
+end;
+
+function TPCZigBuild.DoDiagCacheSettle(const AReport: Boolean): TArray<string>;
+var
+  LSource: string;
+  LLanguage: TPCSourceLanguage;
+  LSettled: TPCDiagSettled;
+  LFailure: string;
+begin
+  // After zig ran, before the commit reads the .dia files: a compiled TU's
+  // .dia is kept, a cached TU's kept .dia is put back. Result = the .dia
+  // paths of the TUs missed (cached, nothing kept): Process builds again for
+  // them. A failure is reported only when AReport (the settle whose .dia
+  // files the commit reads). A TU whose language is unknown has no block in
+  // build.zig and nothing to settle
+  Result := nil;
+  for LSource in DoAllSourceFiles() do
+  begin
+    if not TPCSourceFiles.LanguageOf(LSource, LLanguage) then
+      Continue;
+    if (not FDiagCache.SettleUnit(DoDiagFilePath(LSource), LSource, LLanguage,
+      FOutputPath, LSettled, LFailure)) and AReport and Assigned(FErrors) then
+      FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNDIAGCACHE,
+        RSZigBuildDiagCacheUnit, [TUtils.StripLongPathPrefix(LSource), LFailure]);
+    if LSettled <> dsMissed then
+      Continue;
+    Result := Result + [DoDiagFilePath(LSource)];
+    // The commit's settle: still missed after the rebuild (a salt that
+    // could not be written, a .dia that could not be kept). Never silent.
+    // A build that stopped before it compiled reached no TU: nothing is
+    // missing (FZigCompiled, set by Process after the first run)
+    if AReport and FZigCompiled and Assigned(FErrors) then
+      FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNDIAGCACHE,
+        RSZigBuildDiagCacheMissed, [TUtils.StripLongPathPrefix(LSource)]);
+  end;
+end;
+
+function TPCZigBuild.DoAnyDiagFile(): Boolean;
+var
+  LSource: string;
+begin
+  // Right after a zig run, before any settle: DoDiagFilePrepare deleted
+  // every TU's .dia, so one that exists was written by a compile of this run
+  Result := False;
+  for LSource in DoAllSourceFiles() do
+  begin
+    if FileExists(DoDiagFilePath(LSource)) then
+      Exit(True);
+  end;
+end;
+
+function TPCZigBuild.DoRenewMissed(const AMissed: TArray<string>): Boolean;
+var
+  LDiagPath: string;
+  LFailure: string;
+begin
+  // Each missed TU gets a new salt (TPCDiagCache.RenewUnit): its flags
+  // change, so the next build compiles it. False = none could be renewed
+  // (a rebuild would serve them from the cache again)
+  Result := False;
+  for LDiagPath in AMissed do
+  begin
+    if FDiagCache.RenewUnit(LDiagPath, LFailure) then
+      Result := True
+    else if Assigned(FErrors) then
+      FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNDIAGCACHE,
+        RSZigBuildDiagCacheUnit, [TUtils.StripLongPathPrefix(LDiagPath), LFailure]);
+  end;
+end;
+
 function TPCZigBuild.DoDiagFilePrepare(): Boolean;
 var
-  LI: Integer;
+  LSource: string;
   LDir: string;
   LDiagPath: string;
   LProbePath: string;
@@ -2972,10 +3343,11 @@ begin
 
   // A file left from an earlier build would be read as this build's: a TU
   // served from zig's cache writes none. A directory in the way would make
-  // clang drop the TU's .dia, with the same silent loss as above.
-  for LI := 0 to FSourceFiles.Count - 1 do
+  // clang drop the TU's .dia, with the same silent loss as above. Every TU
+  // of the build: the companion's too
+  for LSource in DoAllSourceFiles() do
   begin
-    LDiagPath := DoDiagFilePath(FSourceFiles[LI]);
+    LDiagPath := DoDiagFilePath(LSource);
     if DirectoryExists(LDiagPath) then
     begin
       if Assigned(FErrors) then
@@ -2991,9 +3363,69 @@ begin
           [LDiagPath, SysErrorMessage(GetLastError())]);
       Exit;
     end;
+    // The same for its header list: a stale one would key this build's .dia
+    // under another state
+    if not FDiagCache.PrepareUnit(LDiagPath, LReason) then
+    begin
+      if Assigned(FErrors) then
+        FErrors.Add(esError, PC_ERR_ZIGBUILD_DIAGFILEFAILED,
+          RSZigBuildDiagFilePrepare,
+          [FDiagCache.HeaderListPath(LDiagPath), LReason]);
+      Exit;
+    end;
   end;
 
+  // A store that could not be opened keeps nothing: what zig compiles is
+  // still reported, a TU it serves from its cache reports nothing
+  if (FDiagCacheFailure <> '') and Assigned(FErrors) then
+    FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNDIAGCACHE, RSZigBuildDiagCacheOpen,
+      [TUtils.StripLongPathPrefix(LDir), FDiagCacheFailure]);
+
+  // zig runs next: the run is pending until its .dia files are kept
+  // (DoDiagCacheEndRun); a run cut off before that is seen by the next one
+  if (not FDiagCache.BeginRun(LReason)) and Assigned(FErrors) then
+    FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNDIAGCACHE, RSZigBuildDiagCacheOpen,
+      [TUtils.StripLongPathPrefix(LDir), LReason]);
+
   Result := True;
+end;
+
+function TPCZigBuild.DoRenewAfterCutOff(): Boolean;
+var
+  LSource: string;
+  LDiagPath: string;
+  LFailure: string;
+begin
+  // True = a TU was renewed (build.zig must be written again). A TU whose
+  // files cannot be read is reported and left as it is
+  Result := False;
+  if not FDiagCache.WasCutOff() then
+    Exit;
+  for LSource in DoAllSourceFiles() do
+  begin
+    LDiagPath := DoDiagFilePath(LSource);
+    if FDiagCache.NeedsRenew(LDiagPath, LSource, LFailure) then
+    begin
+      if FDiagCache.RenewUnit(LDiagPath, LFailure) then
+        Result := True
+      else if Assigned(FErrors) then
+        FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNDIAGCACHE,
+          RSZigBuildDiagCacheUnit, [TUtils.StripLongPathPrefix(LSource), LFailure]);
+    end
+    else if (LFailure <> '') and Assigned(FErrors) then
+      FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNDIAGCACHE,
+        RSZigBuildDiagCacheUnit, [TUtils.StripLongPathPrefix(LSource), LFailure]);
+  end;
+end;
+
+procedure TPCZigBuild.DoDiagCacheEndRun();
+var
+  LFailure: string;
+begin
+  if (not FDiagCache.EndRun(LFailure)) and Assigned(FErrors) then
+    FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNDIAGCACHE, RSZigBuildDiagCacheOpen,
+      [TUtils.StripLongPathPrefix(TUtils.JoinResolvedPath(FOutputPath,
+      PC_DIAG_FILE_DIR)), LFailure]);
 end;
 
 // Build output
@@ -3013,7 +3445,9 @@ end;
 procedure TPCZigBuild.DoFilterFlush();
 var
   LI: Integer;
-  LDiagFiles: TArray<string>;
+  LSource: string;
+  LUnit: TPCDiagUnit;
+  LUnits: TArray<TPCDiagUnit>;
   LUnreported: TArray<string>;
 begin
   FBuildErrors := 0;
@@ -3022,17 +3456,29 @@ begin
 
   FBuildOutput.Finish();
 
+  // A TU zig served from its cache gets the .dia of the compile that made
+  // its object; a compiled TU's .dia is kept for the next build (raw mode
+  // too: its compiles are a later build's cache). Process already rebuilt
+  // for any TU missed; one still missed is reported
+  DoDiagCacheSettle(True);
+
   // Raw mode passed zig's own text through: nothing was captured
   if not FRawOutput then
   begin
-    // The .dia of every TU, in source order (DoDiagFilePrepare)
-    LDiagFiles := nil;
-    for LI := 0 to FSourceFiles.Count - 1 do
-      LDiagFiles := LDiagFiles + [DoDiagFilePath(FSourceFiles[LI])];
+    // The .dia of every TU, in source order, the companion's last
+    // (DoDiagFilePrepare)
+    LUnits := nil;
+    for LSource in DoAllSourceFiles() do
+    begin
+      LUnit.DiagFile := DoDiagFilePath(LSource);
+      LUnit.SourceFile := LSource;
+      LUnits := LUnits + [LUnit];
+    end;
 
     FBuildCommit.SetErrors(FErrors);
     FBuildCommit.SetDuplicateSymbolCheck(FDuplicateSymbolCheck);
-    FBuildCommit.Commit(FBuildOutput, LDiagFiles,
+    FBuildCommit.SetSourceFileLocator(FSourceFileLocator);
+    FBuildCommit.Commit(FBuildOutput, LUnits,
       FOutputPath, FLocationTranslator, FLibraryLocator, FGeneratedFileTest,
       FFrontendCheck);
     FBuildErrors := FBuildCommit.ErrorsReported();
@@ -3104,7 +3550,8 @@ begin
 end;
 
 procedure TPCZigBuild.DoLoadLine(const ALine: string; const ALineNo: Integer;
-  const AFilename: string; var ATURoot: string; var ATUIndex: Integer);
+  const AFilename: string; var ATURoot: string; var ATUIndex: Integer;
+  var AInCompanion: Boolean);
 var
   LI: Integer;
 begin
@@ -3115,20 +3562,118 @@ begin
       Exit;
   end;
 
-  if DoLoadHeaderLine(ALine) then
+  // The companion's block is the last (DoZigCompanion): from its declaration
+  // on, a line is the companion's, never the main artifact's
+  if ALine = PC_ZIG_FORM_COMPANION then
+  begin
+    AInCompanion := True;
+    ATURoot := '';
+    ATUIndex := -1;
     Exit;
-  if DoLoadArtifactLine(ALine) then
-    Exit;
-  if DoLoadModuleLine(ALine) then
-    Exit;
-  if DoLoadSourceLine(ALine, ATURoot, ATUIndex) then
-    Exit;
+  end;
+  if AInCompanion then
+  begin
+    if DoLoadCompanionLine(ALine, ATURoot) then
+      Exit;
+  end
+  else
+  begin
+    if DoLoadHeaderLine(ALine) then
+      Exit;
+    if DoLoadArtifactLine(ALine) then
+      Exit;
+    if DoLoadModuleLine(ALine) then
+      Exit;
+    if DoLoadSourceLine(ALine, ATURoot, ATUIndex) then
+      Exit;
+  end;
 
   // Not a line GenerateBuildZig writes, or a payload it cannot read: said,
   // skipped, the rest loads
   if Assigned(FErrors) then
     FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNBUILDLINE, RSZigBuildUnknownLine,
       [ALineNo, AFilename, ALine]);
+end;
+
+function TPCZigBuild.DoLoadCompanionLine(const ALine: string; var ATURoot: string): Boolean;
+var
+  LPrefix: string;
+  LPayload: string;
+  LText: string;
+  LResolved: string;
+  LLanguage: TPCSourceLanguage;
+  LFlags: TArray<string>;
+  LFlag: string;
+begin
+  // DoZigCompanion's lines; a part that cannot be taken is reported and not
+  // stored (LoadBuildFile then drops an incomplete companion whole)
+  Result := True;
+  LPrefix := PC_ZIG_COMPANION_VAR + '.';
+
+  // Its linkage: always static
+  if ALine = PC_ZIG_FORM_LINKAGE_PRE + '.static,' then
+    Exit;
+
+  // Its name
+  if DoFormPayload(ALine, PC_ZIG_FORM_NAME_PRE, ',', LPayload) and
+    ZigStringValue(LPayload, LText) then
+  begin
+    if (LText <> '') and TPath.HasValidFileNameChars(LText, False) then
+      FCompanionName := LText
+    else if Assigned(FErrors) then
+      FErrors.Add(esError, PC_ERR_ZIGBUILD_BADPATH, RSZigBuildBadProjectName, [LText]);
+    Exit;
+  end;
+
+  // Its include path
+  if ALine.StartsWith(LPrefix) and
+    DoFormPayload(ALine.Substring(Length(LPrefix)), PC_ZIG_FORM_INCLUDE_PRE,
+    PC_ZIG_FORM_LAZY_SUF, LPayload) and ZigStringValue(LPayload, LText) then
+  begin
+    if DoAcceptPath(LText, FOutputPath, RSZigBuildWhatIncludePath, LResolved) then
+      FCompanionIncludePath := LResolved;
+    Exit;
+  end;
+
+  // Its TU's folder, then its file (one string literal on its own line)
+  if DoFormPayload(ALine, PC_ZIG_FORM_ROOT_PRE, PC_ZIG_FORM_ROOT_SUF, LPayload) and
+    ZigStringValue(LPayload, LText) then
+  begin
+    if DoAcceptPath(LText, FOutputPath, RSZigBuildWhatSourceFile, LResolved) then
+      ATURoot := LResolved
+    else
+      ATURoot := '';
+    Exit;
+  end;
+  if ALine.StartsWith('"') and ZigStringValue(ALine, LText) then
+  begin
+    if (ATURoot <> '') and
+      DoAcceptPath(LText, ATURoot, RSZigBuildWhatSourceFile, LResolved) then
+    begin
+      if TPCSourceFiles.LanguageOf(LResolved, LLanguage) then
+        FCompanionSource := LResolved
+      else if Assigned(FErrors) then
+        FErrors.Add(esError, PC_ERR_ZIGBUILD_NOTSOURCE, RSZigBuildNotSource,
+          [LText, TPCSourceFiles.ExtensionsText()]);
+    end;
+    Exit;
+  end;
+
+  // Its TU's flags: the -D entries are its defines; every other flag follows
+  // from its language (DoFlagsList) or is its .dia flag
+  if DoFormPayload(ALine, PC_ZIG_FORM_FLAGS_PRE, PC_ZIG_FORM_FLAGS_SUF, LPayload) and
+    ZigStringList(LPayload, LFlags) then
+  begin
+    FCompanionDefines.Clear();
+    for LFlag in LFlags do
+    begin
+      if LFlag.StartsWith('-D') then
+        FCompanionDefines.Add(LFlag.Substring(2));
+    end;
+    Exit;
+  end;
+
+  Result := False;
 end;
 
 function TPCZigBuild.DoLoadHeaderLine(const ALine: string): Boolean;
@@ -3303,6 +3848,7 @@ var
   LRoot: string;
   LTURoot: string;
   LTUIndex: Integer;
+  LInCompanion: Boolean;
 begin
   Result := False;
 
@@ -3347,8 +3893,19 @@ begin
     // Each line whole, in order: a TU's .root line comes before its file
     LTURoot := FOutputPath;
     LTUIndex := -1;
+    LInCompanion := False;
     for LI := 0 to LLines.Count - 1 do
-      DoLoadLine(LLines[LI].Trim(), LI + 1, LFilename, LTURoot, LTUIndex);
+      DoLoadLine(LLines[LI].Trim(), LI + 1, LFilename, LTURoot, LTUIndex, LInCompanion);
+
+    // A companion is whole or none: one without its name or its TU (a part
+    // refused above, or a line missing) would write a block zig cannot build
+    if LInCompanion and ((FCompanionName = '') or (FCompanionSource = '')) then
+    begin
+      if Assigned(FErrors) then
+        FErrors.Add(esWarning, PC_ERR_ZIGBUILD_WRNBUILDLINE,
+          RSZigBuildCompanionIncomplete, [LFilename]);
+      ClearCompanionLib();
+    end;
 
     Result := not FProjectName.IsEmpty;
   finally
@@ -3375,6 +3932,17 @@ begin
   begin
     if Assigned(FErrors) then
       FErrors.Add(esError, PC_ERR_ZIGBUILD_NOSOURCES, RSZigBuildNoSources);
+    Exit;
+  end;
+
+  // A companion of the main artifact's name would be the same file in lib\
+  // (a static library, or a DLL's import library); names compare without
+  // case, as Windows file names do
+  if (FCompanionName <> '') and SameText(FCompanionName, FProjectName) then
+  begin
+    if Assigned(FErrors) then
+      FErrors.Add(esError, PC_ERR_ZIGBUILD_COMPANIONNAME, RSZigBuildCompanionName,
+        [FCompanionName]);
     Exit;
   end;
 
@@ -3405,6 +3973,58 @@ end;
 
 // Invocation
 
+function TPCZigBuild.DoRunZig(const AZigExe: string; const AZigArgs: string): Boolean;
+begin
+  // One zig build over plain pipes, its lines captured afresh (a second run
+  // replaces the first one's captures). False = zig could not be started
+  // (reported)
+  Result := False;
+  FBuildOutput.Init(FOutputPath);
+  // A linker message about a linked library's file goes where the source
+  // names that library
+  FBuildOutput.SetLinkedFiles(DoLinkedFiles());
+  try
+    // zig prints no progress over pipes: with a progress callback the pipe is
+    // polled and the callback hears the elapsed time every PC_ZIG_PROGRESS_MS
+    // while zig is quiet (a build for a new target can be silent for minutes)
+    if FProgress.IsAssigned() then
+      TUtils.CaptureConsoleOutput(
+        '',
+        PChar(AZigExe),
+        PChar(AZigArgs),
+        FOutputPath,
+        FLastExitCode,
+        nil,
+        HandleOutputLine,
+        False,
+        PC_ZIG_PROGRESS_MS,
+        procedure(const AElapsedMs: UInt64; const AUserData: Pointer)
+        begin
+          FProgress.Callback(AElapsedMs, FProgress.UserData);
+        end
+      )
+    else
+      TUtils.CaptureConsoleOutput(
+        '',
+        PChar(AZigExe),
+        PChar(AZigArgs),
+        FOutputPath,
+        FLastExitCode,
+        nil,
+        HandleOutputLine
+      );
+  except
+    on E: Exception do
+    begin
+      if Assigned(FErrors) then
+        FErrors.Add(esError, PC_ERR_ZIGBUILD_ZIGSTART, RSZigBuildZigStartFailed,
+          [TUtils.StripLongPathPrefix(AZigExe), E.Message]);
+      Exit;
+    end;
+  end;
+  Result := True;
+end;
+
 function TPCZigBuild.Process(const AAutoRun: Boolean): Boolean;
 var
   LZigExe: string;
@@ -3427,6 +4047,11 @@ begin
   // Always save the build file first
   Status(RSZigBuildSaving);
   if not SaveBuildFile() then
+    Exit;
+  // The last run was cut off after zig compiled and before its .dia files
+  // were kept: zig may serve those TUs with nothing kept. Each TU with no
+  // kept .dia for its present state gets new flags, so this run compiles it
+  if DoRenewAfterCutOff() and (not SaveBuildFile()) then
     Exit;
 
   // Locate the zig executable
@@ -3469,47 +4094,31 @@ begin
     TUtils.QuoteCommandArg(TUtils.StripLongPathPrefix(FOutputPath));
 
   Status(RSZigBuildBuilding, [FProjectName]);
-  FBuildOutput.Init(FOutputPath);
-  try
-    // zig prints no progress over pipes: with a progress callback the pipe is
-    // polled and the callback hears the elapsed time every PC_ZIG_PROGRESS_MS
-    // while zig is quiet (a build for a new target can be silent for minutes)
-    if FProgress.IsAssigned() then
-      TUtils.CaptureConsoleOutput(
-        '',
-        PChar(LZigExe),
-        PChar(LZigArgs),
-        FOutputPath,
-        FLastExitCode,
-        nil,
-        HandleOutputLine,
-        False,
-        PC_ZIG_PROGRESS_MS,
-        procedure(const AElapsedMs: UInt64; const AUserData: Pointer)
-        begin
-          FProgress.Callback(AElapsedMs, FProgress.UserData);
-        end
-      )
-    else
-      TUtils.CaptureConsoleOutput(
-        '',
-        PChar(LZigExe),
-        PChar(LZigArgs),
-        FOutputPath,
-        FLastExitCode,
-        nil,
-        HandleOutputLine
-      );
-  except
-    on E: Exception do
-    begin
-      if Assigned(FErrors) then
-        FErrors.Add(esError, PC_ERR_ZIGBUILD_ZIGSTART, RSZigBuildZigStartFailed,
-          [TUtils.StripLongPathPrefix(LZigExe), E.Message]);
+  if not DoRunZig(LZigExe, LZigArgs) then
+    Exit;
+
+  // A TU zig served from its cache with no kept diagnostics (a save that
+  // failed, a build cut off before its .dia was kept) would report nothing:
+  // what was compiled is kept now, each missed TU gets new flags, and the
+  // build runs once more so zig compiles those TUs alone. Only when zig got
+  // as far as compiling: it finished, or some TU wrote its .dia (every .dia
+  // was deleted before the run). A build that stopped before it compiled (a
+  // library it cannot find) reached no TU, so a TU with no .dia there was
+  // not cached. Raw mode reads no .dia, so it never rebuilds
+  FZigCompiled := (FLastExitCode = 0) or DoAnyDiagFile();
+  if (not FRawOutput) and FZigCompiled and
+    DoRenewMissed(DoDiagCacheSettle(False)) then
+  begin
+    if not SaveBuildFile() then
       Exit;
-    end;
+    if not DoDiagFilePrepare() then
+      Exit;
+    if not DoRunZig(LZigExe, LZigArgs) then
+      Exit;
   end;
   DoFilterFlush();
+  // Every .dia of the run is kept: the run is no longer pending
+  DoDiagCacheEndRun();
 
   if FLastExitCode <> 0 then
   begin
@@ -3911,6 +4520,30 @@ function TPCZigBuild.DoFindLinkFile(const ALibrary: string; out APath: string): 
 begin
   // The linker's own search for -l<name> on a Linux target (FindLinkFile's Unix rule)
   Result := FindLinkFile(False, GetLibraryPaths(), ALibrary, APath);
+end;
+
+function TPCZigBuild.DoLinkedFiles(): TArray<TPCLinkedFile>;
+var
+  LWindows: Boolean;
+  LPaths: TArray<string>;
+  LIndex: Integer;
+  LFile: TPCLinkedFile;
+begin
+  // Each library of this build as the linker finds it on this target
+  // (FindLinkFile: the linker's own search over the library paths, never
+  // raises). A library no folder holds has no file: zig's own
+  // missing-library error names it
+  Result := nil;
+  LWindows := DoIsWindowsTarget();
+  LPaths := GetLibraryPaths();
+  for LIndex := 0 to FLinkLibraries.Count - 1 do
+  begin
+    LFile := Default(TPCLinkedFile);
+    if not FindLinkFile(LWindows, LPaths, FLinkLibraries[LIndex], LFile.FilePath) then
+      Continue;
+    LFile.LibraryName := FLinkLibraries[LIndex];
+    Result := Result + [LFile];
+  end;
 end;
 
 function TPCZigBuild.GetLibraryPaths(): TArray<string>;

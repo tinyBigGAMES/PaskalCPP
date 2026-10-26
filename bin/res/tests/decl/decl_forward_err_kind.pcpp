@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  decl_forward_err_kind.pcpp - Decl: forward, kind
+
+  Break step of decl_forward: a forward type completed by an alias (only a
+  record, object or overlay completes one).
+*******************************************************************************/
+
+module exe decl_forward_err_kind;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+forward type TCount;
+
+type
+  TCount = int32; // ERROR SM0305@3
+
+begin
+end.

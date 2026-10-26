@@ -1,0 +1,90 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  stmt_for.pcpp - Statement: for
+
+  for V := A to | downto B do ... end; (BNF.md sec 5): V is a variable
+  declared before the loop, of an integer, char, wchar or choices type; to counts
+  up, downto down, both ends included, and an empty range runs nothing.
+  The body reads V but never writes it. A C/C++ variable mixed into the file
+  is an iterator too; its type is clang's (GCpp).
+*******************************************************************************/
+
+module exe stmt_for;
+
+/*
+  @@test
+    kind run
+    expect
+    | up 1 2 3
+    | down 3 2 1
+    | chars a b c
+    | wide x y z
+    | choices 0 1 2
+    | cpp 7 8 9
+    | empty 0
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+type
+  TColor = choices(cRed, cGreen, cBlue);
+
+int GCpp = 0;
+
+var
+  LI: int32;
+  LC: char;
+  LW: wchar;
+  LK: TColor;
+  LRuns: int32;
+
+begin
+  print("up");
+  for LI := 1 to 3 do
+    print(" {}", LI);
+  end;
+  println("");
+  print("down");
+  for LI := 3 downto 1 do
+    print(" {}", LI);
+  end;
+  println("");
+  print("chars");
+  for LC := 'a' to 'c' do
+    print(" {}", LC);
+  end;
+  println("");
+  print("wide");
+  for LW := L'x' to L'z' do
+    print(" {}", LW);
+  end;
+  println("");
+  print("choices");
+  for LK := TColor.cRed to TColor.cBlue do
+    print(" {}", int32(LK));
+  end;
+  println("");
+  print("cpp");
+  for GCpp := 7 to 9 do
+    print(" {}", GCpp);
+  end;
+  println("");
+  LRuns := 0;
+  for LI := 5 to 1 do
+    LRuns += 1;
+  end;
+  println("empty {}", LRuns);
+end.

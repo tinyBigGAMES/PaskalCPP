@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dll_build_dll.pcpp - Build kind: a PaskalCPP dll (dep)
+
+  The dll dll_build links: one exported clink routine. Its build puts the
+  shared library in output\bin (with its import library in output\lib on
+  Windows), where dll_build looks for it.
+*******************************************************************************/
+
+module dll dll_build_dll;
+
+/*
+  @@test
+    kind dep
+  @@end
+*/
+
+exported routine clink dll_build_twice(AN: int32): int32;
+begin
+  return AN * 2;
+end;
+
+end.

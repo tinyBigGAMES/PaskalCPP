@@ -1,0 +1,65 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_cppstart.pcpp - Lexical: what a cppstart block holds
+
+  A cppstart block is C++ copied as written up to the cppend keyword (BNF.md
+  sec 10). The lexer reads it as C++ to find that cppend: a cppend in a
+  string or a // comment does not end the block, $ (a C++ identifier
+  character) and @ (stringized by a macro) are taken as they are, a #define
+  ending in a splice continues on the next line (LX_SEVEN), an unclosed
+  quote runs to its newline only (under #if 0, which clang skips), so the
+  cppend after it on that line is no cppend, and an empty line after a
+  last splice ends that line (LX_EMPTY), so the cppend after it closes the
+  block (no LX0014, see lex_splices_err_cppstart).
+*******************************************************************************/
+
+module exe lex_cppstart;
+
+/*
+  @@test
+    kind run
+    expect
+    | text cppend
+    | dollar 2
+    | at @home
+    | macro 7
+    | skipped ok
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+cppstart source
+const char* GText = "cppend"; // cppend
+int $count = 2;
+int GDollar = $count;
+#define LX_STR(x) #x
+const char* GAt = LX_STR(@home);
+#define LX_SEVEN 3 + \
+  4
+#if 0
+  x = 'a cppend;
+#endif
+#define LX_EMPTY \
+
+cppend;
+
+begin
+  println("text {}", GText);
+  println("dollar {}", GDollar);
+  println("at {}", GAt);
+  println("macro {}", LX_SEVEN);
+  println("skipped ok");
+end.

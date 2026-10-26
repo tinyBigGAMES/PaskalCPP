@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_splices_err_cppstart_blanks.pcpp - Lexical: blanks before cppend
+
+  Break step of lex_splices: blanks before cppend are no empty line, so the
+  splice ending the block's last line of C++ still joins cppend's line to
+  it, LX0014 at the backslash (an empty line between them would end the
+  splice, see lex_cppstart). The marked line ends in the splice, so its
+  marker is a block-comment marker.
+*******************************************************************************/
+
+module exe lex_splices_err_cppstart_blanks;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+cppstart source
+int GX = 1; /* // ERROR LX0014@41 // */ \
+  cppend;
+
+begin
+  println("{}", 1);
+end.

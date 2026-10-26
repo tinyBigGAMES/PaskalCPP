@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lex_newlines_err_cr_string.pcpp - Lexical: a string a lone CR ends
+
+  Break step of lex_newlines: a lone CR is a newline, and a string ends
+  at its line's end at the latest, so a string a lone CR cuts off is
+  unterminated, LX0001, where it starts; the line after the CR is read
+  on its own.
+  Its bytes are part of the test (see above): edit it with an editor
+  that keeps them as they are.
+*******************************************************************************/
+
+module exe lex_newlines_err_cr_string;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+begin
+  println("ab // ERROR LX0001@11  );
+end.
