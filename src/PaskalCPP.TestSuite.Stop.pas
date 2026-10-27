@@ -16,9 +16,12 @@
   PaskalCPP.TestSuite.Stop - TPCTestStop, the clean way out of a test run
 
   A run is stopped by a press: the key combo Ctrl+Shift+Alt+X (read from the
-  whole keyboard, so it reaches a run with no console window), or the stop
+  whole keyboard, so it reaches a run with no console window), the stop
   file appearing in the output folder (taken and deleted, so making it again
-  is the next press). One thread polls both every PC_TS_STOP_POLL_MS.
+  is the next press), or Press from code (the control channel's stop and
+  abort, `testbed -rpc`). One thread polls the key and the file every
+  PC_TS_STOP_POLL_MS and runs the poll hook (the control channel's
+  heartbeat and mailbox) each round.
   First press: the suite runs no further cell; the one running finishes.
   Second press: every process the suite started (and theirs) is ended, so
   a hung cell returns at once. Ctrl+C keeps its own meaning: it is no stop.
@@ -68,6 +71,7 @@ type
     FPresses: Integer;
     FThread: TThread;
     FDone: Boolean;
+    FPollHook: TProc;
     procedure DoPoll();
     function DoKeyComboPressed(): Boolean;
     function DoStopFileTaken(): Boolean;
@@ -80,6 +84,13 @@ type
     // AOutputRoot: the folder the stop file is looked for in ('' = key only)
     procedure Start(const AOutputRoot: string);
     procedure Halt();
+
+    // A press from code (the control channel's stop / abort): the same as
+    // the key or the stop file. Safe from any thread
+    procedure Press();
+    // Called on the stop thread every poll round, before the presses are
+    // read (nil = none); set before Start
+    procedure SetPollHook(const AHook: TProc);
 
     // Presses so far (0 = run on)
     function Presses(): Integer;
@@ -108,6 +119,7 @@ begin
   FPresses := 0;
   FThread := nil;
   FDone := False;
+  FPollHook := nil;
 end;
 
 destructor TPCTestStop.Destroy();
@@ -165,6 +177,8 @@ begin
   TInput.Clear();
   while not FDone do
   begin
+    if Assigned(FPollHook) then
+      FPollHook();
     if DoKeyComboPressed() or DoStopFileTaken() then
       DoPress();
     // A forced stop keeps ending what the running cell starts after it
@@ -200,6 +214,16 @@ end;
 procedure TPCTestStop.DoPress();
 begin
   TInterlocked.Increment(FPresses);
+end;
+
+procedure TPCTestStop.Press();
+begin
+  DoPress();
+end;
+
+procedure TPCTestStop.SetPollHook(const AHook: TProc);
+begin
+  FPollHook := AHook;
 end;
 
 function TPCTestStop.Presses(): Integer;

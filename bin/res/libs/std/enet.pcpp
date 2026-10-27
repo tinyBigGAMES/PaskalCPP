@@ -1,0 +1,92 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  enet.pcpp - the enet unit: `import enet;` sends and receives over UDP with
+  ENet (https://github.com/lsalzman/enet), a small networking library in C
+  with reliable, ordered packets on top of UDP, connection management and
+  channels. A self-describing vendor module: it owns every include path,
+  library path and link library it needs, per official target. The library
+  is libenet.a (one per target), built by PaskalCPP-Libs' build-enet.cmd
+  from ENet's own CMake project (static), shipped under ENet's MIT license.
+  On Windows it links ws2_32 (sockets) and winmm (timeGetTime); on Linux
+  the C runtime has both.
+
+  The API is ENet's C API as it ships, called straight from PaskalCPP:
+  - Setup: enet_initialize() once before any other call (0 = ready),
+    enet_deinitialize() once at the end.
+  - Addresses: an ENetAddress holds host (an IPv4 address in network byte
+    order) and port (host byte order). enet_address_set_host(address of A,
+    "127.0.0.1") fills host from a name or dotted address (0 = done);
+    ENET_HOST_ANY binds every interface, ENET_PORT_ANY lets the system pick
+    a free port.
+  - Hosts: enet_host_create(address, peers, channels, in, out) makes a host
+    (nil on failure): a server passes the address it listens on, a client
+    passes nil. With ENET_PORT_ANY the bound port is read back from the
+    host's address field. enet_host_destroy frees it and every peer.
+  - Connecting: enet_host_connect(host, address of A, channels, data) gives
+    the peer that is connecting; the connection is made by servicing.
+    enet_peer_timeout(peer, limit, minimum, maximum) sets how long an
+    unanswered peer is kept (milliseconds); a peer that never answers ends in
+    a DISCONNECT event. Each side gets its own CONNECT event when it services
+    its host, the client's often before the server's: a server reaches (and
+    broadcasts to) only the peers whose CONNECT it has seen.
+  - Servicing: enet_host_service(host, address of E, timeout) sends what is
+    queued and waits up to timeout milliseconds for one event: > 0 = E holds
+    an event, 0 = none, < 0 = failure. E.type is ENET_EVENT_TYPE_CONNECT,
+    _RECEIVE or _DISCONNECT; E.peer is the peer it is about, E.channelID and
+    E.packet (RECEIVE only) the channel and the packet, E.data the value the
+    other side passed to connect / disconnect.
+  - Packets: enet_packet_create(data, length, flags) copies length bytes
+    into a new packet (ENET_PACKET_FLAG_RELIABLE: delivered and in order);
+    enet_peer_send(peer, channel, packet) queues it (0 = queued, and the
+    packet then belongs to ENet), enet_host_broadcast to every peer. A
+    received packet (E.packet^.data, E.packet^.dataLength) belongs to the
+    caller and is freed with enet_packet_destroy. enet_host_flush sends the
+    queue without waiting for an event.
+  - Ending: enet_peer_disconnect(peer, data) asks for a clean close (a
+    DISCONNECT event on both sides once serviced), enet_peer_reset drops the
+    peer at once without telling the other side.
+==============================================================================*/
+
+module unit enet;
+
+// Self-describing vendor module: it owns every path it needs.
+
+@addincludepath "$P:res/libs/vendor/enet/include";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/enet/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/enet/lib/x86_64-linux-gnu";
+@else
+  @message error "enet: unsupported target";
+@endif
+
+@linklibrary "enet";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @linklibrary "ws2_32";
+  @linklibrary "winmm";
+@endif
+
+// The header goes to this unit's header, so every importer sees ENet's API
+cpp header;
+
+#include "enet/enet.h"
+
+end.

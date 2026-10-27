@@ -22,7 +22,9 @@
   play from memory, and the music streams, raylib reading its IO while it
   plays (so that IO stays open until UnloadMusicStreamIO). 1 / 2 / 3 play a
   sound effect, Space pauses / resumes the music, N plays the next track,
-  Escape or the close button ends it.
+  F11 toggles fullscreen, Escape or the close button ends it. The window is
+  raylib_ext's frame window: drawn in 800 x 450 units, sized for the
+  monitor's DPI, the picture scaled and letterboxed on resize.
 ==============================================================================*/
 
 module exe RaylibZip;
@@ -34,6 +36,7 @@ import
   raylib,
   raylib_ext,
   CustomIO,
+  Math,
   SysUtils;
 
 const
@@ -75,10 +78,10 @@ begin
   return LResult;
 end;
 
-// A raylib Vector2 from its two parts
-routine V2(const AX: float32; const AY: float32): Vector2;
+// A raylib Vector2 from its two parts (::Vector2: Math has one of its own)
+routine V2(const AX: float32; const AY: float32): ::Vector2;
 var
-  LResult: Vector2;
+  LResult: ::Vector2;
 begin
   LResult.x := AX;
   LResult.y := AY;
@@ -157,10 +160,16 @@ begin
     return;
   end;
 
-  SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT | FLAG_WINDOW_HIGHDPI | FLAG_WINDOW_RESIZABLE);
-  InitWindow(CScreenWidth, CScreenHeight, "PaskalCPP + raylib: assets from a zip");
+  SetConfigFlags(FLAG_VSYNC_HINT | FLAG_MSAA_4X_HINT);
+  // The frame window: drawn in 800 x 450 units, sized for the monitor's DPI,
+  // scaled and letterboxed on resize
+  if not InitFrameWindow(CScreenWidth, CScreenHeight, "PaskalCPP + raylib: assets from a zip") then
+    println("the window did not open");
+    return;
+  end;
   InitAudioDevice();
   SetTargetFPS(60);
+  SetFrameColor(Rgb(24, 24, 32));
 
   LTexture := ZipTexture("res/assets/images/paskalcpp.png", ".png");
   if LTexture.id = 0 then
@@ -211,6 +220,9 @@ begin
       end;
       LPaused := not LPaused;
     end;
+    if IsKeyPressed(KEY_F11) then
+      ToggleFrameFullscreen();
+    end;
     if IsKeyPressed(KEY_N) then
       // The music stops reading before its IO closes and the next one opens
       UnloadMusicStreamIO(LMusic);
@@ -223,7 +235,7 @@ begin
     end;
 
     // The image sways gently; a sound effect flashes the frame
-    LAngle := 6.0f * sinf(float32(GetTime()) * 1.5f);
+    LAngle := 6.0f * Sin(float32(GetTime()) * 1.5f);
     LFlash := LFlash - GetFrameTime() * 3.0f;
     if LFlash < 0.0f then
       LFlash := 0.0f;
@@ -242,7 +254,7 @@ begin
     end;
 
     BeginDrawing();
-    ClearBackground(Rgb(24, 24, 32));
+    BeginFrame();
     DrawRectangleLinesEx(Rect(2.0f, 2.0f, float32(CScreenWidth) - 4.0f, float32(CScreenHeight) - 4.0f),
       2.0f + (6.0f * LFlash), Rgb(80 + int32(150.0f * LFlash), 120, 200));
     DrawTexturePro(LTexture, Rect(0.0f, 0.0f, float32(LTexture.width), float32(LTexture.height)),
@@ -251,6 +263,7 @@ begin
       GetMusicTimePlayed(LMusic), GetMusicTimeLength(LMusic)), V2(16.0f, 352.0f), 20.0f, 1.0f, Rgb(230, 230, 230));
     DrawTextEx(LFont, "1 / 2 / 3 sound effect   Space pause / resume   N next track   Escape quit",
       V2(16.0f, 390.0f), 16.0f, 1.0f, Rgb(160, 200, 160));
+    EndFrame();
     EndDrawing();
   end;
 

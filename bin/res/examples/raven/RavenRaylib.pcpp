@@ -1,0 +1,187 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  RavenRaylib.pcpp - a Raven user interface over a raylib scene (import
+  raven_raylib). raylib opens the window, draws the moving scene and plays
+  the sound; Raven lays out and draws its widgets over it: a title, a status
+  line, a text input, a choice box and two buttons. "Play a sound" plays a
+  raylib Sound and counts the clicks, "Quit" ends the program. The UI is
+  built in code with Raven's C API, called straight from PaskalCPP; its
+  callbacks are clink routines. The window is raylib_ext's frame window
+  (960 x 540 units, sized for the monitor's DPI, scaled and letterboxed on
+  resize): Raven works in the same units, its text sharp at the frame's
+  real size. F11 toggles fullscreen; Escape or the close button ends it.
+==============================================================================*/
+
+module exe RavenRaylib;
+
+@exeicon "$P:res/assets/icons/paskalcpp.ico";
+
+import
+  raylib,
+  raylib_ext,
+  raven,
+  raven_raylib,
+  SysUtils,
+  Math;
+
+const
+  CScreenWidth: int32 = 960;
+  CScreenHeight: int32 = 540;
+  // How many balls the scene draws
+  CBalls: int32 = 12;
+
+var
+  // The widgets the callbacks read and change
+  GStatus: Rid;
+  GName: Rid;
+  GClicks: int32;
+  GSound: Sound;
+  GQuit: bool;
+
+routine clink OnError(ACode: RError; ASeverity: RSeverity; ADetail: ptr to const char);
+begin
+  println("[Raven] {} ({}): {}", Rerror_to_string(ACode), Rseverity_to_string(ASeverity), ADetail);
+end;
+
+// "Play a sound": the raylib sound, and the count in the status line
+routine clink OnPlay(AButton: Rid; AUserData: ptr);
+begin
+  GClicks := GClicks + 1;
+  PlaySound(GSound);
+  Rlabel_set_text(GStatus, TextFormat("Played %d time(s), %s", GClicks, Rtext_input_get_text(GName)));
+end;
+
+routine clink OnQuit(AButton: Rid; AUserData: ptr);
+begin
+  GQuit := true;
+end;
+
+// The UI window: a column in the middle of the frame
+routine BuildUi(): Rid;
+var
+  LWindow: Rid;
+  LBox: Rid;
+  LTitle: Rid;
+  LChoice: Rid;
+  LRow: Rid;
+  LPlay: Rid;
+  LQuit: Rid;
+begin
+  // Its size follows the frame (UpdateRaven): any size will do here
+  LWindow := Rwindow_create("RavenRaylib", CScreenWidth, CScreenHeight, R_WINDOW_DEFAULT);
+  LBox := Rwidget_create(R_WIDGET_VBOX);
+  Rpanel_set_spacing(LBox, 12.0f);
+  Rslot_set_halign(LBox, R_HALIGN_CENTER);
+  Rslot_set_valign(LBox, R_VALIGN_CENTER);
+  Rwindow_set_content(LWindow, LBox);
+
+  LTitle := Rwidget_add_child(LBox, Rlabel_create("Raven UI over a raylib scene"));
+  Rlabel_set_text_size(LTitle, 24.0f);
+  Rslot_set_halign(LTitle, R_HALIGN_CENTER);
+  GStatus := Rwidget_add_child(LBox, Rlabel_create("Type a name, then play a sound"));
+  Rslot_set_halign(GStatus, R_HALIGN_CENTER);
+
+  GName := Rwidget_add_child(LBox, Rwidget_create(R_WIDGET_TEXT_INPUT));
+  Rtext_input_set_placeholder(GName, "Your name");
+  Rwidget_set_size(GName, 260.0f, -1.0f);
+  Rslot_set_halign(GName, R_HALIGN_CENTER);
+
+  LChoice := Rwidget_add_child(LBox, Rwidget_create(R_WIDGET_COMBO_BOX));
+  Rcombo_box_add_item(LChoice, "Easy");
+  Rcombo_box_add_item(LChoice, "Normal");
+  Rcombo_box_add_item(LChoice, "Hard");
+  Rcombo_box_set_selected(LChoice, 1);
+  Rwidget_set_size(LChoice, 160.0f, -1.0f);
+  Rslot_set_halign(LChoice, R_HALIGN_CENTER);
+
+  LRow := Rwidget_add_child(LBox, Rwidget_create(R_WIDGET_HBOX));
+  Rpanel_set_spacing(LRow, 8.0f);
+  Rslot_set_halign(LRow, R_HALIGN_CENTER);
+  LPlay := Rwidget_add_child(LRow, Rbutton_create("Play a sound"));
+  Rbutton_set_style(LPlay, R_BUTTON_PRIMARY);
+  Rbutton_set_clicked_callback(LPlay, OnPlay, nil);
+  LQuit := Rwidget_add_child(LRow, Rbutton_create("Quit"));
+  Rbutton_set_clicked_callback(LQuit, OnQuit, nil);
+  return LWindow;
+end;
+
+// The game's part of the frame: a gradient and balls on their orbits
+routine DrawScene(const ATime: float32);
+var
+  LBall: int32;
+  LAngle: float32;
+  LCenter: ::Vector2;
+begin
+  DrawRectangleGradientV(0, 0, CScreenWidth, CScreenHeight, ColorFromHSV(220.0f, 0.7f, 0.55f),
+    ColorFromHSV(330.0f, 0.7f, 0.55f));
+  for LBall := 0 to CBalls - 1 do
+    LAngle := ATime * 0.8f + float32(LBall) * 0.52f;
+    LCenter.x := float32(CScreenWidth) * 0.5f + Cos(LAngle) * float32(CScreenWidth) * 0.42f;
+    LCenter.y := float32(CScreenHeight) * 0.5f + Sin(LAngle * 1.3f) * float32(CScreenHeight) * 0.40f;
+    DrawCircleV(LCenter, 18.0f + float32(LBall mod 3) * 8.0f, Fade(ColorFromHSV(float32(LBall) * 30.0f, 0.7f, 1.0f), 0.85f));
+  end;
+  DrawText("raylib draws this scene", 12, CScreenHeight - 30, 20, RAYWHITE);
+end;
+
+var
+  LUi: Rid;
+
+begin
+  SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
+  if not InitFrameWindow(CScreenWidth, CScreenHeight, "PaskalCPP - Raven in raylib") then
+    println("the window did not open");
+    return;
+  end;
+  SetTargetFPS(60);
+  InitAudioDevice();
+  GSound := LoadSound(ResolvePath("$P:../../res/assets/audio/sfx/explo_rock.ogg").c_str());
+
+  Rerror_set_callback(OnError);
+  if not InitRaven("RavenRaylib") then
+    println("Raven did not start");
+    UnloadSound(GSound);
+    CloseAudioDevice();
+    CloseWindow();
+    return;
+  end;
+  LUi := BuildUi();
+  GClicks := 0;
+  GQuit := false;
+
+  while not WindowShouldClose() and not GQuit do
+    if IsKeyPressed(KEY_F11) then
+      ToggleFrameFullscreen();
+    end;
+    // Raven's frame before raylib's: its input, layout and callbacks
+    if not UpdateRaven(LUi) then
+      leave;
+    end;
+
+    BeginDrawing();
+    BeginFrame();
+    DrawScene(float32(GetTime()));
+    // Over the scene, in the frame's units
+    DrawRaven(LUi);
+    EndFrame();
+    DrawFPS(10, 10);
+    EndDrawing();
+  end;
+
+  CloseRaven();
+  UnloadSound(GSound);
+  CloseAudioDevice();
+  CloseWindow();
+end.

@@ -1,0 +1,191 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_yyjson.pcpp - Std library compliance: the yyjson vendor unit
+  (res\libs\std\yyjson.pcpp)
+
+  yyjson's C API called straight from PaskalCPP: the linked library is the
+  one its header names. A JSON text is parsed into a read-only document and
+  walked: the root object's size, a string, an integer, a real, a bool, an
+  array's items by index and a member that is not there (nil). A mutable
+  document is built (string, integer, real, bool and an array of integers;
+  one string added by yyjson_mut_obj_add_strcpy from a PaskalCPP string
+  that changes before the write, so the written text proves the copy),
+  written compact, read back and walked again (the round trip). Malformed
+  text returns nil with the reader's error code, byte position and message:
+  a trailing comma (JSON_STRUCTURE at the comma; the same text parses with
+  YYJSON_READ_ALLOW_TRAILING_COMMAS), a text that ends early (UNEXPECTED_END
+  at its length), a bad literal (LITERAL where it starts).
+*******************************************************************************/
+
+module exe std_yyjson;
+
+/*
+  @@test
+    kind run
+    expect
+    | header matches lib true
+    | parsed true root object true size 5
+    | name pcpp version 3 ratio 0.5 debug true
+    | tags 3 a b c
+    | absent nil true
+    | written {"title":"demo","width":640,"scale":1.5,"vsync":true,"levels":[1,2,3],"player":"Ada"}
+    | written length 85
+    | round trip true title demo width 640 scale 1.5 vsync true
+    | round trip levels 3 sum 6 player Ada
+    | trailing comma nil true code 7 pos 6 trailing comma is not allowed
+    | trailing comma allowed true a 1
+    | unexpected end nil true code 5 pos 9 unexpected end of data
+    | bad literal nil true code 11 pos 1 invalid literal, expected 'true'
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  yyjson;
+
+// Parses AText; nil with AErr set when the text is not JSON. yyjson_read_opts
+// takes a writable buffer (it reads in place only with YYJSON_READ_INSITU):
+// a local copy's data() is that buffer
+routine Parse(const AText: string; const AFlags: yyjson_read_flag;
+  var AErr: yyjson_read_err): ptr to yyjson_doc;
+var
+  LBuffer: string;
+begin
+  LBuffer := AText;
+  return yyjson_read_opts(LBuffer.data(), LBuffer.length(), AFlags, nil, address of AErr);
+end;
+
+// Prints the error code, byte position and message of one malformed text
+routine ShowError(const ALabel: string; const AText: string);
+var
+  LErr: yyjson_read_err;
+  LDoc: ptr to yyjson_doc;
+begin
+  LDoc := Parse(AText, YYJSON_READ_NOFLAG, LErr);
+  println("{} nil {} code {} pos {} {}", ALabel, LDoc = nil, LErr.code, LErr.pos, LErr.msg);
+  yyjson_doc_free(LDoc);
+end;
+
+// Builds the settings document: one of each kind of value
+routine BuildSettings(const ADoc: ptr to yyjson_mut_doc);
+var
+  LRoot: ptr to yyjson_mut_val;
+  LLevels: ptr to yyjson_mut_val;
+  LPlayer: string;
+begin
+  LRoot := yyjson_mut_obj(ADoc);
+  yyjson_mut_doc_set_root(ADoc, LRoot);
+  // Literal keys and values: yyjson keeps the pointer, a literal lives on
+  yyjson_mut_obj_add_str(ADoc, LRoot, "title", "demo");
+  yyjson_mut_obj_add_int(ADoc, LRoot, "width", 640);
+  yyjson_mut_obj_add_real(ADoc, LRoot, "scale", 1.5);
+  yyjson_mut_obj_add_bool(ADoc, LRoot, "vsync", true);
+  LLevels := yyjson_mut_arr(ADoc);
+  yyjson_mut_arr_add_int(ADoc, LLevels, 1);
+  yyjson_mut_arr_add_int(ADoc, LLevels, 2);
+  yyjson_mut_arr_add_int(ADoc, LLevels, 3);
+  yyjson_mut_obj_add_val(ADoc, LRoot, "levels", LLevels);
+  // A PaskalCPP string's text: copied into the document, so changing the
+  // string afterwards leaves the written value as it was
+  LPlayer := "Ada";
+  yyjson_mut_obj_add_strcpy(ADoc, LRoot, "player", LPlayer.c_str());
+  LPlayer := "changed before the write";
+end;
+
+// Walks the written text back: every value the build put in
+routine CheckRoundTrip(const AText: string);
+var
+  LErr: yyjson_read_err;
+  LDoc: ptr to yyjson_doc;
+  LRoot: ptr to yyjson_val;
+  LLevels: ptr to yyjson_val;
+  LSum: int64;
+  LIndex: size_t;
+begin
+  LDoc := Parse(AText, YYJSON_READ_NOFLAG, LErr);
+  LRoot := yyjson_doc_get_root(LDoc);
+  println("round trip {} title {} width {} scale {} vsync {}", LDoc <> nil,
+    yyjson_get_str(yyjson_obj_get(LRoot, "title")),
+    yyjson_get_sint(yyjson_obj_get(LRoot, "width")),
+    yyjson_get_real(yyjson_obj_get(LRoot, "scale")),
+    yyjson_get_bool(yyjson_obj_get(LRoot, "vsync")));
+  LLevels := yyjson_obj_get(LRoot, "levels");
+  LSum := 0;
+  LIndex := 0;
+  while LIndex < yyjson_arr_size(LLevels) do
+    LSum := LSum + yyjson_get_sint(yyjson_arr_get(LLevels, LIndex));
+    LIndex := LIndex + 1;
+  end;
+  println("round trip levels {} sum {} player {}", yyjson_arr_size(LLevels), LSum,
+    yyjson_get_str(yyjson_obj_get(LRoot, "player")));
+  yyjson_doc_free(LDoc);
+end;
+
+var
+  LText: string;
+  LErr: yyjson_read_err;
+  LDoc: ptr to yyjson_doc;
+  LRoot: ptr to yyjson_val;
+  LTags: ptr to yyjson_val;
+  LMut: ptr to yyjson_mut_doc;
+  LOut: ptr to char;
+  LLength: size_t;
+  LWritten: string;
+
+begin
+  println("header matches lib {}", yyjson_version() = YYJSON_VERSION_HEX);
+
+  // Parse and walk a read-only document
+  LText := R"({"name":"pcpp","version":3,"ratio":0.5,"tags":["a","b","c"],"debug":true})";
+  LDoc := Parse(LText, YYJSON_READ_NOFLAG, LErr);
+  LRoot := yyjson_doc_get_root(LDoc);
+  println("parsed {} root object {} size {}", LDoc <> nil, yyjson_is_obj(LRoot),
+    yyjson_obj_size(LRoot));
+  println("name {} version {} ratio {} debug {}",
+    yyjson_get_str(yyjson_obj_get(LRoot, "name")),
+    yyjson_get_int(yyjson_obj_get(LRoot, "version")),
+    yyjson_get_real(yyjson_obj_get(LRoot, "ratio")),
+    yyjson_get_bool(yyjson_obj_get(LRoot, "debug")));
+  LTags := yyjson_obj_get(LRoot, "tags");
+  println("tags {} {} {} {}", yyjson_arr_size(LTags), yyjson_get_str(yyjson_arr_get(LTags, 0)),
+    yyjson_get_str(yyjson_arr_get(LTags, 1)), yyjson_get_str(yyjson_arr_get(LTags, 2)));
+  println("absent nil {}", yyjson_obj_get(LRoot, "absent") = nil);
+  yyjson_doc_free(LDoc);
+
+  // Build a mutable document and write it compact
+  LMut := yyjson_mut_doc_new(nil);
+  BuildSettings(LMut);
+  LLength := 0;
+  LOut := yyjson_mut_write(LMut, YYJSON_WRITE_NOFLAG, address of LLength);
+  LWritten := string(LOut);
+  // The text is malloc'd by yyjson: freed with free() (the C boundary)
+  free(LOut);
+  yyjson_mut_doc_free(LMut);
+  println("written {}", LWritten);
+  println("written length {}", LLength);
+
+  // Read the written text back
+  CheckRoundTrip(LWritten);
+
+  // Malformed text: nil, the error code and where reading stopped
+  ShowError("trailing comma", R"({"a":1,})");
+  LDoc := Parse(R"({"a":1,})", YYJSON_READ_ALLOW_TRAILING_COMMAS, LErr);
+  println("trailing comma allowed {} a {}", LDoc <> nil,
+    yyjson_get_int(yyjson_obj_get(yyjson_doc_get_root(LDoc), "a")));
+  yyjson_doc_free(LDoc);
+  ShowError("unexpected end", R"({"a":[1,2)");
+  ShowError("bad literal", "[tru]");
+end.

@@ -1,0 +1,316 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  FlecsBoids.pcpp - a flock of boids run by flecs (import flecs), drawn with
+  raylib. Every boid is an entity with a Position and a Velocity component.
+  Three systems run on every progress, in the order they were registered:
+  Gather copies each boid's position and velocity into a snapshot, Steer
+  turns each boid toward its neighbours' centre and heading, away from
+  boids too close and away from the mouse, Move moves it and wraps it around
+  the frame's edges. The frame is drawn with LWorld.each over the same two
+  components. The window is raylib_ext's frame window (960 x 540 units,
+  sized for the monitor's DPI, scaled and letterboxed on resize). A left
+  click adds boids at the mouse; F11 toggles fullscreen; Escape or the close
+  button ends it.
+==============================================================================*/
+
+module exe FlecsBoids;
+
+@exeicon "$P:res/assets/icons/paskalcpp.ico";
+
+import
+  raylib,
+  raylib_ext,
+  flecs,
+  Math;
+
+const
+  CScreenWidth: int32 = 960;
+  CScreenHeight: int32 = 540;
+  // The flock at the start, how many a click adds, and the most there can be
+  CStartBoids: int32 = 150;
+  CClickBoids: int32 = 10;
+  CMaxBoids: int32 = 600;
+  // Neighbours closer than this steer a boid; closer than CPersonalSpace push it away
+  CViewRadius: float32 = 60.0f;
+  CPersonalSpace: float32 = 18.0f;
+  // How hard each rule turns a boid, per second
+  CCohesion: float32 = 1.0f;
+  CAlignment: float32 = 2.0f;
+  CSeparation: float32 = 6.0f;
+  // Boids within this distance of the mouse flee it
+  CMouseRadius: float32 = 90.0f;
+  CMouseForce: float32 = 600.0f;
+  // Speed limits in pixels per second
+  CMinSpeed: float32 = 60.0f;
+  CMaxSpeed: float32 = 160.0f;
+
+type
+  // Where a boid is, in pixels
+  Position = record
+    x: float32;
+    y: float32;
+  end;
+
+  // Where a boid is heading, in pixels per second
+  Velocity = record
+    x: float32;
+    y: float32;
+  end;
+
+var
+  // This frame's copy of every boid, filled by Gather and read by Steer
+  GSnapPositions: array[0..CMaxBoids - 1] of Position;
+  GSnapVelocities: array[0..CMaxBoids - 1] of Velocity;
+  GSnapCount: int32;
+  // The frame time and the mouse, read by the systems
+  GDeltaTime: float32;
+  GMouse: ::Vector2;
+
+// A raylib vector of AX, AY
+routine Vec(const AX: float32; const AY: float32): ::Vector2;
+var
+  LResult: ::Vector2;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  return LResult;
+end;
+
+// The Gather system: copies one boid into the frame's snapshot
+routine Gather(const AP: Position; const AV: Velocity);
+begin
+  if GSnapCount < CMaxBoids then
+    GSnapPositions[GSnapCount] := AP;
+    GSnapVelocities[GSnapCount] := AV;
+    GSnapCount := GSnapCount + 1;
+  end;
+end;
+
+// Keeps a velocity's speed inside CMinSpeed .. CMaxSpeed
+routine LimitSpeed(var AV: Velocity);
+var
+  LSpeed: float32;
+  LTarget: float32;
+begin
+  LSpeed := Sqrt(AV.x * AV.x + AV.y * AV.y);
+  if LSpeed > 0.0f then
+    LTarget := Clamp(LSpeed, CMinSpeed, CMaxSpeed);
+    AV.x := AV.x / LSpeed * LTarget;
+    AV.y := AV.y / LSpeed * LTarget;
+  else
+    AV.x := CMinSpeed;
+  end;
+end;
+
+// The Steer system: turns one boid by the flocking rules and the mouse
+routine Steer(const AP: Position; var AV: Velocity);
+var
+  LI: int32;
+  LDx: float32;
+  LDy: float32;
+  LDist: float32;
+  LNear: int32;
+  LCenterX: float32;
+  LCenterY: float32;
+  LHeadX: float32;
+  LHeadY: float32;
+  LPushX: float32;
+  LPushY: float32;
+begin
+  LNear := 0;
+  LCenterX := 0.0f;
+  LCenterY := 0.0f;
+  LHeadX := 0.0f;
+  LHeadY := 0.0f;
+  LPushX := 0.0f;
+  LPushY := 0.0f;
+  for LI := 0 to GSnapCount - 1 do
+    LDx := GSnapPositions[LI].x - AP.x;
+    LDy := GSnapPositions[LI].y - AP.y;
+    LDist := Sqrt(LDx * LDx + LDy * LDy);
+    // The boid itself is in the snapshot, at distance 0
+    if (LDist > 0.0f) and (LDist < CViewRadius) then
+      LNear := LNear + 1;
+      LCenterX := LCenterX + GSnapPositions[LI].x;
+      LCenterY := LCenterY + GSnapPositions[LI].y;
+      LHeadX := LHeadX + GSnapVelocities[LI].x;
+      LHeadY := LHeadY + GSnapVelocities[LI].y;
+      // Pushed away harder the closer the neighbour is
+      if LDist < CPersonalSpace then
+        LPushX := LPushX - LDx / LDist * (CPersonalSpace - LDist);
+        LPushY := LPushY - LDy / LDist * (CPersonalSpace - LDist);
+      end;
+    end;
+  end;
+
+  if LNear > 0 then
+    // Cohesion: toward the neighbours' centre; alignment: toward their mean heading
+    LCenterX := LCenterX / float32(LNear) - AP.x;
+    LCenterY := LCenterY / float32(LNear) - AP.y;
+    LHeadX := LHeadX / float32(LNear) - AV.x;
+    LHeadY := LHeadY / float32(LNear) - AV.y;
+    AV.x := AV.x + (LCenterX * CCohesion + LHeadX * CAlignment) * GDeltaTime;
+    AV.y := AV.y + (LCenterY * CCohesion + LHeadY * CAlignment) * GDeltaTime;
+  end;
+  AV.x := AV.x + LPushX * CSeparation * GDeltaTime;
+  AV.y := AV.y + LPushY * CSeparation * GDeltaTime;
+
+  // Flee the mouse
+  LDx := AP.x - GMouse.x;
+  LDy := AP.y - GMouse.y;
+  LDist := Sqrt(LDx * LDx + LDy * LDy);
+  if (LDist > 0.0f) and (LDist < CMouseRadius) then
+    AV.x := AV.x + LDx / LDist * CMouseForce * GDeltaTime;
+    AV.y := AV.y + LDy / LDist * CMouseForce * GDeltaTime;
+  end;
+
+  LimitSpeed(AV);
+end;
+
+// The Move system: moves one boid and wraps it around the window edges
+routine Move(var AP: Position; const AV: Velocity);
+begin
+  AP.x := AP.x + AV.x * GDeltaTime;
+  AP.y := AP.y + AV.y * GDeltaTime;
+  if AP.x < 0.0f then
+    AP.x := AP.x + float32(CScreenWidth);
+  end;
+  if AP.x >= float32(CScreenWidth) then
+    AP.x := AP.x - float32(CScreenWidth);
+  end;
+  if AP.y < 0.0f then
+    AP.y := AP.y + float32(CScreenHeight);
+  end;
+  if AP.y >= float32(CScreenHeight) then
+    AP.y := AP.y - float32(CScreenHeight);
+  end;
+end;
+
+// Draws one boid as a triangle pointing where it heads
+routine DrawBoid(const AP: Position; const AV: Velocity);
+var
+  LSpeed: float32;
+  LFx: float32;
+  LFy: float32;
+  LTip: ::Vector2;
+  LLeft: ::Vector2;
+  LRight: ::Vector2;
+  LCross: float32;
+begin
+  LSpeed := Sqrt(AV.x * AV.x + AV.y * AV.y);
+  if LSpeed > 0.0f then
+    LFx := AV.x / LSpeed;
+    LFy := AV.y / LSpeed;
+  else
+    LFx := 1.0f;
+    LFy := 0.0f;
+  end;
+  // The tip ahead of the position, the two back corners behind it to either side
+  LTip := Vec(AP.x + LFx * 9.0f, AP.y + LFy * 9.0f);
+  LLeft := Vec(AP.x - LFx * 5.0f - LFy * 4.0f, AP.y - LFy * 5.0f + LFx * 4.0f);
+  LRight := Vec(AP.x - LFx * 5.0f + LFy * 4.0f, AP.y - LFy * 5.0f - LFx * 4.0f);
+  // raylib fills a triangle only in its own winding (negative cross product on screen)
+  LCross := (LLeft.x - LTip.x) * (LRight.y - LTip.y) - (LLeft.y - LTip.y) * (LRight.x - LTip.x);
+  if LCross < 0.0f then
+    DrawTriangle(LTip, LLeft, LRight, SKYBLUE);
+  else
+    DrawTriangle(LTip, LRight, LLeft, SKYBLUE);
+  end;
+end;
+
+// Adds one boid at AX, AY heading a random way at a random speed
+routine SpawnBoid(const AWorld: flecs::world; const AX: float32; const AY: float32);
+var
+  LBoid: flecs::entity;
+  LPosition: Position;
+  LVelocity: Velocity;
+  LAngle: float32;
+  LSpeed: float32;
+begin
+  LAngle := RandomFloat(0.0f, 2.0f * float32(Pi));
+  LSpeed := RandomFloat(CMinSpeed, CMaxSpeed);
+  LPosition.x := AX;
+  LPosition.y := AY;
+  LVelocity.x := Cos(LAngle) * LSpeed;
+  LVelocity.y := Sin(LAngle) * LSpeed;
+  LBoid := AWorld.entity();
+  LBoid.set(LPosition);
+  LBoid.set(LVelocity);
+end;
+
+routine Run();
+var
+  LWorld: flecs::world;
+  LCount: int32;
+  LI: int32;
+begin
+  // The frame window: the flock lives in 960 x 540 units whatever the
+  // window's real size
+  if not InitFrameWindow(CScreenWidth, CScreenHeight, "PaskalCPP + flecs: boids") then
+    println("the window did not open");
+    return;
+  end;
+  SetTargetFPS(60);
+  SetFrameColor(BLACK);
+
+  // Registered in the order they run on every progress
+  LWorld.system<Position, Velocity>("Gather").each(Gather);
+  LWorld.system<Position, Velocity>("Steer").each(Steer);
+  LWorld.system<Position, Velocity>("Move").each(Move);
+
+  for LI := 1 to CStartBoids do
+    SpawnBoid(LWorld, RandomFloat(0.0f, float32(CScreenWidth)), RandomFloat(0.0f, float32(CScreenHeight)));
+  end;
+  LCount := CStartBoids;
+
+  while not WindowShouldClose() do
+    if IsKeyPressed(KEY_F11) then
+      ToggleFrameFullscreen();
+    end;
+
+    // The mouse in frame units, as the last BeginFrame took it
+    GMouse := GetFrameMousePosition();
+    if IsMouseButtonPressed(MOUSE_BUTTON_LEFT) then
+      for LI := 1 to CClickBoids do
+        if LCount < CMaxBoids then
+          SpawnBoid(LWorld, GMouse.x, GMouse.y);
+          LCount := LCount + 1;
+        end;
+      end;
+    end;
+
+    // The systems read the frame time and the mouse; a long first frame is capped
+    GDeltaTime := Clamp(GetFrameTime(), 0.0f, 0.05f);
+    GSnapCount := 0;
+    LWorld.progress(GDeltaTime);
+
+    BeginDrawing();
+    BeginFrame();
+    LWorld.each(DrawBoid);
+    DrawText(TextFormat("boids %d   click to add   F11 fullscreen   Escape quits", LCount), 16, 16, 20, RAYWHITE);
+    DrawFPS(CScreenWidth - 100, 16);
+    EndFrame();
+    EndDrawing();
+  end;
+
+  CloseWindow();
+end;
+
+begin
+  GSnapCount := 0;
+  GDeltaTime := 0.0f;
+  Run();
+end.

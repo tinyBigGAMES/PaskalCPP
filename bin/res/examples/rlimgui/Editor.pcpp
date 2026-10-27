@@ -19,16 +19,21 @@
     Image Viewer  a 2D view; with the Move tool, drag it with the left button
     3D View       a camera swinging over a field of little trees
     menu bar      File > Exit, Window > show / hide each window and the demo
+    F11           fullscreen on / off
+  It runs in raylib_ext's frame window (1600 x 900 units, sized for the
+  monitor's DPI, scaled and letterboxed on resize), ImGui inside it through
+  rlimgui_ext (BeginFrameImGui / EndFrameImGui), so the editor and its
+  mouse work in the same units whatever the window's size.
 ==============================================================================*/
 
 module exe Editor;
 
 import
   raylib,
-  rlimgui;
-
-// std::sin for the swinging camera
-#include <cmath>
+  raylib_ext,
+  rlimgui,
+  rlimgui_ext,
+  Math;
 
 const
   CScreenWidth: int32 = 1600;
@@ -53,10 +58,11 @@ type
     ViewTexture: RenderTexture2D;
     ImageTexture: Texture2D;
     Camera: Camera2D;
-    // The window's content area on the screen: where a drag may start
+    // The window's content area in frame units: where a drag may start
     ContentRect: Rectangle;
-    LastMousePos: Vector2;
-    LastTarget: Vector2;
+    // raylib's Vector2 (Math has one of its own)
+    LastMousePos: ::Vector2;
+    LastTarget: ::Vector2;
   end;
 
   // The 3D view: a world drawn by a 3D camera into ViewTexture
@@ -85,9 +91,9 @@ begin
 end;
 
 // A raylib Vector2 from its two parts
-routine V2(const AX: float32; const AY: float32): Vector2;
+routine V2(const AX: float32; const AY: float32): ::Vector2;
 var
-  LResult: Vector2;
+  LResult: ::Vector2;
 begin
   LResult.x := AX;
   LResult.y := AY;
@@ -116,10 +122,12 @@ routine SetupImageViewer();
 var
   LImage: Image;
 begin
+  // The view is the frame's size: the frame's units never change with the
+  // window, so it is made once
   GImage.Camera.zoom := 1.0;
-  GImage.Camera.offset.x := float32(GetScreenWidth()) * CHalf;
-  GImage.Camera.offset.y := float32(GetScreenHeight()) * CHalf;
-  GImage.ViewTexture := LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
+  GImage.Camera.offset.x := float32(CScreenWidth) * CHalf;
+  GImage.Camera.offset.y := float32(CScreenHeight) * CHalf;
+  GImage.ViewTexture := LoadRenderTexture(CScreenWidth, CScreenHeight);
   // An image made in code, so the example needs no file beside it
   LImage := GenImageChecked(320, 240, 40, 40, ORANGE, MAROON);
   GImage.ImageTexture := LoadTextureFromImage(LImage);
@@ -136,11 +144,12 @@ var
 begin
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0, 0.0));
   ImGui::SetNextWindowSizeConstraints(ImVec2(CMinWindow, CMinWindow),
-    ImVec2(float32(GetScreenWidth()), float32(GetScreenHeight())));
+    ImVec2(float32(CScreenWidth), float32(CScreenHeight)));
   GImage.Focused := false;
 
   if ImGui::Begin("Image Viewer", address of GImage.Open, ImGuiWindowFlags_NoScrollbar) then
-    // The content area on the screen, saved for the drag in UpdateImageViewer
+    // The content area in frame units (ImGui's), saved for the drag in
+    // UpdateImageViewer
     LCursor := ImGui::GetCursorScreenPos();
     LAvail := ImGui::GetContentRegionAvail();
     GImage.ContentRect.x := LCursor.x;
@@ -187,23 +196,16 @@ end;
 
 routine UpdateImageViewer();
 var
-  LMouse: Vector2;
+  LMouse: ::Vector2;
 begin
   if not GImage.Open then
     return;
   end;
 
-  if IsWindowResized() then
-    UnloadRenderTexture(GImage.ViewTexture);
-    GImage.ViewTexture := LoadRenderTexture(GetScreenWidth(), GetScreenHeight());
-    GImage.Camera.offset.x := float32(GetScreenWidth()) * CHalf;
-    GImage.Camera.offset.y := float32(GetScreenHeight()) * CHalf;
-    GImage.DirtyScene := true;
-  end;
-
   // The Move tool drags the camera while the left button is held, starting
-  // only inside the window's content area
-  LMouse := GetMousePosition();
+  // only inside the window's content area; the mouse in frame units, as
+  // ImGui's content area is
+  LMouse := GetFrameMousePosition();
   if GImage.Focused and GImage.MoveTool and IsMouseButtonDown(MOUSE_BUTTON_LEFT) and
     CheckCollisionPointRec(LMouse, GImage.ContentRect) then
     if not GImage.Dragging then
@@ -249,7 +251,7 @@ routine ShowSceneView();
 begin
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0, 0.0));
   ImGui::SetNextWindowSizeConstraints(ImVec2(CMinWindow, CMinWindow),
-    ImVec2(float32(GetScreenWidth()), float32(GetScreenHeight())));
+    ImVec2(float32(CScreenWidth), float32(CScreenHeight)));
 
   if ImGui::Begin("3D View", address of GScene.Open, ImGuiWindowFlags_NoScrollbar) then
     GScene.Focused := ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
@@ -276,7 +278,7 @@ begin
     GScene.ViewTexture := LoadRenderTexture(GetRenderWidth(), GetRenderHeight());
   end;
 
-  GScene.Camera.position.x := float32(std::sin(GetTime() / CSwingPeriod) * CSwingSize);
+  GScene.Camera.position.x := float32(Sin(GetTime() / CSwingPeriod) * CSwingSize);
 
   BeginTextureMode(GScene.ViewTexture);
   ClearBackground(SKYBLUE);
@@ -322,14 +324,16 @@ begin
 end;
 
 begin
-  // HighDPI: raylib sizes the window for the monitor's DPI scale (and follows
-  // it to another monitor) and works in logical pixels; rlImGui hands ImGui
-  // that scale, so ImGui's text and widgets grow with it and its fonts are
-  // drawn at the full resolution. Without the flag raylib 6.2 reports a DPI
-  // scale of 1 and ImGui stays at its 1x size on a high DPI monitor.
-  SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT | FLAG_WINDOW_HIGHDPI);
-  InitWindow(CScreenWidth, CScreenHeight, "PaskalCPP - rlImGui editor");
+  // The frame window: sized for the monitor's DPI (and follows it to another
+  // monitor); the editor, ImGui and the mouse all work in its 1600 x 900
+  // units, its text sharp at the frame's real size
+  SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
+  if not InitFrameWindow(CScreenWidth, CScreenHeight, "PaskalCPP - rlImGui editor") then
+    println("the window did not open");
+    return;
+  end;
   SetTargetFPS(144);
+  SetFrameColor(DARKGRAY);
   rlImGuiSetup(true);
   // Windows move only by their title bar, so a drag inside a view is the tool's
   ImGui::GetIO().ConfigWindowsMoveFromTitleBarOnly := true;
@@ -338,13 +342,16 @@ begin
   SetupSceneView();
 
   while not WindowShouldClose() and not GQuit do
+    if IsKeyPressed(KEY_F11) then
+      ToggleFrameFullscreen();
+    end;
     UpdateImageViewer();
     UpdateSceneView();
 
     BeginDrawing();
-    ClearBackground(DARKGRAY);
+    BeginFrame();
 
-    rlImGuiBegin();
+    BeginFrameImGui();
     DoMainMenu();
     if GDemoOpen then
       ImGui::ShowDemoWindow(address of GDemoOpen);
@@ -355,8 +362,9 @@ begin
     if GScene.Open then
       ShowSceneView();
     end;
-    rlImGuiEnd();
+    EndFrameImGui();
 
+    EndFrame();
     EndDrawing();
   end;
 

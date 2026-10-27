@@ -421,6 +421,13 @@ type
     // case-blind file system). True = no such file, or renamed; False = the
     // rename failed, AError = the OS's reason. Never raises
     class function  MatchFileNameCase(const AFilename: string; out AError: string): Boolean; static;
+    // ABytes written to AFilename only when no file is there or it holds
+    // other bytes: an unchanged file keeps its time stamp, so a build tool
+    // that checks time stamps (zig's cache) sees it unchanged. True = the
+    // file holds ABytes (written or already so); False = a read or write
+    // failed, AError = the reason. Never raises
+    class function  WriteBytesIfChanged(const AFilename: string; const ABytes: TBytes;
+      out AError: string): Boolean; static;
     // A name or a relative path (no '.' or '..' segment, no drive or root)
     // under a directory ResolvePath returned, joined as text: no file system
     // access and no exception. ResolvePath's spelling (the long-path spelling
@@ -3077,6 +3084,40 @@ begin
     AError := SysErrorMessage(GetLastError());
 end;
 
+class function TUtils.WriteBytesIfChanged(const AFilename: string; const ABytes: TBytes;
+  out AError: string): Boolean;
+var
+  LOld: TBytes;
+  LSame: Boolean;
+begin
+  AError := '';
+  try
+    // The file's bytes are compared whole: same length and same content
+    // leaves it untouched (its time stamp is what a build cache checks)
+    LSame := False;
+    if TFile.Exists(AFilename) then
+    begin
+      LOld := TFile.ReadAllBytes(AFilename);
+      if Length(LOld) = Length(ABytes) then
+      begin
+        if Length(ABytes) = 0 then
+          LSame := True
+        else
+          LSame := CompareMem(@LOld[0], @ABytes[0], Length(ABytes));
+      end;
+    end;
+    if not LSame then
+      TFile.WriteAllBytes(AFilename, ABytes);
+    Result := True;
+  except
+    on E: Exception do
+    begin
+      AError := E.Message;
+      Result := False;
+    end;
+  end;
+end;
+
 class function TUtils.JoinResolvedPath(const AResolvedDir: string;
   const ARelPath: string): string;
 var
@@ -3314,7 +3355,7 @@ begin
     else if LNtHeaders.OptionalHeader.Subsystem = IMAGE_SUBSYSTEM_WINDOWS_GUI then
       Result := atGUI;
   except
-    // PE header read failed — return matUnknown
+    // PE header read failed - return matUnknown
   end;
 end;
 

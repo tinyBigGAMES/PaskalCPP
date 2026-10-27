@@ -28,9 +28,10 @@
 
   The scalar groups: the constants; Clamp and Wrap (bounds
   in either order, Wrap however far outside, int ends both included, float
-  [min, max)); SameSign and SameValue (the default tolerance scales past 1);
-  Lerp; AngleDifference in [-180, 180); SmoothMove; every Easing curve at 0,
-  0.25, 0.5, 0.75 and 1 (exactly 0 and 1 at the ends) and EaseBetween; and
+  [min, max)); Min and Max (Delphi's rule, a NaN first gives the second);
+  SameSign and SameValue (the default tolerance scales past 1); Lerp;
+  AngleDifference in [-180, 180); SmoothMove; every Easing curve at 0, 0.25,
+  0.5, 0.75 and 1 (exactly 0 and 1 at the ends) and EaseBetween; and
   Random: a seed's sequence, the same on both targets, and Randomize (the
   object's and the free one: a fresh system seed that SetSeed(Seed()) /
   SetRandomSeed(RandomSeed()) repeats; its rows print only true / false,
@@ -81,6 +82,10 @@ module exe std_math;
     | clamp int64 4000000000
     | clamp float 1 0 0.25
     | clamp nan true
+    | min max int 3 -9 7 -2
+    | min max int64 4000000000 5000000000
+    | min max float 0.25 1.5 0.25 0.5
+    | min max nan 1 1 true
     | wrap int 1 0 359 5 3 2
     | wrap int64 3 9223372036854775807
     | wrap float 5 0 270 1 10
@@ -161,6 +166,17 @@ module exe std_math;
     | line Point 5.000000 0.000000
     | radius overlap true false
     | obb true false true false true false
+    | sin cos 1.000000 -1.000000 0.500000 0.500000 0.500000
+    | sqrt abs 3.000000 0.500000 2.500000 1.500000 7 3 true
+    | round 2 4 -2 -3 3 0
+    | trunc floor ceil -2 -3 -2 2 2 3 2
+    | trunc lowest -9223372036854775808
+    | round nan 5 Round: the value is outside the int64 range
+    | floor inf 5 Floor: the value is outside the int64 range
+    | trunc big 5 Trunc: the value is outside the int64 range
+    | ceil big 5 Ceil: the value is outside the int64 range
+    | abs lowest 5 Abs: the lowest int64 has no positive counterpart
+    | abs lowest32 5 Abs: the lowest int32 has no positive counterpart
     | [Heap] Allocs: 0, Frees: 0, Leaked: 0
   @@end
 */
@@ -339,6 +355,13 @@ begin
   println("clamp float {} {} {}", Clamp(1.5, 0.0, 1.0), Clamp(-2.0, 0.0, 1.0), Clamp(LLevel, 0.0f, LQuarter32));
   LFloat := Clamp(LNaN, 0.0, 1.0);
   println("clamp nan {}", LFloat <> LFloat);
+  // Min / Max: Delphi's rule, AA when it wins the compare, else AB; so a NaN
+  // first gives AB, a NaN second is returned
+  println("min max int {} {} {} {}", Min(3, 7), Min(-2, -9), Max(3, 7), Max(-2, -9));
+  println("min max int64 {} {}", Min(LBig, LCap), Max(LBig, LCap));
+  println("min max float {} {} {} {}", Min(1.5, 0.25), Max(1.5, 0.25), Min(LLevel, LQuarter32), Max(LLevel, LQuarter32));
+  LFloat := Min(1.0, LNaN);
+  println("min max nan {} {} {}", Min(LNaN, 1.0), Max(LNaN, 1.0), LFloat <> LFloat);
   // Wrap: however far outside; int ends both included, float [min, max)
   println("wrap int {} {} {} {} {} {}", Wrap(361, 0, 359), Wrap(360, 0, 359), Wrap(-1, 0, 359), Wrap(725, 0, 359),
     Wrap(3, 5, 1), Wrap(7, 5, 1));
@@ -528,4 +551,49 @@ begin
     ObbsOverlap(Box(0.0f, 0.0f, 1.0f, 1.0f, 0.0f), Box(2.5f, 0.0f, 1.0f, 1.0f, 45.0f)),
     ObbsOverlap(Box(0.0f, 0.0f, 2.0f, 0.5f, 30.0f), Box(1.5f, 0.9f, 0.1f, 0.1f, 0.0f)),
     ObbsOverlap(Box(0.0f, 0.0f, 2.0f, 0.5f, -30.0f), Box(1.5f, 0.9f, 0.1f, 0.1f, 0.0f)));
+  // Sin, Cos (float64 and float32), Sqrt (a negative value is NaN), Abs
+  println("sin cos {:.6f} {:.6f} {:.6f} {:.6f} {:.6f}", Sin(90.0 * DegToRad), Cos(Pi),
+    Sin(30.0 * DegToRad), Cos(60.0 * DegToRad), Sin(float32(30.0 * DegToRad)));
+  LFloat := Sqrt(-1.0);
+  println("sqrt abs {:.6f} {:.6f} {:.6f} {:.6f} {} {} {}", Sqrt(9.0), Sqrt(LQuarter32), Abs(-2.5),
+    Abs(-LWrap32 + 1.0f), Abs(-7), Abs(LMinus3), LFloat <> LFloat);
+  // Round: halfway goes to the even neighbour, as Delphi's
+  println("round {} {} {} {} {} {}", Round(2.5), Round(3.5), Round(-2.5), Round(-2.6), Round(2.6),
+    Round(LQuarter32));
+  println("trunc floor ceil {} {} {} {} {} {} {}", Trunc(-2.7), Floor(-2.5), Ceil(-2.5), Trunc(2.7),
+    Floor(2.5), Ceil(2.1), Floor(LWrap32));
+  // -2^63 is the one float64 at the bottom edge that still fits int64
+  println("trunc lowest {}", Trunc(-9223372036854775808.0));
+  // The refusals: no integer stands for these, so each raises rather than
+  // giving C++'s undefined conversion
+  guard
+    LInt64 := Round(LNaN);
+  except
+    println("round nan {} {}", exccode(), excmsg());
+  end;
+  guard
+    LInt64 := Floor(LInf);
+  except
+    println("floor inf {} {}", exccode(), excmsg());
+  end;
+  guard
+    LInt64 := Trunc(1.0e19);
+  except
+    println("trunc big {} {}", exccode(), excmsg());
+  end;
+  guard
+    LInt64 := Ceil(9223372036854775808.0);
+  except
+    println("ceil big {} {}", exccode(), excmsg());
+  end;
+  guard
+    LInt64 := Abs(LMin64);
+  except
+    println("abs lowest {} {}", exccode(), excmsg());
+  end;
+  guard
+    LI := Abs(LMin32);
+  except
+    println("abs lowest32 {} {}", exccode(), excmsg());
+  end;
 end.

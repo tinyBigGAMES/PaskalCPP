@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.10.2" orientation="staggered" renderorder="right-down" width="2" height="2" tilewidth="16" tileheight="8" staggeraxis="y" staggerindex="odd" infinite="0" nextlayerid="9" nextobjectid="3">
+ <tileset firstgid="1" source="std_tmxlite_tiles.tsx"/>
+ <layer id="1" name="tiles" width="2" height="2">
+  <data encoding="csv">
+0,2,
+2,0
+</data>
+ </layer>
+</map>

@@ -1,0 +1,55 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  SqliteZip.pcpp - SQLite example (import sqlite_ext): a database read
+  straight from bin\assets.zip. OpenDatabaseZip opens the entry
+  res/assets/data/sample.db (password PaskalCPP), read-only and in memory,
+  and the levels table is queried as from the file; a write is refused
+  with SQLITE_READONLY.
+==============================================================================*/
+
+module exe SqliteZip;
+
+import
+  sqlite,
+  sqlite_ext;
+
+var
+  LDb: ptr to sqlite3;
+  LStmt: ptr to sqlite3_stmt;
+  LResult: int32;
+
+begin
+  LResult := OpenDatabaseZip("$P:../../assets.zip", "res/assets/data/sample.db", "PaskalCPP", LDb);
+  if LResult <> SQLITE_OK then
+    println("cannot open sample.db from assets.zip: {}", LResult);
+    sqlite3_close(LDb);
+    return;
+  end;
+
+  LStmt := nil;
+  sqlite3_prepare_v2(LDb, "select id, name, enemies from levels order by id", -1,
+    address of LStmt, nil);
+  while sqlite3_step(LStmt) = SQLITE_ROW do
+    println("level {}: {} ({} enemies)", sqlite3_column_int(LStmt, 0),
+      ptr to const char(sqlite3_column_text(LStmt, 1)), sqlite3_column_int(LStmt, 2));
+  end;
+  sqlite3_finalize(LStmt);
+
+  // The database is the zip's bytes: read-only
+  LResult := sqlite3_exec(LDb, "delete from levels", nil, nil, nil);
+  println("delete refused: {} ({})", LResult = SQLITE_READONLY, sqlite3_errmsg(LDb));
+  sqlite3_close(LDb);
+end.

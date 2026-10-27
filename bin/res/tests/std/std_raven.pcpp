@@ -1,0 +1,130 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_raven.pcpp - Std library compliance: the raven vendor unit
+  (res\libs\std\raven.pcpp), Raven's C API called from PaskalCPP. Raven runs
+  headless on its null backend (no window, nothing drawn): a window with a
+  column of a label, a text input and a button is laid out by Rdraw_frame;
+  a click injected in the middle of the button runs its clink callback,
+  which sets the label; text injected into the focused input, then a
+  Backspace, leaves it one character shorter; the clipboard keeps what it
+  is given. A texture from a file that is not there is Raven's
+  FILE_NOT_FOUND through its error callback. Rshutdown ends it.
+*******************************************************************************/
+
+module exe std_raven;
+
+/*
+  @@test
+    kind run
+    expect
+    | init true
+    | laid out true
+    | clicks 1 label Clicked once
+    | input typed o
+    | clipboard copied text
+    | [Raven] R_ERROR_FILE_NOT_FOUND (R_SEVERITY_ERROR): Rtexture_create_from_file: cannot read 'missing.png'
+    | missing texture true
+    | running after shutdown 0
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  raven;
+
+var
+  GLabel: Rid;
+  GClicks: int32;
+
+routine clink OnError(ACode: RError; ASeverity: RSeverity; ADetail: ptr to const char);
+begin
+  println("[Raven] {} ({}): {}", Rerror_to_string(ACode), Rseverity_to_string(ASeverity), ADetail);
+end;
+
+routine clink OnClicked(AButton: Rid; AUserData: ptr);
+begin
+  GClicks := GClicks + 1;
+  Rlabel_set_text(GLabel, "Clicked once");
+end;
+
+// A press and a release in the middle of a widget, a frame each
+routine Click(const AWindow: Rid; const AWidget: Rid);
+var
+  LX: float32;
+  LY: float32;
+  LW: float32;
+  LH: float32;
+begin
+  Rwidget_get_rect(AWidget, address of LX, address of LY, address of LW, address of LH);
+  Rwindow_inject_mouse_move(AWindow, LX + LW * 0.5f, LY + LH * 0.5f);
+  Rwindow_inject_mouse_button(AWindow, R_MOUSE_LEFT, R_TRUE);
+  Rdraw_frame();
+  Rwindow_inject_mouse_button(AWindow, R_MOUSE_LEFT, R_FALSE);
+  Rdraw_frame();
+end;
+
+var
+  LDesc: RInitDesc;
+  LWindow: Rid;
+  LBox: Rid;
+  LInput: Rid;
+  LButton: Rid;
+  LX: float32;
+  LY: float32;
+  LW: float32;
+  LH: float32;
+begin
+  Rerror_set_callback(OnError);
+  memset(address of LDesc, 0, size(RInitDesc));
+  LDesc.backend := R_BACKEND_NULL;
+  LDesc.app_name := "std_raven";
+  LDesc.headless := R_TRUE;
+  LDesc.disable_render_thread := R_TRUE;
+  println("init {}", Rinit_ex(address of LDesc) <> 0);
+
+  LWindow := Rwindow_create("std_raven", 400, 300, R_WINDOW_DEFAULT);
+  LBox := Rwidget_create(R_WIDGET_VBOX);
+  Rwindow_set_content(LWindow, LBox);
+  GLabel := Rwidget_add_child(LBox, Rlabel_create("Not clicked"));
+  LInput := Rwidget_add_child(LBox, Rwidget_create(R_WIDGET_TEXT_INPUT));
+  LButton := Rwidget_add_child(LBox, Rbutton_create("Click me"));
+  Rbutton_set_clicked_callback(LButton, OnClicked, nil);
+  GClicks := 0;
+  Rdraw_frame();
+
+  // Laid out: the button has a size and lies inside the window
+  Rwidget_get_rect(LButton, address of LX, address of LY, address of LW, address of LH);
+  println("laid out {}", (LW > 0.0f) and (LH > 0.0f) and (LX >= 0.0f) and (LY + LH <= 300.0f));
+
+  Click(LWindow, LButton);
+  println("clicks {} label {}", GClicks, Rlabel_get_text(GLabel));
+
+  Rwidget_focus(LInput);
+  Rwindow_inject_text(LWindow, "typed ok");
+  Rwindow_inject_key(LWindow, R_KEY_BACKSPACE, R_TRUE, 0);
+  Rwindow_inject_key(LWindow, R_KEY_BACKSPACE, R_FALSE, 0);
+  Rdraw_frame();
+  println("input {}", Rtext_input_get_text(LInput));
+
+  Rclipboard_set_text("copied text");
+  println("clipboard {}", Rclipboard_get_text());
+
+  // Named relative: the line reads the same on every target
+  println("missing texture {}", Rtexture_create_from_file("missing.png") = R_INVALID_ID);
+
+  Rshutdown();
+  println("running after shutdown {}", Ris_initialized());
+end.

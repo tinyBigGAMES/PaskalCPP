@@ -60,20 +60,20 @@ type
   public
     constructor Create(); override;
 
-    // Lifecycle — drives the main loop. Subclasses override OnXXX hooks.
+    // Lifecycle - drives the main loop. Subclasses override OnXXX hooks.
     procedure Execute();
 
     // Signals the loop in Execute to stop after the current iteration.
     procedure Terminate();
 
-    // Lifecycle hooks — override in subclasses. All have empty defaults.
+    // Lifecycle hooks - override in subclasses. All have empty defaults.
     procedure OnSetup(); virtual;
     procedure OnShutdown(); virtual;
     procedure OnUpdate(const ADeltaTime: Double); virtual;
     procedure OnRender(); virtual;
     procedure OnFrame(); virtual;
 
-    // Console output helpers — delegates to TMyrUtils.
+    // Console output helpers - delegates to TMyrUtils.
     procedure Print(const AMsg: string; const AArgs: array of const);
     procedure PrintLn(const AMsg: string; const AArgs: array of const);
 
@@ -160,22 +160,22 @@ end;
 
 procedure TTestDemo.OnSetup();
 begin
-  // Empty default — override in subclass
+  // Empty default - override in subclass
 end;
 
 procedure TTestDemo.OnShutdown();
 begin
-  // Empty default — override in subclass
+  // Empty default - override in subclass
 end;
 
 procedure TTestDemo.OnUpdate(const ADeltaTime: Double);
 begin
-  // Empty default — override in subclass
+  // Empty default - override in subclass
 end;
 
 procedure TTestDemo.OnRender();
 begin
-  // Empty default — override in subclass
+  // Empty default - override in subclass
 end;
 
 procedure TTestDemo.OnFrame();

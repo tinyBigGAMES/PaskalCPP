@@ -1,0 +1,119 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_raven_zip.pcpp - Std library compliance: the raven vendor unit's file
+  loading through HookIO (res\libs\std\raven.pcpp, res\libs\std\HookIO.pcpp),
+  with no raven_ext: Raven's own calls read bin\assets.zip. Raven runs
+  headless on its null backend. Through an io:// prefix of the zip
+  (RegisterIOSource): the theme res/assets/ui/raven_theme.xml loads as
+  "Teal" and becomes the theme, and the window res/assets/ui/raven_demo.xml
+  is built with its named widgets, its image (../images/paskalcpp.png) and
+  title font (../fonts/KenneyMiniSquareMono.ttf) read relative to it from
+  the same zip with no error. With the zip as this thread's path source
+  (SetIOThreadPathSource) the entries load by their own names: the window
+  again and the logo as a 512 x 512 texture. The zip opened with a wrong
+  password reads nothing: the theme is Raven's FILE_NOT_FOUND line.
+*******************************************************************************/
+
+module exe std_raven_zip;
+
+/*
+  @@test
+    kind run
+    expect
+    | init true
+    | prefix theme Teal use 1
+    | prefix window true title Raven over raylib logo true name true
+    | source window true title Raven over raylib
+    | source texture 512 x 512
+    | [Raven] R_ERROR_FILE_NOT_FOUND (R_SEVERITY_ERROR): theme: cannot read 'res/assets/ui/raven_theme.xml'
+    | wrong password theme none true
+    | [Heap] Allocs: 12, Frees: 12, Leaked: 0
+  @@end
+*/
+
+import
+  raven,
+  CustomIO,
+  HookIO;
+
+routine clink OnError(ACode: RError; ASeverity: RSeverity; ADetail: ptr to const char);
+begin
+  println("[Raven] {} ({}): {}", Rerror_to_string(ACode), Rseverity_to_string(ASeverity), ADetail);
+end;
+
+// The demo window's title text, or "none"
+routine Title(const AWindow: Rid): string;
+var
+  LTitle: Rid;
+begin
+  LTitle := Rwidget_find(AWindow, "title");
+  if LTitle = R_INVALID_ID then
+    return "none";
+  end;
+  return string(Rlabel_get_text(LTitle));
+end;
+
+var
+  LDesc: RInitDesc;
+  LZip: IOSource;
+  LWrong: IOSource;
+  LPrefix: string;
+  LTheme: ptr to const char;
+  LWindow: Rid;
+  LTexture: Rid;
+  LWidth: int32;
+  LHeight: int32;
+begin
+  Rerror_set_callback(OnError);
+  memset(address of LDesc, 0, size(RInitDesc));
+  LDesc.backend := R_BACKEND_NULL;
+  LDesc.app_name := "std_raven_zip";
+  LDesc.headless := R_TRUE;
+  LDesc.disable_render_thread := R_TRUE;
+  println("init {}", Rinit_ex(address of LDesc) <> 0);
+  LZip := CreateZipIOSource("$P:../../assets.zip", "PaskalCPP");
+
+  // An io:// prefix: every C runtime open of "<prefix>/<entry>" reads the zip
+  LPrefix := RegisterIOSource(LZip);
+  LTheme := Rtheme_load((LPrefix + "/res/assets/ui/raven_theme.xml").c_str());
+  println("prefix theme {} use {}", LTheme, Rtheme_use(LTheme));
+  LWindow := Rwindow_create_from_xml_file((LPrefix + "/res/assets/ui/raven_demo.xml").c_str());
+  println("prefix window {} title {} logo {} name {}", LWindow <> R_INVALID_ID, Title(LWindow),
+    Rwidget_find(LWindow, "logo") <> R_INVALID_ID, Rwidget_find(LWindow, "name") <> R_INVALID_ID);
+  Rwindow_destroy(LWindow);
+  UnregisterIO(LPrefix);
+
+  // The zip as this thread's path source: entries by their own names
+  SetIOThreadPathSource(LZip);
+  LWindow := Rwindow_create_from_xml_file("res/assets/ui/raven_demo.xml");
+  println("source window {} title {}", LWindow <> R_INVALID_ID, Title(LWindow));
+  Rwindow_destroy(LWindow);
+  LTexture := Rtexture_create_from_file("res/assets/images/paskalcpp.png");
+  LWidth := 0;
+  LHeight := 0;
+  Rtexture_get_size(LTexture, address of LWidth, address of LHeight);
+  println("source texture {} x {}", LWidth, LHeight);
+
+  // A wrong password: no entry can be read
+  LWrong := CreateZipIOSource("$P:../../assets.zip", "not the password");
+  SetIOThreadPathSource(LWrong);
+  println("wrong password theme none {}", Rtheme_load("res/assets/ui/raven_theme.xml") = nil);
+  SetIOThreadPathSource(nil);
+
+  Rshutdown();
+  IOSourceClose(LWrong);
+  IOSourceClose(LZip);
+end.

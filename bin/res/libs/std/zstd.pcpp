@@ -1,0 +1,51 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  zstd.pcpp - the zstd unit: `import zstd;` uses Zstandard
+  (https://github.com/facebook/zstd: ZSTD_compress / ZSTD_decompress, the
+  streaming and dictionary APIs) from PaskalCPP. A self-describing vendor
+  module: it owns every include path, library path and link library it
+  needs, per official target. The library is libzstd.a (one per target),
+  built by PaskalCPP-Libs' build-zstd.cmd from zstd's own CMake project
+  (static, multithreaded compression on, legacy formats readable), shipped
+  under zstd's BSD license.
+==============================================================================*/
+
+module unit zstd;
+
+// Self-describing vendor module: it owns every path it needs.
+
+@addincludepath "$P:res/libs/vendor/zstd/include";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/zstd/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/zstd/lib/x86_64-linux-gnu";
+@else
+  @message error "zstd: unsupported target";
+@endif
+
+@linklibrary "zstd";
+
+// The headers go to this unit's header, so every importer sees zstd's API
+cpp header;
+
+#include "zstd.h"
+#include "zstd_errors.h"
+
+end.

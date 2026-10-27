@@ -1,0 +1,1002 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  raven_raylib.pcpp - the raven_raylib unit: `import raven_raylib;` puts a
+  Raven user interface inside a raylib program. raylib keeps the window,
+  the loop, audio and the game's drawing; Raven builds and lays out its
+  widgets (the raven unit's API, XML windows and themes included) and draws
+  them in the raylib frame, over the game.
+
+    InitWindow(...) or InitFrameWindow(...);  InitRaven("Game");
+    LUi := Rwindow_create("Game", 0, 0, R_WINDOW_DEFAULT);  ...widgets...
+    each frame: UpdateRaven(LUi); BeginDrawing(); ...game...;
+                DrawRaven(LUi); EndDrawing();
+    CloseRaven(); CloseWindow();
+
+  Raven runs headless (no OS window of its own) on this unit's rendering
+  backend (R_BACKEND_CUSTOM, its render thread off, so every GL call is on
+  raylib's thread): its draw list is replayed through rlgl with upstream's
+  rounded-rectangle shaders ported to GLSL 330, in whatever raylib has bound
+  (the screen, a render texture, a camera). raylib's input goes in through
+  Raven's inject calls: keys with their modifiers, the mouse, the wheel,
+  typed text, and the clipboard both ways (what Raven copies reaches the OS,
+  what the OS holds is handed to Raven before a paste key).
+
+  One Raven window is the program's UI layer: it covers the raylib window,
+  follows its size, and its popups and menus draw inside it. Its UI scale is
+  the window's DPI scale, our own query on every target (raylib_ext's
+  GetWindowDpi: Windows the window's monitor, Linux X11's Xft.dpi, 96 when
+  unset), so text is sharp and sized for the monitor; with
+  FLAG_WINDOW_HIGHDPI raylib's own scale is used instead (never both).
+  Inside raylib_ext's frame window the Raven window is the frame's base
+  size, drawn in base units between BeginFrame and EndFrame, scaled and
+  letterboxed with the frame, its mouse in base units (none in the bars)
+  and its text rasterized at the frame's real pixel density.
+
+  A raylib texture shows inside Raven's widgets through CreateRavenTexture:
+  a render texture the program draws a 3D view into becomes a Raven
+  texture for a Viewport or an Image, drawn from raylib's own texture in
+  every frame (no copy), so an editor's scene panel is raylib's drawing
+  laid out, clipped and overdrawn by Raven like any widget.
+
+  Real limits of this backend: Raven has no public getter for the mouse
+  cursor shape it wants, so raylib's cursor is left as the program sets it;
+  GLASS and BLUR draw as their tinted rounded rectangle and SHADER effects
+  (SPIR-V) through the plain rectangle path, as raven_backend.h allows; a
+  backdrop, erase or callback command and a frame capture are not drawn.
+==============================================================================*/
+
+module unit raven_raylib;
+
+import
+  raylib,
+  raylib_ext,
+  raven,
+  Math;
+
+// Private: the rlgl backend and the input feed, this unit's own translation
+// unit. Helpers are named apart from the exported names.
+cpp source;
+
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+#include <vector>
+#include "raymath.h"
+#include "rlgl.h"
+
+namespace {
+
+// Upstream's src/render/vulkan/shaders/ui.vert / ui.frag with the same
+// signed-distance math, for GL 3.3 through rlgl: the pixel position is a
+// varying (v_pos, not gl_FragCoord), so the same shader is right on the
+// screen and in a render texture; clip space is raylib's transform x
+// modelview x projection, so Raven follows what raylib has bound; flags and
+// colours arrive as unsigned bytes (rlgl has no integer attribute path); 6
+// vertices per instance from gl_VertexID.
+const char* const CRavenRaylibDoVertexShader = R"(#version 330
+layout(location = 0) in vec4 in_rect;
+layout(location = 1) in vec4 in_uv;
+layout(location = 2) in vec4 in_clip;
+layout(location = 3) in vec4 in_radii;
+layout(location = 4) in vec4 in_color;
+layout(location = 5) in vec4 in_border_color;
+layout(location = 6) in float in_border_width;
+layout(location = 7) in vec4 in_flags;
+uniform mat4 u_mvp;
+uniform float u_unit;
+out vec2 v_uv;
+out vec2 v_pos;
+flat out vec4 v_rect;
+flat out vec4 v_clip;
+flat out vec4 v_radii;
+flat out vec4 v_color;
+flat out vec4 v_border_color;
+flat out float v_border_width;
+flat out vec4 v_flags;
+flat out vec4 v_params;
+const int CORNERS[6] = int[6](0, 1, 2, 2, 1, 3);
+void main() {
+  uint kind = uint(in_flags.x + 0.5) & 15u;
+  int c = CORNERS[gl_VertexID];
+  vec2 corner = vec2(float(c & 1), float(c >> 1));
+  vec2 lo = in_rect.xy;
+  vec2 hi = in_rect.zw;
+  if (kind == 0u || kind == 5u || kind == 6u || kind == 8u) { lo -= 0.5; hi += 0.5; }
+  else if (kind == 2u) { float g = in_border_width + 1.0; lo -= g; hi += g; }
+  else if (kind == 3u) { float g = in_radii.x * 0.5 + 1.0; lo = min(in_rect.xy, in_rect.zw) - g; hi = max(in_rect.xy, in_rect.zw) + g; }
+  else if (kind == 7u) { float g = in_border_width * 0.5 + in_uv.x + 1.0;
+    lo = min(min(in_rect.xy, in_rect.zw), min(in_radii.xy, in_radii.zw)) - g;
+    hi = max(max(in_rect.xy, in_rect.zw), max(in_radii.xy, in_radii.zw)) + g; }
+  else if (kind == 4u) { lo = min(min(in_rect.xy, in_rect.zw), in_radii.xy) - 1.0; hi = max(max(in_rect.xy, in_rect.zw), in_radii.xy) + 1.0; }
+  vec2 position = mix(lo, hi, corner);
+  vec2 size = max(in_rect.zw - in_rect.xy, vec2(1e-6));
+  v_uv = mix(in_uv.xy, in_uv.zw, (position - in_rect.xy) / size);
+  v_pos = position;
+  v_rect = in_rect; v_clip = in_clip; v_radii = in_radii;
+  v_color = vec4(in_color.rgb * in_color.a, in_color.a);
+  v_border_color = vec4(in_border_color.rgb * in_border_color.a, in_border_color.a);
+  v_border_width = in_border_width; v_flags = in_flags; v_params = in_uv;
+  gl_Position = u_mvp * vec4(position * u_unit, 0.0, 1.0);
+}
+)";
+
+const char* const CRavenRaylibDoFragmentShader = R"(#version 330
+uniform sampler2D u_texture;
+in vec2 v_uv;
+in vec2 v_pos;
+flat in vec4 v_rect;
+flat in vec4 v_clip;
+flat in vec4 v_radii;
+flat in vec4 v_color;
+flat in vec4 v_border_color;
+flat in float v_border_width;
+flat in vec4 v_flags;
+flat in vec4 v_params;
+layout(location = 0) out vec4 out_color;
+float sd_round_box(vec2 p, vec2 half_size, vec4 radii) {
+  float radius = p.x < 0.0 ? (p.y < 0.0 ? radii.x : radii.w) : (p.y < 0.0 ? radii.y : radii.z);
+  radius = min(radius, min(half_size.x, half_size.y));
+  vec2 q = abs(p) - half_size + radius;
+  return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - radius;
+}
+float sd_segment(vec2 p, vec2 a, vec2 b) {
+  vec2 pa = p - a; vec2 ba = b - a;
+  float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+  return length(pa - ba * h);
+}
+float sd_triangle(vec2 p, vec2 p0, vec2 p1, vec2 p2) {
+  vec2 e0 = p1 - p0, e1 = p2 - p1, e2 = p0 - p2;
+  vec2 v0 = p - p0, v1 = p - p1, v2 = p - p2;
+  vec2 pq0 = v0 - e0 * clamp(dot(v0, e0) / max(dot(e0, e0), 1e-6), 0.0, 1.0);
+  vec2 pq1 = v1 - e1 * clamp(dot(v1, e1) / max(dot(e1, e1), 1e-6), 0.0, 1.0);
+  vec2 pq2 = v2 - e2 * clamp(dot(v2, e2) / max(dot(e2, e2), 1e-6), 0.0, 1.0);
+  float s = sign(e0.x * e2.y - e0.y * e2.x);
+  vec2 d = min(min(vec2(dot(pq0, pq0), s * (v0.x * e0.y - v0.y * e0.x)),
+                   vec2(dot(pq1, pq1), s * (v1.x * e1.y - v1.y * e1.x))),
+                   vec2(dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x)));
+  return -sqrt(d.x) * sign(d.y);
+}
+void main() {
+  vec2 p = v_pos;
+  if (p.x < v_clip.x || p.y < v_clip.y || p.x >= v_clip.z || p.y >= v_clip.w) discard;
+  uint f0 = uint(v_flags.x + 0.5);
+  uint kind = f0 & 15u;
+  vec4 color = v_color;
+  if ((f0 & 16u) != 0u) { vec4 t = textureLod(u_texture, v_uv, 0.0); color *= vec4(t.rgb * t.a, t.a); }
+  float coverage = 1.0;
+  if (kind == 0u || kind == 5u || kind == 6u || kind == 8u) {
+    vec2 hs = (v_rect.zw - v_rect.xy) * 0.5;
+    float d = sd_round_box(p - (v_rect.xy + hs), hs, v_radii);
+    coverage = clamp(0.5 - d, 0.0, 1.0);
+    if (v_border_width > 0.0 && kind != 5u) { float inside = clamp(0.5 - (d + v_border_width), 0.0, 1.0); color = mix(v_border_color, color, inside); }
+    if (kind == 5u || kind == 6u) color *= (v_flags.y / 255.0);
+  } else if (kind == 2u) {
+    vec2 hs = (v_rect.zw - v_rect.xy) * 0.5;
+    float d = sd_round_box(p - (v_rect.xy + hs), hs, v_radii);
+    float b = max(v_border_width, 0.5);
+    coverage = 1.0 - smoothstep(-b, b, d);
+  } else if (kind == 3u) {
+    float d = sd_segment(p, v_rect.xy, v_rect.zw) - v_radii.x * 0.5;
+    coverage = clamp(0.5 - d, 0.0, 1.0);
+  } else if (kind == 4u) {
+    float d = sd_triangle(p, v_rect.xy, v_rect.zw, v_radii.xy);
+    coverage = clamp(0.5 - d, 0.0, 1.0);
+  } else if (kind == 7u) {
+    vec2 a = v_rect.xy, b = v_radii.xy, c = v_radii.zw, e = v_rect.zw;
+    vec2 from = a; float nearest = 1e20, along = 0.0;
+    for (int i = 1; i <= 24; i++) {
+      float t = float(i) / 24.0; float u = 1.0 - t;
+      vec2 to = u * u * u * a + 3.0 * u * u * t * b + 3.0 * u * t * t * c + t * t * t * e;
+      vec2 pa = p - from, ba = to - from;
+      float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
+      vec2 away = pa - ba * h; float d2 = dot(away, away);
+      if (d2 < nearest) { nearest = d2; along = (float(i - 1) + h) / 24.0; }
+      from = to;
+    }
+    float d = sqrt(nearest) - v_border_width * 0.5;
+    float stroke = clamp(0.5 - d, 0.0, 1.0);
+    float pulse = 0.0;
+    color = mix(v_color, v_border_color, along);
+    float bright = v_flags.y / 255.0;
+    if (v_params.w > 0.0 && bright > 0.0) { float f = fract(along * v_params.w - v_params.z) - 0.5; pulse = exp(-f * f * 80.0) * bright; color.rgb = mix(color.rgb, vec3(color.a), pulse * 0.6); }
+    float halo = 0.0;
+    if (v_params.x > 0.0) { halo = 1.0 - smoothstep(0.0, v_params.x, max(d, 0.0)); halo = halo * halo * v_params.y * (1.0 + pulse * 0.8); }
+    coverage = stroke + (1.0 - stroke) * min(halo, 1.0);
+  }
+  out_color = color * coverage;
+}
+)";
+
+// A texture Raven made: its GL name and how its pixels come in. Owned is
+// false for a raylib texture linked by CreateRavenTexture: Raven draws it,
+// raylib keeps it (never unloaded, updated or re-filtered here)
+struct RavenRaylibDoTexture
+{
+  unsigned int Gl = 0;
+  RTextureFormat Format{};
+  bool Owned = true;
+};
+
+// A Raven window's last draw list: Raven renders a window only when it
+// changed, a game redraws every frame, so RavenRaylibDoDraw replays it
+struct RavenRaylibDoWindow
+{
+  bool Used = false;
+  Rid Window = 0;
+  std::vector<RDrawInstance> Instances;
+  std::vector<RDrawCommand> Commands;
+  // Raven's framebuffer pixels per logical unit when it rendered
+  float Scale = 1.0f;
+};
+
+constexpr int CRavenRaylibDoMaxWindows = 8;
+
+struct RavenRaylibDoState
+{
+  unsigned int Program = 0;
+  int LocMvp = -1;
+  int LocUnit = -1;
+  int LocTexture = -1;
+  unsigned int Vao = 0;
+  unsigned int Vbo = 0;
+  int VboSize = 0;
+  // indexed by R_ID_INDEX of the texture's Rid
+  std::vector<RavenRaylibDoTexture> Textures;
+  RavenRaylibDoWindow Windows[CRavenRaylibDoMaxWindows];
+  // ALPHA8 pixels widened to RGBA8
+  std::vector<unsigned char> Convert;
+  ::Vector2 LastMouse{ -1.0e6f, -1.0e6f };
+  // the clipboard text last exchanged with the OS
+  std::string ClipSeen;
+  // raylib units per Raven logical unit (RavenRaylibDoSync's)
+  float UnitsPerLogical = 1.0f;
+};
+
+RavenRaylibDoState& RavenRaylibDoGet()
+{
+  static RavenRaylibDoState LState;
+  return LState;
+}
+
+RavenRaylibDoWindow* RavenRaylibDoFindWindow(const Rid AWindow, const bool ACreate)
+{
+  RavenRaylibDoState& LState = RavenRaylibDoGet();
+
+  for (RavenRaylibDoWindow& LWindow : LState.Windows)
+    if (LWindow.Used && (LWindow.Window == AWindow))
+      return &LWindow;
+  if (!ACreate)
+    return nullptr;
+  for (RavenRaylibDoWindow& LWindow : LState.Windows)
+  {
+    if (!LWindow.Used)
+    {
+      LWindow.Used = true;
+      LWindow.Window = AWindow;
+      return &LWindow;
+    }
+  }
+  return nullptr;
+}
+
+RavenRaylibDoTexture* RavenRaylibDoFindTexture(const Rid ATexture, const bool ACreate)
+{
+  std::vector<RavenRaylibDoTexture>& LTextures = RavenRaylibDoGet().Textures;
+  const std::size_t LIndex = R_ID_INDEX(ATexture);
+
+  if (LIndex >= LTextures.size())
+  {
+    if (!ACreate)
+      return nullptr;
+    LTextures.resize(LIndex + 1);
+  }
+  return &LTextures[LIndex];
+}
+
+// ALPHA8 is sampled as (1, 1, 1, value): widened to RGBA8 on the CPU, every
+// texture being RGBA8 on the GL side
+const void* RavenRaylibDoPixels(const RTextureFormat AFormat, const Ruint AWidth, const Ruint AHeight,
+  const void* APixels)
+{
+  if ((APixels == nullptr) || (AFormat != R_TEXTURE_ALPHA8))
+    return APixels;
+  std::vector<unsigned char>& LBuffer = RavenRaylibDoGet().Convert;
+  const std::size_t LCount = static_cast<std::size_t>(AWidth) * static_cast<std::size_t>(AHeight);
+  const unsigned char* LSource = static_cast<const unsigned char*>(APixels);
+
+  LBuffer.resize(LCount * 4);
+  for (std::size_t LPixel = 0; LPixel < LCount; LPixel++)
+  {
+    LBuffer[LPixel * 4 + 0] = 255;
+    LBuffer[LPixel * 4 + 1] = 255;
+    LBuffer[LPixel * 4 + 2] = 255;
+    LBuffer[LPixel * 4 + 3] = LSource[LPixel];
+  }
+  return LBuffer.data();
+}
+
+void RavenRaylibDoFilter(const unsigned int AGl, const RFilterType AFilter)
+{
+  const int LValue = (AFilter == R_FILTER_NEAREST) ? RL_TEXTURE_FILTER_NEAREST : RL_TEXTURE_FILTER_LINEAR;
+
+  rlTextureParameters(AGl, RL_TEXTURE_MIN_FILTER, LValue);
+  rlTextureParameters(AGl, RL_TEXTURE_MAG_FILTER, LValue);
+  rlTextureParameters(AGl, RL_TEXTURE_WRAP_S, RL_TEXTURE_WRAP_CLAMP);
+  rlTextureParameters(AGl, RL_TEXTURE_WRAP_T, RL_TEXTURE_WRAP_CLAMP);
+}
+
+// ---- the RBackendVTable entries ----
+
+int RavenRaylibDoBackendInit(const RBackendInitInfo* AInfo)
+{
+  RavenRaylibDoState& LState = RavenRaylibDoGet();
+
+  (void)AInfo;
+  LState.Program = rlLoadShaderProgram(CRavenRaylibDoVertexShader, CRavenRaylibDoFragmentShader);
+  if (LState.Program == 0)
+    return R_FALSE;
+  LState.LocMvp = rlGetLocationUniform(LState.Program, "u_mvp");
+  LState.LocUnit = rlGetLocationUniform(LState.Program, "u_unit");
+  LState.LocTexture = rlGetLocationUniform(LState.Program, "u_texture");
+  LState.Vao = rlLoadVertexArray();
+  return R_TRUE;
+}
+
+void RavenRaylibDoBackendShutdown()
+{
+  RavenRaylibDoState& LState = RavenRaylibDoGet();
+
+  for (const RavenRaylibDoTexture& LTexture : LState.Textures)
+    if ((LTexture.Gl != 0) && LTexture.Owned)
+      rlUnloadTexture(LTexture.Gl);
+  if (LState.Vbo != 0)
+    rlUnloadVertexBuffer(LState.Vbo);
+  if (LState.Vao != 0)
+    rlUnloadVertexArray(LState.Vao);
+  if (LState.Program != 0)
+    rlUnloadShaderProgram(LState.Program);
+  // Everything back to "not set up", ready for another InitRaven
+  LState = RavenRaylibDoState();
+}
+
+int RavenRaylibDoCreateSurface(const Rid AWindow, const RNativeWindow* ANative, const Ruint AWidth,
+  const Ruint AHeight)
+{
+  (void)ANative;
+  (void)AWidth;
+  (void)AHeight;
+  return (RavenRaylibDoFindWindow(AWindow, true) != nullptr) ? R_TRUE : R_FALSE;
+}
+
+void RavenRaylibDoDestroySurface(const Rid AWindow)
+{
+  RavenRaylibDoWindow* LWindow = RavenRaylibDoFindWindow(AWindow, false);
+
+  if (LWindow != nullptr)
+    *LWindow = RavenRaylibDoWindow();
+}
+
+int RavenRaylibDoCreateTexture(const Rid ATexture, const RTextureDesc* ADesc, const void* APixels)
+{
+  RavenRaylibDoTexture* LSlot = RavenRaylibDoFindTexture(ATexture, true);
+
+  if (LSlot == nullptr)
+    return R_FALSE;
+  if ((LSlot->Gl != 0) && LSlot->Owned)
+    rlUnloadTexture(LSlot->Gl);
+  LSlot->Owned = true;
+  LSlot->Format = ADesc->format;
+  LSlot->Gl = rlLoadTexture(RavenRaylibDoPixels(ADesc->format, ADesc->width, ADesc->height, APixels),
+    static_cast<int>(ADesc->width), static_cast<int>(ADesc->height), RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8A8, 1);
+  if (LSlot->Gl == 0)
+    return R_FALSE;
+  RavenRaylibDoFilter(LSlot->Gl, ADesc->filter);
+  return R_TRUE;
+}
+
+void RavenRaylibDoUpdateTexture(const Rid ATexture, const Ruint AX, const Ruint AY, const Ruint AWidth,
+  const Ruint AHeight, const void* APixels)
+{
+  RavenRaylibDoTexture* LSlot = RavenRaylibDoFindTexture(ATexture, false);
+
+  if ((LSlot == nullptr) || (LSlot->Gl == 0) || !LSlot->Owned || (APixels == nullptr))
+    return;
+  rlUpdateTexture(LSlot->Gl, static_cast<int>(AX), static_cast<int>(AY), static_cast<int>(AWidth),
+    static_cast<int>(AHeight), RL_PIXELFORMAT_UNCOMPRESSED_R8G8B8A8,
+    RavenRaylibDoPixels(LSlot->Format, AWidth, AHeight, APixels));
+}
+
+void RavenRaylibDoSetTextureFilter(const Rid ATexture, const RFilterType AFilter)
+{
+  RavenRaylibDoTexture* LSlot = RavenRaylibDoFindTexture(ATexture, false);
+
+  if ((LSlot != nullptr) && (LSlot->Gl != 0) && LSlot->Owned)
+    RavenRaylibDoFilter(LSlot->Gl, AFilter);
+}
+
+void RavenRaylibDoDestroyTexture(const Rid ATexture)
+{
+  RavenRaylibDoTexture* LSlot = RavenRaylibDoFindTexture(ATexture, false);
+
+  if ((LSlot == nullptr) || (LSlot->Gl == 0))
+    return;
+  if (LSlot->Owned)
+    rlUnloadTexture(LSlot->Gl);
+  *LSlot = RavenRaylibDoTexture();
+}
+
+// Keeps the window's draw list: RavenRaylibDoDraw replays it every frame
+void RavenRaylibDoRenderFrame(const RDrawData* AData, RCapture* ACapture)
+{
+  RavenRaylibDoWindow* LWindow = RavenRaylibDoFindWindow(AData->window, true);
+
+  // A capture is not supported: no pixels
+  if (ACapture != nullptr)
+    ACapture->pixels = nullptr;
+  if (LWindow == nullptr)
+    return;
+  LWindow->Instances.assign(AData->instances, AData->instances + AData->instance_count);
+  LWindow->Commands.assign(AData->commands, AData->commands + AData->command_count);
+  LWindow->Scale = (AData->scale > 0.0f) ? AData->scale : 1.0f;
+}
+
+void RavenRaylibDoWaitIdle()
+{
+}
+
+void RavenRaylibDoRegister()
+{
+  RBackendVTable LTable;
+
+  std::memset(&LTable, 0, sizeof(LTable));
+  LTable.name = "raylib";
+  LTable.Init = RavenRaylibDoBackendInit;
+  LTable.Shutdown = RavenRaylibDoBackendShutdown;
+  LTable.CreateSurface = RavenRaylibDoCreateSurface;
+  LTable.DestroySurface = RavenRaylibDoDestroySurface;
+  LTable.CreateTexture = RavenRaylibDoCreateTexture;
+  LTable.UpdateTexture = RavenRaylibDoUpdateTexture;
+  LTable.SetTextureFilter = RavenRaylibDoSetTextureFilter;
+  LTable.DestroyTexture = RavenRaylibDoDestroyTexture;
+  LTable.RenderFrame = RavenRaylibDoRenderFrame;
+  LTable.WaitIdle = RavenRaylibDoWaitIdle;
+  Rbackend_register(&LTable);
+}
+
+// ---- input ----
+
+// A codepoint as UTF-8 (AOut holds at least 5 bytes)
+void RavenRaylibDoUtf8(const int ACodepoint, char* AOut)
+{
+  if (ACodepoint < 0x80)
+  {
+    AOut[0] = static_cast<char>(ACodepoint);
+    AOut[1] = 0;
+  }
+  else if (ACodepoint < 0x800)
+  {
+    AOut[0] = static_cast<char>(0xC0 | (ACodepoint >> 6));
+    AOut[1] = static_cast<char>(0x80 | (ACodepoint & 0x3F));
+    AOut[2] = 0;
+  }
+  else if (ACodepoint < 0x10000)
+  {
+    AOut[0] = static_cast<char>(0xE0 | (ACodepoint >> 12));
+    AOut[1] = static_cast<char>(0x80 | ((ACodepoint >> 6) & 0x3F));
+    AOut[2] = static_cast<char>(0x80 | (ACodepoint & 0x3F));
+    AOut[3] = 0;
+  }
+  else
+  {
+    AOut[0] = static_cast<char>(0xF0 | (ACodepoint >> 18));
+    AOut[1] = static_cast<char>(0x80 | ((ACodepoint >> 12) & 0x3F));
+    AOut[2] = static_cast<char>(0x80 | ((ACodepoint >> 6) & 0x3F));
+    AOut[3] = static_cast<char>(0x80 | (ACodepoint & 0x3F));
+    AOut[4] = 0;
+  }
+}
+
+// raylib key -> Raven key: the same codes up to END, then the two diverge,
+// so every pair is named (the compiler checks both sides)
+struct RavenRaylibDoKey
+{
+  int Raylib;
+  RKey Raven;
+};
+
+const RavenRaylibDoKey CRavenRaylibDoKeys[] = {
+  { KEY_SPACE, R_KEY_SPACE }, { KEY_APOSTROPHE, R_KEY_APOSTROPHE }, { KEY_COMMA, R_KEY_COMMA },
+  { KEY_MINUS, R_KEY_MINUS }, { KEY_PERIOD, R_KEY_PERIOD }, { KEY_SLASH, R_KEY_SLASH },
+  { KEY_ZERO, R_KEY_0 }, { KEY_ONE, R_KEY_1 }, { KEY_TWO, R_KEY_2 }, { KEY_THREE, R_KEY_3 },
+  { KEY_FOUR, R_KEY_4 }, { KEY_FIVE, R_KEY_5 }, { KEY_SIX, R_KEY_6 }, { KEY_SEVEN, R_KEY_7 },
+  { KEY_EIGHT, R_KEY_8 }, { KEY_NINE, R_KEY_9 }, { KEY_SEMICOLON, R_KEY_SEMICOLON }, { KEY_EQUAL, R_KEY_EQUAL },
+  { KEY_A, R_KEY_A }, { KEY_B, R_KEY_B }, { KEY_C, R_KEY_C }, { KEY_D, R_KEY_D }, { KEY_E, R_KEY_E },
+  { KEY_F, R_KEY_F }, { KEY_G, R_KEY_G }, { KEY_H, R_KEY_H }, { KEY_I, R_KEY_I }, { KEY_J, R_KEY_J },
+  { KEY_K, R_KEY_K }, { KEY_L, R_KEY_L }, { KEY_M, R_KEY_M }, { KEY_N, R_KEY_N }, { KEY_O, R_KEY_O },
+  { KEY_P, R_KEY_P }, { KEY_Q, R_KEY_Q }, { KEY_R, R_KEY_R }, { KEY_S, R_KEY_S }, { KEY_T, R_KEY_T },
+  { KEY_U, R_KEY_U }, { KEY_V, R_KEY_V }, { KEY_W, R_KEY_W }, { KEY_X, R_KEY_X }, { KEY_Y, R_KEY_Y },
+  { KEY_Z, R_KEY_Z }, { KEY_LEFT_BRACKET, R_KEY_LEFT_BRACKET }, { KEY_BACKSLASH, R_KEY_BACKSLASH },
+  { KEY_RIGHT_BRACKET, R_KEY_RIGHT_BRACKET }, { KEY_GRAVE, R_KEY_GRAVE },
+  { KEY_ESCAPE, R_KEY_ESCAPE }, { KEY_ENTER, R_KEY_ENTER }, { KEY_TAB, R_KEY_TAB }, { KEY_BACKSPACE, R_KEY_BACKSPACE },
+  { KEY_INSERT, R_KEY_INSERT }, { KEY_DELETE, R_KEY_DELETE }, { KEY_RIGHT, R_KEY_RIGHT }, { KEY_LEFT, R_KEY_LEFT },
+  { KEY_DOWN, R_KEY_DOWN }, { KEY_UP, R_KEY_UP }, { KEY_PAGE_UP, R_KEY_PAGE_UP }, { KEY_PAGE_DOWN, R_KEY_PAGE_DOWN },
+  { KEY_HOME, R_KEY_HOME }, { KEY_END, R_KEY_END }, { KEY_CAPS_LOCK, R_KEY_CAPS_LOCK },
+  { KEY_PRINT_SCREEN, R_KEY_PRINT_SCREEN }, { KEY_PAUSE, R_KEY_PAUSE },
+  { KEY_F1, R_KEY_F1 }, { KEY_F2, R_KEY_F2 }, { KEY_F3, R_KEY_F3 }, { KEY_F4, R_KEY_F4 }, { KEY_F5, R_KEY_F5 },
+  { KEY_F6, R_KEY_F6 }, { KEY_F7, R_KEY_F7 }, { KEY_F8, R_KEY_F8 }, { KEY_F9, R_KEY_F9 }, { KEY_F10, R_KEY_F10 },
+  { KEY_F11, R_KEY_F11 }, { KEY_F12, R_KEY_F12 },
+  { KEY_KP_0, R_KEY_KP_0 }, { KEY_KP_1, R_KEY_KP_1 }, { KEY_KP_2, R_KEY_KP_2 }, { KEY_KP_3, R_KEY_KP_3 },
+  { KEY_KP_4, R_KEY_KP_4 }, { KEY_KP_5, R_KEY_KP_5 }, { KEY_KP_6, R_KEY_KP_6 }, { KEY_KP_7, R_KEY_KP_7 },
+  { KEY_KP_8, R_KEY_KP_8 }, { KEY_KP_9, R_KEY_KP_9 }, { KEY_KP_DECIMAL, R_KEY_KP_DECIMAL },
+  { KEY_KP_DIVIDE, R_KEY_KP_DIVIDE }, { KEY_KP_MULTIPLY, R_KEY_KP_MULTIPLY }, { KEY_KP_SUBTRACT, R_KEY_KP_SUBTRACT },
+  { KEY_KP_ADD, R_KEY_KP_ADD }, { KEY_KP_ENTER, R_KEY_KP_ENTER },
+  { KEY_LEFT_SHIFT, R_KEY_LEFT_SHIFT }, { KEY_LEFT_CONTROL, R_KEY_LEFT_CTRL }, { KEY_LEFT_ALT, R_KEY_LEFT_ALT },
+  { KEY_LEFT_SUPER, R_KEY_LEFT_SUPER }, { KEY_RIGHT_SHIFT, R_KEY_RIGHT_SHIFT }, { KEY_RIGHT_CONTROL, R_KEY_RIGHT_CTRL },
+  { KEY_RIGHT_ALT, R_KEY_RIGHT_ALT }, { KEY_RIGHT_SUPER, R_KEY_RIGHT_SUPER }, { KEY_KB_MENU, R_KEY_MENU }
+};
+
+Ruint RavenRaylibDoModifiers()
+{
+  Ruint LMods = 0;
+
+  if (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))
+    LMods |= R_MOD_SHIFT;
+  if (IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL))
+    LMods |= R_MOD_CTRL;
+  if (IsKeyDown(KEY_LEFT_ALT) || IsKeyDown(KEY_RIGHT_ALT))
+    LMods |= R_MOD_ALT;
+  if (IsKeyDown(KEY_LEFT_SUPER) || IsKeyDown(KEY_RIGHT_SUPER))
+    LMods |= R_MOD_SUPER;
+  return LMods;
+}
+
+// Headless Raven keeps its clipboard to itself: what it copies goes to the
+// OS through raylib, what the OS holds is handed to it before a paste key
+void RavenRaylibDoClipboardOut()
+{
+  RavenRaylibDoState& LState = RavenRaylibDoGet();
+  const char* LText = Rclipboard_get_text();
+
+  if ((LText == nullptr) || (LText[0] == 0) || (LState.ClipSeen == LText))
+    return;
+  SetClipboardText(LText);
+  LState.ClipSeen = LText;
+}
+
+void RavenRaylibDoClipboardIn()
+{
+  const char* LText = GetClipboardText();
+
+  if (LText == nullptr)
+    return;
+  Rclipboard_set_text(LText);
+  RavenRaylibDoGet().ClipSeen = LText;
+}
+
+// The Raven window as the host lays it out: its logical size, its UI scale
+// (framebuffer pixels per logical unit), and raylib units per logical unit
+void RavenRaylibDoSync(const Rid AWindow, const int AWidth, const int AHeight, const float AScale,
+  const float AUnitsPerLogical)
+{
+  int LWidth = 0;
+  int LHeight = 0;
+
+  RavenRaylibDoGet().UnitsPerLogical = AUnitsPerLogical;
+  if (Rget_ui_scale() != AScale)
+    Rset_ui_scale(AScale);
+  Rwindow_get_size(AWindow, &LWidth, &LHeight);
+  if ((LWidth != AWidth) || (LHeight != AHeight))
+    Rwindow_set_size(AWindow, AWidth, AHeight);
+}
+
+// raylib's input into the Raven window: AMouse already in its logical units
+void RavenRaylibDoFeed(const Rid AWindow, const ::Vector2 AMouse)
+{
+  static const int CButtons[3] = { MOUSE_BUTTON_LEFT, MOUSE_BUTTON_RIGHT, MOUSE_BUTTON_MIDDLE };
+  static const RMouseButton CTargets[3] = { R_MOUSE_LEFT, R_MOUSE_RIGHT, R_MOUSE_MIDDLE };
+  RavenRaylibDoState& LState = RavenRaylibDoGet();
+  const ::Vector2 LWheel = GetMouseWheelMoveV();
+  const Ruint LMods = RavenRaylibDoModifiers();
+  char LText[5];
+
+  RavenRaylibDoClipboardOut();
+  for (const RavenRaylibDoKey& LKey : CRavenRaylibDoKeys)
+  {
+    if (IsKeyPressed(LKey.Raylib) || IsKeyPressedRepeat(LKey.Raylib))
+    {
+      const bool LPaste = ((LKey.Raven == R_KEY_V) && ((LMods & (R_MOD_CTRL | R_MOD_SUPER)) != 0)) ||
+        ((LKey.Raven == R_KEY_INSERT) && ((LMods & R_MOD_SHIFT) != 0));
+      if (LPaste)
+        RavenRaylibDoClipboardIn();
+      Rwindow_inject_key(AWindow, LKey.Raven, R_TRUE, LMods);
+    }
+    if (IsKeyReleased(LKey.Raylib))
+      Rwindow_inject_key(AWindow, LKey.Raven, R_FALSE, LMods);
+  }
+  if ((AMouse.x != LState.LastMouse.x) || (AMouse.y != LState.LastMouse.y))
+  {
+    Rwindow_inject_mouse_move(AWindow, AMouse.x, AMouse.y);
+    LState.LastMouse = AMouse;
+  }
+  for (int LButton = 0; LButton < 3; LButton++)
+  {
+    if (IsMouseButtonPressed(CButtons[LButton]))
+      Rwindow_inject_mouse_button(AWindow, CTargets[LButton], R_TRUE);
+    if (IsMouseButtonReleased(CButtons[LButton]))
+      Rwindow_inject_mouse_button(AWindow, CTargets[LButton], R_FALSE);
+  }
+  if ((LWheel.x != 0.0f) || (LWheel.y != 0.0f))
+    Rwindow_inject_mouse_wheel(AWindow, LWheel.x, LWheel.y);
+  for (int LCodepoint = GetCharPressed(); LCodepoint != 0; LCodepoint = GetCharPressed())
+  {
+    RavenRaylibDoUtf8(LCodepoint, LText);
+    Rwindow_inject_text(AWindow, LText);
+  }
+}
+
+// ---- drawing ----
+
+// GL 3.3 has no base instance: each command points the attributes at its
+// first instance (RDrawInstance's layout, raven_backend.h)
+void RavenRaylibDoPointAttributes(const Ruint AFirst)
+{
+  const int LBase = static_cast<int>(AFirst * sizeof(RDrawInstance));
+  const int LStride = static_cast<int>(sizeof(RDrawInstance));
+
+  rlSetVertexAttribute(0, 4, RL_FLOAT, false, LStride, LBase + 0);
+  rlSetVertexAttribute(1, 4, RL_FLOAT, false, LStride, LBase + 16);
+  rlSetVertexAttribute(2, 4, RL_FLOAT, false, LStride, LBase + 32);
+  rlSetVertexAttribute(3, 4, RL_FLOAT, false, LStride, LBase + 48);
+  rlSetVertexAttribute(4, 4, RL_UNSIGNED_BYTE, true, LStride, LBase + 64);
+  rlSetVertexAttribute(5, 4, RL_UNSIGNED_BYTE, true, LStride, LBase + 68);
+  rlSetVertexAttribute(6, 1, RL_FLOAT, false, LStride, LBase + 72);
+  rlSetVertexAttribute(7, 4, RL_UNSIGNED_BYTE, false, LStride, LBase + 76);
+}
+
+// The window's last draw list, with raylib's current projection
+void RavenRaylibDoDraw(const Rid AWindow)
+{
+  RavenRaylibDoState& LState = RavenRaylibDoGet();
+  RavenRaylibDoWindow* LWindow = RavenRaylibDoFindWindow(AWindow, false);
+  int LSlot = 0;
+
+  if ((LWindow == nullptr) || LWindow->Instances.empty() || (LState.Program == 0))
+    return;
+  // raylib's own batch first: Raven draws over what the game drew
+  rlDrawRenderBatchActive();
+  // Premultiplied output (ONE, ONE_MINUS_SRC_ALPHA), set before any bind:
+  // rlSetBlendMode flushes raylib's batch, which binds and then unbinds
+  // raylib's own shader and vertex array
+  rlSetBlendFactors(RL_ONE, RL_ONE_MINUS_SRC_ALPHA, RL_FUNC_ADD);
+  rlSetBlendMode(RL_BLEND_CUSTOM);
+
+  const int LBytes = static_cast<int>(LWindow->Instances.size() * sizeof(RDrawInstance));
+  rlEnableVertexArray(LState.Vao);
+  if (LBytes > LState.VboSize)
+  {
+    if (LState.Vbo != 0)
+      rlUnloadVertexBuffer(LState.Vbo);
+    LState.Vbo = rlLoadVertexBuffer(LWindow->Instances.data(), LBytes, true);
+    LState.VboSize = LBytes;
+  }
+  else
+  {
+    rlEnableVertexBuffer(LState.Vbo);
+    rlUpdateVertexBuffer(LState.Vbo, LWindow->Instances.data(), LBytes, 0);
+  }
+  rlEnableVertexBuffer(LState.Vbo);
+  for (unsigned int LAttribute = 0; LAttribute < 8; LAttribute++)
+  {
+    rlEnableVertexAttribute(LAttribute);
+    rlSetVertexAttributeDivisor(LAttribute, 1);
+  }
+
+  const ::Matrix LMvp = MatrixMultiply(MatrixMultiply(rlGetMatrixTransform(), rlGetMatrixModelview()),
+    rlGetMatrixProjection());
+  // Raven framebuffer pixels -> raylib units
+  const float LUnit = LState.UnitsPerLogical / LWindow->Scale;
+  rlEnableShader(LState.Program);
+  rlSetUniformMatrix(LState.LocMvp, LMvp);
+  rlSetUniform(LState.LocUnit, &LUnit, RL_SHADER_UNIFORM_FLOAT, 1);
+  rlSetUniform(LState.LocTexture, &LSlot, RL_SHADER_UNIFORM_INT, 1);
+  rlDisableBackfaceCulling();
+  for (const RDrawCommand& LCommand : LWindow->Commands)
+  {
+    if ((LCommand.type != R_DRAW_INSTANCES) && (LCommand.type != R_DRAW_SHADER))
+      continue;
+    if (LCommand.instance_count == 0)
+      continue;
+    const RavenRaylibDoTexture* LTexture = (LCommand.texture != 0) ?
+      RavenRaylibDoFindTexture(LCommand.texture, false) : nullptr;
+    rlActiveTextureSlot(0);
+    rlEnableTexture(((LTexture != nullptr) && (LTexture->Gl != 0)) ? LTexture->Gl : rlGetTextureIdDefault());
+    RavenRaylibDoPointAttributes(LCommand.first_instance);
+    rlDrawVertexArrayInstanced(0, 6, static_cast<int>(LCommand.instance_count));
+  }
+  rlEnableBackfaceCulling();
+  rlSetBlendMode(RL_BLEND_ALPHA);
+  rlDisableTexture();
+  rlDisableShader();
+  rlDisableVertexBuffer();
+  rlDisableVertexArray();
+}
+
+// Raven on this backend: custom, headless (no OS window), render thread off
+bool RavenRaylibDoInit(const char* AAppName)
+{
+  RInitDesc LDesc;
+
+  if (!IsWindowReady() || (Ris_initialized() != 0))
+    return false;
+  RavenRaylibDoRegister();
+  std::memset(&LDesc, 0, sizeof(LDesc));
+  LDesc.backend = R_BACKEND_CUSTOM;
+  LDesc.app_name = AAppName;
+  LDesc.headless = R_TRUE;
+  LDesc.disable_render_thread = R_TRUE;
+  return Rinit_ex(&LDesc) != 0;
+}
+
+// A Raven texture whose slot draws raylib's GL texture AGl, not owned.
+// Raven sizes a texture from its first pixels, so it is made at the raylib
+// texture's size from transparent ones; the GL texture the backend made for
+// them is swapped for raylib's at once (with the render thread off,
+// Rtexture_create_from_pixels runs CreateTexture before it returns)
+Rid RavenRaylibDoLinkTexture(const unsigned int AGl, const int AWidth, const int AHeight)
+{
+  if ((AGl == 0) || (AWidth <= 0) || (AHeight <= 0) || (Ris_initialized() == 0))
+    return R_INVALID_ID;
+  const std::vector<std::uint8_t> LPixels(static_cast<std::size_t>(AWidth) * static_cast<std::size_t>(AHeight) * 4, 0);
+  const Rid LTexture = Rtexture_create_from_pixels(LPixels.data(), AWidth, AHeight);
+
+  if (LTexture == R_INVALID_ID)
+    return R_INVALID_ID;
+  RavenRaylibDoTexture* LSlot = RavenRaylibDoFindTexture(LTexture, false);
+  if ((LSlot == nullptr) || (LSlot->Gl == 0))
+  {
+    Rtexture_destroy(LTexture);
+    return R_INVALID_ID;
+  }
+  rlUnloadTexture(LSlot->Gl);
+  LSlot->Gl = AGl;
+  LSlot->Owned = false;
+  return LTexture;
+}
+
+// A linked Raven texture pointed at another raylib GL texture; a texture
+// Raven owns (its own pixels) is refused
+bool RavenRaylibDoRelinkTexture(const Rid ATexture, const unsigned int AGl)
+{
+  if ((AGl == 0) || (Ris_initialized() == 0) || (Rtexture_is_valid(ATexture) == 0))
+    return false;
+  RavenRaylibDoTexture* LSlot = RavenRaylibDoFindTexture(ATexture, false);
+  if ((LSlot == nullptr) || LSlot->Owned)
+    return false;
+  LSlot->Gl = AGl;
+  return true;
+}
+
+} // namespace
+
+type
+  // The Raven window as UpdateRaven lays it out over raylib's window or the
+  // frame: its logical size, its UI scale (framebuffer pixels per logical
+  // unit), raylib units per logical unit, the mouse in logical units
+  RavenRaylibDoLayout = record
+    Width: int32;
+    Height: int32;
+    Scale: float32;
+    UnitsPerLogical: float32;
+    Mouse: ::Vector2;
+  end;
+
+const
+  // The mouse when it is over no part of the Raven window (the frame's bars)
+  CRavenRaylibDoNoMouse: float32 = -1000000.0f;
+  // A scale below this is no scale (a DPI query that went wrong): 1 instead
+  CRavenRaylibDoMinScale: float32 = 0.25f;
+
+// raylib's window units to framebuffer pixels: 1, or the monitor's scale
+// when raylib scales the window itself (FLAG_WINDOW_HIGHDPI)
+routine RavenRaylibDoWindowScale(): float32;
+begin
+  if IsWindowState(FLAG_WINDOW_HIGHDPI) then
+    return GetWindowScaleDPI().x;
+  end;
+  return 1.0f;
+end;
+
+// Inside the frame window: the frame's base size in base units, drawn
+// through its letterbox (the window's size now, raylib_ext's rule), text at
+// the letterbox's real pixel density, the mouse in base units
+routine RavenRaylibDoFrameLayout(): RavenRaylibDoLayout;
+var
+  LResult: RavenRaylibDoLayout;
+  LBox: Rectangle;
+  LZoom: float32;
+  LMouse: ::Vector2;
+begin
+  LResult.Width := GetFrameWidth();
+  LResult.Height := GetFrameHeight();
+  LBox := GetLetterboxRect(GetScreenWidth(), GetScreenHeight(), LResult.Width, LResult.Height);
+  LZoom := LBox.width / float32(LResult.Width);
+  // A minimized window has an empty letterbox: the last real density is
+  // as good as any, 1 is never wrong
+  if LZoom <= 0.0f then
+    LZoom := 1.0f;
+  end;
+  LResult.Scale := LZoom * RavenRaylibDoWindowScale();
+  LResult.UnitsPerLogical := 1.0f;
+
+  LMouse := GetMousePosition();
+  if (LBox.width > 0.0f) and CheckCollisionPointRec(LMouse, LBox) then
+    LResult.Mouse.x := (LMouse.x - LBox.x) / LZoom;
+    LResult.Mouse.y := (LMouse.y - LBox.y) / LZoom;
+  else
+    LResult.Mouse.x := CRavenRaylibDoNoMouse;
+    LResult.Mouse.y := CRavenRaylibDoNoMouse;
+  end;
+  return LResult;
+end;
+
+// raylib's own window: the UI laid out at the window's DPI scale. Without
+// FLAG_WINDOW_HIGHDPI raylib's units are pixels, so the Raven window is the
+// screen in logical units (its framebuffer exactly raylib's pixels); with
+// it raylib already works in logical units at its own scale
+routine RavenRaylibDoWindowLayout(): RavenRaylibDoLayout;
+var
+  LResult: RavenRaylibDoLayout;
+  LMouse: ::Vector2;
+begin
+  if IsWindowState(FLAG_WINDOW_HIGHDPI) then
+    LResult.Scale := GetWindowScaleDPI().x;
+  else
+    LResult.Scale := float32(float32(GetWindowDpi()) / 96.0);
+  end;
+  if LResult.Scale < CRavenRaylibDoMinScale then
+    LResult.Scale := 1.0f;
+  end;
+  if IsWindowState(FLAG_WINDOW_HIGHDPI) then
+    LResult.UnitsPerLogical := 1.0f;
+  else
+    LResult.UnitsPerLogical := LResult.Scale;
+  end;
+
+  LResult.Width := int32(Round(float32(GetScreenWidth()) / LResult.UnitsPerLogical));
+  LResult.Height := int32(Round(float32(GetScreenHeight()) / LResult.UnitsPerLogical));
+  LMouse := GetMousePosition();
+  LResult.Mouse.x := LMouse.x / LResult.UnitsPerLogical;
+  LResult.Mouse.y := LMouse.y / LResult.UnitsPerLogical;
+  return LResult;
+end;
+
+/// Starts Raven inside the raylib program, on this unit's rlgl backend:
+/// headless (no OS window of Raven's own), R_BACKEND_CUSTOM, its render
+/// thread off. Call it once after InitWindow or InitFrameWindow, then make
+/// the UI window with Rwindow_create (its size follows raylib's window, so
+/// any size will do) and its widgets with the raven unit's API.
+/// @param AAppName the application's name, as RInitDesc.app_name
+/// @returns true when Raven is up; false when raylib has no window yet,
+///   Raven is already running, or Raven could not start (its error
+///   callback says why)
+/// @example `InitWindow(800, 450, "Game"); if not InitRaven("Game") then return; end;`
+/// @see UpdateRaven
+/// @since 0.3
+exported routine InitRaven(const AAppName: ptr to const char): bool;
+begin
+  return RavenRaylibDoInit(AAppName);
+end;
+
+/// Runs one Raven frame for AWindow, before BeginDrawing: the window takes
+/// raylib's window size (or the frame's base size inside the frame window)
+/// and its UI scale, then raylib's input this frame (keys with modifiers,
+/// mouse, wheel, typed text, the clipboard both ways), then Rdraw_frame
+/// lays out and paints what changed and runs Raven's callbacks, timers and
+/// tasks.
+/// @param AWindow the UI window (Rwindow_create's)
+/// @returns false once Rquit was called, the last Raven window is closed,
+///   or Raven is not running (InitRaven not called, CloseRaven called)
+/// @example `while not WindowShouldClose() and UpdateRaven(LUi) do ... end;`
+/// @see DrawRaven
+/// @since 0.3
+exported routine UpdateRaven(const AWindow: Rid): bool;
+var
+  LLayout: RavenRaylibDoLayout;
+begin
+  if Ris_initialized() = 0 then
+    return false;
+  end;
+  if GetFrameWidth() > 0 then
+    LLayout := RavenRaylibDoFrameLayout();
+  else
+    LLayout := RavenRaylibDoWindowLayout();
+  end;
+  RavenRaylibDoSync(AWindow, LLayout.Width, LLayout.Height, LLayout.Scale, LLayout.UnitsPerLogical);
+  RavenRaylibDoFeed(AWindow, LLayout.Mouse);
+  return Rdraw_frame() <> 0;
+end;
+
+/// Draws AWindow's last Raven frame over what the program drew, inside
+/// BeginDrawing / EndDrawing: in raylib's window units, or with the frame
+/// window open between BeginFrame and EndFrame (base units, scaled and
+/// letterboxed with the frame). It draws through whatever raylib has bound,
+/// so a render texture or a camera takes it too. Does nothing before the
+/// window's first UpdateRaven or with Raven not running.
+/// @param AWindow the UI window (Rwindow_create's)
+/// @example `BeginDrawing(); ClearBackground(BLACK); DrawGame(); DrawRaven(LUi); EndDrawing();`
+/// @see UpdateRaven
+/// @since 0.3
+exported routine DrawRaven(const AWindow: Rid);
+begin
+  RavenRaylibDoDraw(AWindow);
+end;
+
+/// Makes a Raven texture that shows ATexture, a raylib texture (one the
+/// program loaded, or a render texture's .texture). Raven draws raylib's
+/// texture as it is in every frame, so what the program draws into a
+/// render texture shows at once in a Viewport (Rviewport_set_texture; a
+/// render texture is bottom-up: Rviewport_set_flip_y(viewport, R_TRUE)) or
+/// an Image. raylib keeps the texture: Raven never copies, updates,
+/// re-filters or unloads it, and Rtexture_update on the Raven texture does
+/// nothing. Before the program unloads ATexture, it points the Raven
+/// texture at its new one (SetRavenTexture) or destroys it
+/// (Rtexture_destroy, which leaves raylib's texture alone).
+/// @param ATexture the raylib texture to show
+/// @returns the Raven texture; R_INVALID_ID when Raven is not running or
+///   ATexture is no texture (id 0, a size of 0)
+/// @example `LRaven := CreateRavenTexture(LTarget.texture); Rviewport_set_texture(LView, LRaven);`
+/// @see SetRavenTexture
+/// @since 0.3
+exported routine CreateRavenTexture(const ATexture: Texture2D): Rid;
+begin
+  return RavenRaylibDoLinkTexture(ATexture.id, ATexture.width, ATexture.height);
+end;
+
+/// Points a Raven texture made by CreateRavenTexture at another raylib
+/// texture: after a render texture is made again at a new size, the
+/// Viewport or Image showing it keeps its Raven texture.
+/// @param ARavenTexture CreateRavenTexture's Raven texture
+/// @param ATexture the raylib texture it shows from now on
+/// @returns true when done; false when Raven is not running, ATexture is
+///   no texture (id 0), or ARavenTexture is not a texture CreateRavenTexture
+///   made (one Raven made from its own pixels is never re-pointed)
+/// @example `LTarget := LoadRenderTexture(LWidth, LHeight); SetRavenTexture(LRaven, LTarget.texture);`
+/// @see CreateRavenTexture
+/// @since 0.3
+exported routine SetRavenTexture(const ARavenTexture: Rid; const ATexture: Texture2D): bool;
+begin
+  return RavenRaylibDoRelinkTexture(ARavenTexture, ATexture.id);
+end;
+
+/// Ends Raven (Rshutdown): its windows, widgets, textures and the backend's
+/// GL objects are freed. Call it before CloseWindow; InitRaven may start it
+/// again after. Does nothing with Raven not running.
+/// @example `CloseRaven(); CloseWindow();`
+/// @see InitRaven
+/// @since 0.3
+exported routine CloseRaven();
+begin
+  if Ris_initialized() <> 0 then
+    Rshutdown();
+  end;
+end;
+
+end.

@@ -6683,22 +6683,18 @@ begin
   // build left under this name in another case (a unit Math, then a unit
   // math) would keep its old name on a case-blind file system, and clang
   // would warn on the #include that names it: it is given the exact name
-  // first (TUtils.MatchFileNameCase, never raises), then written
+  // first (TUtils.MatchFileNameCase, never raises), then written. Written
+  // only when its bytes changed (TUtils.WriteBytesIfChanged, never raises):
+  // zig's cache checks time stamps, and a rewrite of the same bytes made it
+  // recompile every TU of an unchanged program
   if not TUtils.MatchFileNameCase(APath, LError) then
   begin
     FErrors.Add(esError, PC_ERR_EMT_002, RSEmtWriteFile, [APath, LError]);
     Exit(False);
   end;
-  try
-    TFile.WriteAllBytes(APath, ABytes);
-    Result := True;
-  except
-    on E: Exception do
-    begin
-      FErrors.Add(esError, PC_ERR_EMT_002, RSEmtWriteFile, [APath, E.Message]);
-      Result := False;
-    end;
-  end;
+  Result := TUtils.WriteBytesIfChanged(APath, ABytes, LError);
+  if not Result then
+    FErrors.Add(esError, PC_ERR_EMT_002, RSEmtWriteFile, [APath, LError]);
 end;
 
 function TPCEmitter.WriteFiles(const AOutputDir: string): Boolean;

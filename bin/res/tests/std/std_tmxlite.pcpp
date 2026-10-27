@@ -1,0 +1,316 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_tmxlite.pcpp - Std library compliance: the tmxlite unit
+  (res\libs\std\tmxlite.pcpp)
+
+  tmxlite's API used from PaskalCPP on the fixtures scripts\vendor\
+  gen_tmx_fixtures.py writes (res\tests\std\fixtures\std_tmxlite*): an
+  orthogonal 5x2 map with an external tileset (std_tmxlite_tiles.tsx), map
+  properties of four types, a CSV tile layer holding every flip combination,
+  a group with a zlib-compressed base64 layer, a hidden uncompressed base64
+  layer, an object group with a property and an image layer. Then a map
+  from a string (loadFromString), an infinite map's chunk, a map with a
+  gzip and a zstd compressed base64 layer (std_tmxlite_comp.tmx: Tiled's
+  other two compressed layer formats), and the stagger settings of an
+  isometric, a staggered and a hexagonal map. A tile prints
+  as `<global id>/<flip flags>` (Horizontal 8, Vertical 4, Diagonal 2).
+
+  The refusals: a map file that is not there loads false and leaves the map
+  empty (tmxlite reports the missing file on stderr); a malformed map whose
+  uncompressed base64 layer is shorter than the layer
+  (std_tmxlite_short.tmx) loads with that layer empty and an error line,
+  never read past its data (zstd-layer.patch), its other layer whole.
+*******************************************************************************/
+
+module exe std_tmxlite;
+
+/*
+  @@test
+    kind run
+    expect
+    | load true
+    | orthogonal true count 5x2 tile 8x8 infinite false
+    | prop title Fixture
+    | prop level 3
+    | prop gravity 9.5
+    | prop night true
+    | tilesets 1 first 1 last 2 name quads image true
+    | tile 2 pos 8,0 size 8x8 solid true
+    | layers 5
+    | layer csv tile visible true
+    | layer group group visible true
+    | layer hidden tile visible false
+    | layer objects object visible true
+    | layer badge image visible true
+    | csv 1/0 1/8 1/4 1/2 1/14 1/10 1/6 0/0 1/12 0/0
+    | group zlib 0/0 0/0 0/0 0/0 0/0 0/0 0/0 2/0 0/0 0/0
+    | hidden 2/0 2/0 2/0 2/0 2/0 2/0 2/0 2/0 2/0 2/0
+    | objects 2
+    | object spawn [player] at 8,0 size 8x8 properties 1
+    | property hp 10
+    | object exit [] at 32,8 size 8x8 properties 0
+    | badge image true offset 24,8 size 4x4
+    | ERROR: Failed to read file std_tmxlite_nowhere.tmx
+    | missing false layers 0 tilesets 0
+    | string true 1/0 2/0
+    | infinite true chunks 1 at -2,0 size 2x1 2/0 0/0
+    | comp true layers 2
+    | gzip 1/8 0/0 0/0 2/0
+    | zstd 0/0 1/4 1/2 0/0
+    | ERROR: Layer data is shorter than the layer, node skipped.
+    | short map true layers 2
+    | whole tiles 4 1/0 2/0 2/0 1/0
+    | short tiles 0
+    | iso isometric true
+    | stag staggered true axis y true odd true
+    | hex hexagonal true side 4 axis x true even true
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  tmxlite,
+  SysUtils;
+
+const
+  CFixtures: string = "$P:../../res/tests/std/fixtures/";
+
+// A layer type's name
+routine KindOf(const AType: tmx::Layer::Type): string;
+begin
+  if AType = tmx::Layer::Type::Tile then
+    return "tile";
+  end;
+  if AType = tmx::Layer::Type::Object then
+    return "object";
+  end;
+  if AType = tmx::Layer::Type::Image then
+    return "image";
+  end;
+  if AType = tmx::Layer::Type::Group then
+    return "group";
+  end;
+  return "?";
+end;
+
+// Every tile of a block as " <id>/<flip flags>"
+routine Cells(const ATiles: std::vector<tmx::TileLayer::Tile>): string;
+var
+  LIndex: int32;
+  LText: string;
+begin
+  LText := "";
+  for LIndex := 0 to int32(ATiles.size()) - 1 do
+    LText := LText + " " + std::to_string(ATiles[LIndex].ID) + "/" +
+      std::to_string(int32(ATiles[LIndex].flipFlags));
+  end;
+  return LText;
+end;
+
+// One property as "prop <name> <value>"
+routine ShowProperty(const AProperty: tmx::Property);
+begin
+  if AProperty.getType() = tmx::Property::Type::String then
+    println("prop {} {}", AProperty.getName(), AProperty.getStringValue());
+  else
+    if AProperty.getType() = tmx::Property::Type::Int then
+      println("prop {} {}", AProperty.getName(), AProperty.getIntValue());
+    else
+      if AProperty.getType() = tmx::Property::Type::Float then
+        println("prop {} {}", AProperty.getName(), AProperty.getFloatValue());
+      else
+        if AProperty.getType() = tmx::Property::Type::Boolean then
+          println("prop {} {}", AProperty.getName(), AProperty.getBoolValue());
+        else
+          println("prop {} ?", AProperty.getName());
+        end;
+      end;
+    end;
+  end;
+end;
+
+// The map's orientation, its tilesets and its tiles' details
+routine ShowMap(const AMap: tmx::Map);
+var
+  LIndex: int32;
+  LTile: ptr to const tmx::Tileset::Tile;
+begin
+  println("orthogonal {} count {}x{} tile {}x{} infinite {}",
+    AMap.getOrientation() = tmx::Orientation::Orthogonal, AMap.getTileCount().x,
+    AMap.getTileCount().y, AMap.getTileSize().x, AMap.getTileSize().y, AMap.isInfinite());
+  for LIndex := 0 to int32(AMap.getProperties().size()) - 1 do
+    ShowProperty(AMap.getProperties()[LIndex]);
+  end;
+  println("tilesets {} first {} last {} name {} image {}", AMap.getTilesets().size(),
+    AMap.getTilesets()[0].getFirstGID(), AMap.getTilesets()[0].getLastGID(),
+    AMap.getTilesets()[0].getName(),
+    AMap.getTilesets()[0].getImagePath().ends_with("std_tmxlite_tiles.png"));
+  LTile := AMap.getTilesets()[0].getTile(2);
+  if LTile <> nil then
+    println("tile 2 pos {},{} size {}x{} {} {}", LTile^.imagePosition.x, LTile^.imagePosition.y,
+      LTile^.imageSize.x, LTile^.imageSize.y, LTile^.properties[0].getName(),
+      LTile^.properties[0].getBoolValue());
+  end;
+end;
+
+// One object: name, class, place, size and properties
+routine ShowObject(const AObject: tmx::Object);
+var
+  LIndex: int32;
+begin
+  println("object {} [{}] at {},{} size {}x{} properties {}", AObject.getName(),
+    AObject.getClass(), AObject.getPosition().x, AObject.getPosition().y,
+    AObject.getAABB().width, AObject.getAABB().height, AObject.getProperties().size());
+  for LIndex := 0 to int32(AObject.getProperties().size()) - 1 do
+    println("property {} {}", AObject.getProperties()[LIndex].getName(),
+      AObject.getProperties()[LIndex].getIntValue());
+  end;
+end;
+
+// The layers of the map, then each one's own data
+routine ShowLayers(const AMap: tmx::Map);
+var
+  LIndex: int32;
+  LLayer: ptr to const tmx::Layer;
+  LObject: int32;
+begin
+  println("layers {}", AMap.getLayers().size());
+  for LIndex := 0 to int32(AMap.getLayers().size()) - 1 do
+    LLayer := AMap.getLayers()[LIndex].get();
+    println("layer {} {} visible {}", LLayer^.getName(), KindOf(LLayer^.getType()), LLayer^.getVisible());
+  end;
+  println("csv{}", Cells(AMap.getLayers()[0].get()^.getLayerAs<tmx::TileLayer>().getTiles()));
+  LLayer := AMap.getLayers()[1].get()^.getLayerAs<tmx::LayerGroup>().getLayers()[0].get();
+  println("group {}{}", LLayer^.getName(), Cells(LLayer^.getLayerAs<tmx::TileLayer>().getTiles()));
+  println("hidden{}", Cells(AMap.getLayers()[2].get()^.getLayerAs<tmx::TileLayer>().getTiles()));
+  LLayer := AMap.getLayers()[3].get();
+  println("objects {}", LLayer^.getLayerAs<tmx::ObjectGroup>().getObjects().size());
+  for LObject := 0 to int32(LLayer^.getLayerAs<tmx::ObjectGroup>().getObjects().size()) - 1 do
+    ShowObject(LLayer^.getLayerAs<tmx::ObjectGroup>().getObjects()[LObject]);
+  end;
+  LLayer := AMap.getLayers()[4].get();
+  println("badge image {} offset {},{} size {}x{}",
+    LLayer^.getLayerAs<tmx::ImageLayer>().getImagePath().ends_with("std_tmxlite_badge.png"),
+    LLayer^.getOffset().x, LLayer^.getOffset().y,
+    LLayer^.getLayerAs<tmx::ImageLayer>().getImageSize().x,
+    LLayer^.getLayerAs<tmx::ImageLayer>().getImageSize().y);
+end;
+
+// The map whose layers are gzip and zstd compressed: each layer's tiles
+routine ShowCompressed();
+var
+  LMap: tmx::Map;
+  LLoaded: bool;
+  LIndex: int32;
+  LLayer: ptr to const tmx::Layer;
+begin
+  LLoaded := LMap.load(ResolvePath(CFixtures + "std_tmxlite_comp.tmx"));
+  println("comp {} layers {}", LLoaded, LMap.getLayers().size());
+  for LIndex := 0 to int32(LMap.getLayers().size()) - 1 do
+    LLayer := LMap.getLayers()[LIndex].get();
+    println("{}{}", LLayer^.getName(), Cells(LLayer^.getLayerAs<tmx::TileLayer>().getTiles()));
+  end;
+end;
+
+// The malformed map: its uncompressed base64 layer is shorter than the
+// layer, so tmxlite skips it with an error line (zstd-layer.patch: no read
+// past the data) and loads the whole one
+routine ShowShort();
+var
+  LMap: tmx::Map;
+  LLoaded: bool;
+  LIndex: int32;
+  LLayer: ptr to const tmx::Layer;
+begin
+  LLoaded := LMap.load(ResolvePath(CFixtures + "std_tmxlite_short.tmx"));
+  println("short map {} layers {}", LLoaded, LMap.getLayers().size());
+  for LIndex := 0 to int32(LMap.getLayers().size()) - 1 do
+    LLayer := LMap.getLayers()[LIndex].get();
+    println("{} tiles {}{}", LLayer^.getName(),
+      LLayer^.getLayerAs<tmx::TileLayer>().getTiles().size(),
+      Cells(LLayer^.getLayerAs<tmx::TileLayer>().getTiles()));
+  end;
+end;
+
+// A map of one orientation: whether it loaded as that, and its stagger
+routine ShowStagger(const AName: string; const AFile: string);
+var
+  LMap: tmx::Map;
+  LLoaded: bool;
+begin
+  LLoaded := LMap.load(ResolvePath(CFixtures + AFile));
+  if AName = "iso" then
+    println("iso isometric {}", LLoaded and (LMap.getOrientation() = tmx::Orientation::Isometric));
+  else
+    if AName = "stag" then
+      println("stag staggered {} axis y {} odd {}",
+        LLoaded and (LMap.getOrientation() = tmx::Orientation::Staggered),
+        LMap.getStaggerAxis() = tmx::StaggerAxis::Y, LMap.getStaggerIndex() = tmx::StaggerIndex::Odd);
+    else
+      println("hex hexagonal {} side {} axis x {} even {}",
+        LLoaded and (LMap.getOrientation() = tmx::Orientation::Hexagonal),
+        LMap.getHexSideLength(), LMap.getStaggerAxis() = tmx::StaggerAxis::X,
+        LMap.getStaggerIndex() = tmx::StaggerIndex::Even);
+    end;
+  end;
+end;
+
+var
+  LMap: tmx::Map;
+  LMissing: tmx::Map;
+  LText: tmx::Map;
+  LInfinite: tmx::Map;
+  LLoaded: bool;
+  LXml: string;
+  LChunk: int32;
+
+begin
+  println("load {}", LMap.load(ResolvePath(CFixtures + "std_tmxlite.tmx")));
+  ShowMap(LMap);
+  ShowLayers(LMap);
+
+  // No such file: false, nothing kept. Named relative (testbed runs the
+  // program in its own folder, where it is not), so tmxlite's report of it
+  // on stderr reads the same on every target
+  LLoaded := LMissing.load("std_tmxlite_nowhere.tmx");
+  println("missing {} layers {} tilesets {}", LLoaded, LMissing.getLayers().size(),
+    LMissing.getTilesets().size());
+
+  // A map held in memory: no tileset, one CSV layer of two cells
+  LXml := "<map version='1.10' orientation='orthogonal' renderorder='right-down' width='2' " +
+    "height='1' tilewidth='8' tileheight='8' infinite='0'><layer id='1' name='l' width='2' " +
+    "height='1'><data encoding='csv'>1,2</data></layer></map>";
+  LLoaded := LText.loadFromString(LXml, ResolvePath(CFixtures));
+  println("string {}{}", LLoaded, Cells(LText.getLayers()[0].get()^.getLayerAs<tmx::TileLayer>().getTiles()));
+
+  // An infinite map keeps its tiles in chunks
+  LLoaded := LInfinite.load(ResolvePath(CFixtures + "std_tmxlite_inf.tmx"));
+  LChunk := 0;
+  println("infinite {} chunks {} at {},{} size {}x{}{}", LLoaded and LInfinite.isInfinite(),
+    LInfinite.getLayers()[0].get()^.getLayerAs<tmx::TileLayer>().getChunks().size(),
+    LInfinite.getLayers()[0].get()^.getLayerAs<tmx::TileLayer>().getChunks()[LChunk].position.x,
+    LInfinite.getLayers()[0].get()^.getLayerAs<tmx::TileLayer>().getChunks()[LChunk].position.y,
+    LInfinite.getLayers()[0].get()^.getLayerAs<tmx::TileLayer>().getChunks()[LChunk].size.x,
+    LInfinite.getLayers()[0].get()^.getLayerAs<tmx::TileLayer>().getChunks()[LChunk].size.y,
+    Cells(LInfinite.getLayers()[0].get()^.getLayerAs<tmx::TileLayer>().getChunks()[LChunk].tiles));
+
+  ShowCompressed();
+  ShowShort();
+
+  ShowStagger("iso", "std_tmxlite_iso.tmx");
+  ShowStagger("stag", "std_tmxlite_stag.tmx");
+  ShowStagger("hex", "std_tmxlite_hex.tmx");
+end.

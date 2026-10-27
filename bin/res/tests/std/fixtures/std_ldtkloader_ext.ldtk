@@ -1,0 +1,294 @@
+{
+  "__header__": {
+    "fileType": "LDtk Project JSON",
+    "app": "LDtk",
+    "doc": "https://ldtk.io/json",
+    "schema": "https://ldtk.io/files/JSON_SCHEMA.json",
+    "appAuthor": "Sebastien Benard",
+    "appVersion": "1.5.3",
+    "url": "https://ldtk.io"
+  },
+  "iid": "project-ext",
+  "jsonVersion": "1.5.3",
+  "appBuildId": 0,
+  "nextUid": 100,
+  "identifierStyle": "Capitalize",
+  "toc": [],
+  "worldLayout": "Free",
+  "worldGridWidth": 256,
+  "worldGridHeight": 256,
+  "defaultLevelWidth": 40,
+  "defaultLevelHeight": 16,
+  "defaultPivotX": 0.0,
+  "defaultPivotY": 0.0,
+  "defaultGridSize": 8,
+  "defaultEntityWidth": 8,
+  "defaultEntityHeight": 8,
+  "bgColor": "#40465B",
+  "defaultLevelBgColor": "#202020",
+  "minifyJson": false,
+  "externalLevels": true,
+  "exportTiled": false,
+  "simplifiedExport": false,
+  "imageExportMode": "None",
+  "exportLevelBg": true,
+  "pngFilePattern": null,
+  "backupOnSave": false,
+  "backupLimit": 10,
+  "backupRelPath": null,
+  "levelNamePattern": "Level_%idx",
+  "tutorialDesc": null,
+  "customCommands": [],
+  "flags": [],
+  "defs": {
+    "layers": [
+      {
+        "__type": "Entities",
+        "identifier": "Objects",
+        "type": "Entities",
+        "uid": 10,
+        "gridSize": 8,
+        "guideGridWid": 0,
+        "guideGridHei": 0,
+        "displayOpacity": 1.0,
+        "pxOffsetX": 0,
+        "pxOffsetY": 0,
+        "tilePivotX": 0.0,
+        "tilePivotY": 0.0,
+        "tilesetDefUid": null,
+        "intGridValues": [],
+        "autoRuleGroups": [],
+        "autoSourceLayerDefUid": null
+      },
+      {
+        "__type": "Tiles",
+        "identifier": "Hidden",
+        "type": "Tiles",
+        "uid": 11,
+        "gridSize": 8,
+        "guideGridWid": 0,
+        "guideGridHei": 0,
+        "displayOpacity": 1.0,
+        "pxOffsetX": 0,
+        "pxOffsetY": 0,
+        "tilePivotX": 0.0,
+        "tilePivotY": 0.0,
+        "tilesetDefUid": 1,
+        "intGridValues": [],
+        "autoRuleGroups": [],
+        "autoSourceLayerDefUid": null
+      },
+      {
+        "__type": "Tiles",
+        "identifier": "Badge",
+        "type": "Tiles",
+        "uid": 12,
+        "gridSize": 8,
+        "guideGridWid": 0,
+        "guideGridHei": 0,
+        "displayOpacity": 1.0,
+        "pxOffsetX": 8,
+        "pxOffsetY": 0,
+        "tilePivotX": 0.0,
+        "tilePivotY": 0.0,
+        "tilesetDefUid": 1,
+        "intGridValues": [],
+        "autoRuleGroups": [],
+        "autoSourceLayerDefUid": null
+      },
+      {
+        "__type": "Tiles",
+        "identifier": "Ground",
+        "type": "Tiles",
+        "uid": 13,
+        "gridSize": 8,
+        "guideGridWid": 0,
+        "guideGridHei": 0,
+        "displayOpacity": 1.0,
+        "pxOffsetX": 0,
+        "pxOffsetY": 0,
+        "tilePivotX": 0.0,
+        "tilePivotY": 0.0,
+        "tilesetDefUid": 1,
+        "intGridValues": [],
+        "autoRuleGroups": [],
+        "autoSourceLayerDefUid": null
+      },
+      {
+        "__type": "IntGrid",
+        "identifier": "Collision",
+        "type": "IntGrid",
+        "uid": 14,
+        "gridSize": 8,
+        "guideGridWid": 0,
+        "guideGridHei": 0,
+        "displayOpacity": 1.0,
+        "pxOffsetX": 0,
+        "pxOffsetY": 0,
+        "tilePivotX": 0.0,
+        "tilePivotY": 0.0,
+        "tilesetDefUid": null,
+        "intGridValues": [
+          {
+            "value": 1,
+            "identifier": "wall",
+            "color": "#FF00FF",
+            "tile": null,
+            "groupUid": 0
+          }
+        ],
+        "autoRuleGroups": [],
+        "autoSourceLayerDefUid": null
+      }
+    ],
+    "entities": [
+      {
+        "identifier": "Player",
+        "uid": 20,
+        "width": 8,
+        "height": 8,
+        "color": "#00FF00",
+        "pivotX": 0.0,
+        "pivotY": 0.0,
+        "tileRect": null,
+        "tags": [
+          "player"
+        ],
+        "nineSliceBorders": [],
+        "fieldDefs": []
+      },
+      {
+        "identifier": "Coin",
+        "uid": 21,
+        "width": 8,
+        "height": 8,
+        "color": "#FFD700",
+        "pivotX": 0.0,
+        "pivotY": 0.0,
+        "tileRect": null,
+        "tags": [
+          "coin"
+        ],
+        "nineSliceBorders": [],
+        "fieldDefs": [
+          {
+            "identifier": "value",
+            "__type": "Int",
+            "uid": 30,
+            "type": "Int",
+            "isArray": false,
+            "canBeNull": true,
+            "defaultOverride": null
+          },
+          {
+            "identifier": "label",
+            "__type": "String",
+            "uid": 31,
+            "type": "String",
+            "isArray": false,
+            "canBeNull": true,
+            "defaultOverride": null
+          },
+          {
+            "identifier": "kind",
+            "__type": "LocalEnum.Kind",
+            "uid": 32,
+            "type": "LocalEnum.Kind",
+            "isArray": false,
+            "canBeNull": true,
+            "defaultOverride": null
+          }
+        ]
+      }
+    ],
+    "tilesets": [
+      {
+        "__cWid": 2,
+        "__cHei": 1,
+        "identifier": "Quads",
+        "uid": 1,
+        "relPath": "std_ldtkloader.png",
+        "embedAtlas": null,
+        "pxWid": 16,
+        "pxHei": 8,
+        "tileGridSize": 8,
+        "spacing": 0,
+        "padding": 0,
+        "tags": [
+          "fixture"
+        ],
+        "tagsSourceEnumUid": null,
+        "enumTags": [],
+        "customData": [
+          {
+            "tileId": 1,
+            "data": "solid"
+          }
+        ],
+        "savedSelections": [],
+        "cachedPixelData": null
+      }
+    ],
+    "enums": [
+      {
+        "identifier": "Kind",
+        "uid": 2,
+        "values": [
+          {
+            "id": "Gold",
+            "tileRect": null,
+            "color": 16766720
+          },
+          {
+            "id": "Silver",
+            "tileRect": null,
+            "color": 12632256
+          }
+        ],
+        "iconTilesetUid": null,
+        "externalRelPath": null,
+        "externalFileChecksum": null,
+        "tags": []
+      }
+    ],
+    "externalEnums": [],
+    "levelFields": [
+      {
+        "identifier": "music",
+        "__type": "String",
+        "uid": 33,
+        "type": "String",
+        "isArray": false,
+        "canBeNull": true,
+        "defaultOverride": null
+      }
+    ]
+  },
+  "levels": [
+    {
+      "identifier": "Outside",
+      "iid": "level-52",
+      "uid": 52,
+      "worldX": 0,
+      "worldY": 0,
+      "worldDepth": 0,
+      "pxWid": 16,
+      "pxHei": 8,
+      "__bgColor": "#202020",
+      "bgColor": null,
+      "useAutoIdentifier": false,
+      "bgRelPath": null,
+      "bgPos": null,
+      "bgPivotX": 0.5,
+      "bgPivotY": 0.5,
+      "__smartColor": "#ADADB5",
+      "__bgPos": null,
+      "externalRelPath": "std_ldtkloader_ext/Outside.ldtkl",
+      "fieldInstances": [],
+      "layerInstances": null,
+      "__neighbours": []
+    }
+  ],
+  "worlds": [],
+  "dummyWorldIid": "world-ext"
+}

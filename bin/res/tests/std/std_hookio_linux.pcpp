@@ -3205,6 +3205,35 @@ module exe std_hookio_linux;
     | ok path source close
     | ok path source entry removed
     | ok path source real removed
+    | ok thread source folder
+    | ok thread source parent
+    | ok thread source program file
+    | ok thread source thread file
+    | ok thread source made
+    | ok thread source program set
+    | ok thread source none -> program
+    | ok thread source get none
+    | ok thread source set
+    | ok thread source get
+    | ok thread source this thread
+    | ok thread source other thread -> program
+    | ok thread source unset
+    | ok thread source get unset
+    | ok thread source unset -> program
+    | ok thread source program unset
+    | ok thread source alone set
+    | ok thread source alone this thread
+    | ok thread source alone other thread -> missing
+    | ok thread source replace first
+    | ok thread source replaced -> program folder
+    | ok thread source replace second
+    | ok thread source replaced -> parent
+    | ok thread source last unset
+    | ok thread source none -> missing
+    | ok thread source program close
+    | ok thread source thread close
+    | ok thread source program removed
+    | ok thread source thread removed
     | ok fopen64 ours
     | ok fopen64 close
     | ok fopen64 missing
@@ -3214,7 +3243,7 @@ module exe std_hookio_linux;
     | ok target io close
     | ok exit flush left open
     | done 0
-    | [Heap] Allocs: 1251, Frees: 1251, Leaked: 0
+    | [Heap] Allocs: 1260, Frees: 1260, Leaked: 0
   @@end
 */
 
@@ -5715,6 +5744,132 @@ begin
   Check("path source real removed", remove(LRealPath.c_str()) = 0);
 end;
 
+#include <thread>
+
+// A hooked read of APath on a thread of its own, waited for: the count
+// std_hookio_c_read gives (-1 also when the thread cannot start), the first
+// byte read in AFirst
+static std::int64_t std_hookio_read_apart(const char* APath, std::uint8_t* AFirst)
+{
+  std::int64_t LCount = -1;
+
+  try
+  {
+    std::thread LThread([&]()
+    {
+      std::uint8_t LBuffer[64];
+      long LSize = 0;
+      LCount = std_hookio_c_read(APath, LBuffer, 64, &LSize);
+      if (LCount > 0)
+        *AFirst = LBuffer[0];
+    });
+    LThread.join();
+  }
+  catch (...)
+  {
+    LCount = -1;
+  }
+  return LCount;
+}
+
+// The thread path source (SetIOThreadPathSource): tp_entry.txt in the
+// program's folder holds "PROG", in its parent "THRD"; the program's path
+// source is a folder source over the first, the thread's one over the
+// second. "/tp_entry.txt" is the name read (a plain path whose real file,
+// at the root, is not there). While the thread's source is set this thread
+// reads "THRD" and another thread still "PROG"; nil gives this thread the
+// program's again; with no program path source the thread's still answers
+// here and another thread finds nothing; setting one replaces the one
+// before.
+routine TestThreadPathSource();
+var
+  LExe: string;
+  LFolder: string;
+  LParent: string;
+  LLength: long;
+  LProgramSource: IOSource;
+  LThreadSource: IOSource;
+  LProgramBytes: array[0..3] of uint8;
+  LThreadBytes: array[0..3] of uint8;
+  LBuffer: array[0..63] of uint8;
+  LSize: long;
+  LCount: long;
+  LFirst: uint8;
+begin
+  LExe := paramstr(0);
+  LLength := std_hookio_c_dirlen(LExe.c_str());
+  Check("thread source folder", LLength > 0);
+  if LLength <= 0 then
+    return;
+  end;
+  LFolder := LExe.substr(0, LLength);
+  LLength := std_hookio_c_dirlen(LFolder.c_str());
+  Check("thread source parent", LLength > 0);
+  if LLength <= 0 then
+    return;
+  end;
+  LParent := LFolder.substr(0, LLength);
+  LProgramBytes[0] := uint8('P');
+  LProgramBytes[1] := uint8('R');
+  LProgramBytes[2] := uint8('O');
+  LProgramBytes[3] := uint8('G');
+  LThreadBytes[0] := uint8('T');
+  LThreadBytes[1] := uint8('H');
+  LThreadBytes[2] := uint8('R');
+  LThreadBytes[3] := uint8('D');
+  Check("thread source program file", std_hookio_c_writeraw((LFolder + "/tp_entry.txt").c_str(), address of LProgramBytes[0], 4) = 0);
+  Check("thread source thread file", std_hookio_c_writeraw((LParent + "/tp_entry.txt").c_str(), address of LThreadBytes[0], 4) = 0);
+  LProgramSource := CreateFolderIOSource(LFolder);
+  LThreadSource := CreateFolderIOSource(LParent);
+  Check("thread source made", (LProgramSource <> nil) and (LThreadSource <> nil));
+  if (LProgramSource = nil) or (LThreadSource = nil) then
+    return;
+  end;
+
+  Check("thread source program set", SetIOPathSource(LProgramSource));
+  LCount := std_hookio_c_read("/tp_entry.txt", address of LBuffer[0], 64, address of LSize);
+  Check("thread source none -> program", (LCount = 4) and (LBuffer[0] = uint8('P')));
+
+  Check("thread source get none", GetIOThreadPathSource() = nil);
+  Check("thread source set", SetIOThreadPathSource(LThreadSource));
+  Check("thread source get", GetIOThreadPathSource() = LThreadSource);
+  LCount := std_hookio_c_read("/tp_entry.txt", address of LBuffer[0], 64, address of LSize);
+  Check("thread source this thread", (LCount = 4) and (LBuffer[0] = uint8('T')) and (LBuffer[3] = uint8('D')));
+  LFirst := 0;
+  LCount := std_hookio_read_apart("/tp_entry.txt", address of LFirst);
+  Check("thread source other thread -> program", (LCount = 4) and (LFirst = uint8('P')));
+
+  Check("thread source unset", SetIOThreadPathSource(nil));
+  Check("thread source get unset", GetIOThreadPathSource() = nil);
+  LCount := std_hookio_c_read("/tp_entry.txt", address of LBuffer[0], 64, address of LSize);
+  Check("thread source unset -> program", (LCount = 4) and (LBuffer[0] = uint8('P')));
+
+  Check("thread source program unset", SetIOPathSource(nil));
+  Check("thread source alone set", SetIOThreadPathSource(LThreadSource));
+  LCount := std_hookio_c_read("/tp_entry.txt", address of LBuffer[0], 64, address of LSize);
+  Check("thread source alone this thread", (LCount = 4) and (LBuffer[0] = uint8('T')));
+  LFirst := 0;
+  LCount := std_hookio_read_apart("/tp_entry.txt", address of LFirst);
+  Check("thread source alone other thread -> missing", LCount = -1);
+
+  // A second set replaces the first: the program's folder, then the parent
+  Check("thread source replace first", SetIOThreadPathSource(LProgramSource));
+  LCount := std_hookio_c_read("/tp_entry.txt", address of LBuffer[0], 64, address of LSize);
+  Check("thread source replaced -> program folder", (LCount = 4) and (LBuffer[0] = uint8('P')));
+  Check("thread source replace second", SetIOThreadPathSource(LThreadSource));
+  LCount := std_hookio_c_read("/tp_entry.txt", address of LBuffer[0], 64, address of LSize);
+  Check("thread source replaced -> parent", (LCount = 4) and (LBuffer[0] = uint8('T')));
+
+  Check("thread source last unset", SetIOThreadPathSource(nil));
+  LCount := std_hookio_c_read("/tp_entry.txt", address of LBuffer[0], 64, address of LSize);
+  Check("thread source none -> missing", LCount = -1);
+
+  Check("thread source program close", IOSourceClose(LProgramSource));
+  Check("thread source thread close", IOSourceClose(LThreadSource));
+  Check("thread source program removed", remove((LFolder + "/tp_entry.txt").c_str()) = 0);
+  Check("thread source thread removed", remove((LParent + "/tp_entry.txt").c_str()) = 0);
+end;
+
 // The exit flush: a handle on a memory IO over C's own array is left open
 // with "EXITFLUSH" still in the CRT's buffer, and its IO stays registered.
 // The check std_hookio_c_exitarm registered runs after the exit flush and
@@ -5829,6 +5984,7 @@ begin
   TestStreamWrites();
   TestStreamWriteOnly();
   TestPathSource();
+  TestThreadPathSource();
   TestTarget();
   TestExitFlush();
   println("done {}", GFails);

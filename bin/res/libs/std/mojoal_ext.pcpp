@@ -1,0 +1,220 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  mojoal_ext.pcpp - the mojoal_ext unit: `import mojoal_ext;` loads a sound
+  file into an OpenAL buffer in one call, from a file, from any CustomIO IO,
+  or from an entry of a zip archive.
+
+  LoadSound, LoadSoundIO and LoadSoundZip decode Ogg Vorbis (stb_vorbis) to
+  16-bit samples and hand them to alBufferData: the result is an OpenAL
+  buffer name, ready for alSourcei(LSource, AL_BUFFER, ALint(LBuffer)), and
+  deleted with alDeleteBuffers like any other. With AMono the channels are
+  averaged into one, which is what OpenAL places in 3D (a stereo buffer
+  plays as it is, never positioned); without it a mono or stereo sound
+  keeps its channels. A sound of more than two channels is always mixed to
+  mono: OpenAL 1.1 has no format for it.
+
+  The IO and zip forms run through the HookIO hooks, raylib_ext's way: the
+  IO is registered with HookIO for the call (RegisterIO) and stb_vorbis
+  opens `io://<n>/stream` with its own fopen / fread / fseek, which the
+  hooks give the IO (any name under the prefix is the IO itself; `stream`
+  only fills the path stb_vorbis needs); the IO is read from its start and
+  stays the caller's (LoadSoundZip closes the one it opens). An OpenAL
+  context must be current (alcMakeContextCurrent) for the buffer to be
+  made. Every form returns 0, making no buffer, when the bytes cannot be
+  read or are not Ogg Vorbis, or when OpenAL refuses the buffer (no current
+  context, out of memory).
+==============================================================================*/
+
+module unit mojoal_ext;
+
+import
+  mojoal,
+  stb_vorbis,
+  CustomIO,
+  HookIO,
+  SysUtils;
+
+// The C runtime's free, for the samples stb_vorbis allocates with malloc
+cpp source;
+
+#include <cstdlib>
+
+// Fills ABuffer from AFrames frames of ASamples (AChannels interleaved),
+// averaging every frame's channels into one sample
+routine MojoalExtDoBufferMono(const ABuffer: ALuint; const ASamples: ptr to int16;
+  const AFrames: int32; const AChannels: int32; const ARate: int32);
+var
+  LMono: array of int16;
+  LFrame: int32;
+  LChannel: int32;
+  LSum: int32;
+begin
+  setlength(LMono, AFrames);
+  for LFrame := 0 to AFrames - 1 do
+    LSum := 0;
+    for LChannel := 0 to AChannels - 1 do
+      LSum := LSum + ASamples[LFrame * AChannels + LChannel];
+    end;
+    LMono[LFrame] := int16(LSum div AChannels);
+  end;
+  alBufferData(ABuffer, AL_FORMAT_MONO16, address of LMono[0],
+    ALsizei(int64(AFrames) * size(int16)), ALsizei(ARate));
+end;
+
+// Fills ABuffer with ASamples as they are: one or two channels
+routine MojoalExtDoBufferAsIs(const ABuffer: ALuint; const ASamples: ptr to int16;
+  const AFrames: int32; const AChannels: int32; const ARate: int32);
+var
+  LFormat: ALenum;
+begin
+  LFormat := AL_FORMAT_STEREO16;
+  if AChannels = 1 then
+    LFormat := AL_FORMAT_MONO16;
+  end;
+  alBufferData(ABuffer, LFormat, ASamples,
+    ALsizei(int64(AFrames) * int64(AChannels) * size(int16)), ALsizei(ARate));
+end;
+
+// The Ogg Vorbis file APath (any path stb_vorbis's fopen reaches, io://
+// ones included) decoded into a new OpenAL buffer; 0 on any failure
+routine MojoalExtDoLoad(const APath: string; const AMono: bool): ALuint;
+var
+  LChannels: int32;
+  LRate: int32;
+  LSamples: ptr to int16;
+  LFrames: int32;
+  LBuffer: ALuint;
+begin
+  LSamples := nil;
+  LChannels := 0;
+  LRate := 0;
+  LFrames := stb_vorbis_decode_filename(APath.c_str(), address of LChannels,
+    address of LRate, address of LSamples);
+  if (LFrames <= 0) or (LSamples = nil) or (LChannels <= 0) then
+    std::free(LSamples);
+    return 0;
+  end;
+  // The errors before this call are not this load's
+  alGetError();
+  LBuffer := 0;
+  alGenBuffers(1, address of LBuffer);
+  if alGetError() <> AL_NO_ERROR then
+    std::free(LSamples);
+    return 0;
+  end;
+  if AMono or (LChannels > 2) then
+    MojoalExtDoBufferMono(LBuffer, LSamples, LFrames, LChannels, LRate);
+  else
+    MojoalExtDoBufferAsIs(LBuffer, LSamples, LFrames, LChannels, LRate);
+  end;
+  // stb_vorbis allocates the samples with malloc; alBufferData copied them
+  std::free(LSamples);
+  if alGetError() <> AL_NO_ERROR then
+    alDeleteBuffers(1, address of LBuffer);
+    return 0;
+  end;
+  return LBuffer;
+end;
+
+/// Loads an Ogg Vorbis file into a new OpenAL buffer. An OpenAL context
+/// must be current.
+/// @param APath the file (`$P:` and the other SysUtils.ResolvePath forms
+///   are resolved first)
+/// @param AMono true: the channels are averaged into one, so the buffer can
+///   be placed in 3D; false: a mono or stereo sound keeps its channels
+/// @returns the buffer name; 0 when the file cannot be read or decoded, or
+///   OpenAL refuses the buffer
+/// @example `LEngine := LoadSound("$P:../../res/assets/audio/sfx/engine_player.ogg", true);`
+/// @see LoadSoundIO
+/// @see LoadSoundZip
+/// @since 0.3
+exported routine LoadSound(const APath: string; const AMono: bool): ALuint;
+begin
+  return MojoalExtDoLoad(ResolvePath(APath), AMono);
+end;
+
+/// Loads an Ogg Vorbis stream from an IO into a new OpenAL buffer, as
+/// LoadSound loads a file (stb_vorbis reads the IO through the HookIO
+/// hooks). The IO is read from its start and stays the caller's. An OpenAL
+/// context must be current.
+/// @param AIO the stream (CreateZipFileIO's, CreateFileIO's, any IO)
+/// @param AMono true: the channels are averaged into one, for 3D
+/// @returns the buffer name; 0 when the IO is nil, cannot be read or does
+///   not decode, or OpenAL refuses the buffer
+/// @example `LHit := LoadSoundIO(CreateZipFileIO("$P:assets.zip", "hit.ogg"), true);`
+/// @see LoadSound
+/// @since 0.3
+exported routine LoadSoundIO(const AIO: IO; const AMono: bool): ALuint;
+var
+  LPrefix: string;
+  LBuffer: ALuint;
+begin
+  LPrefix := RegisterIO(AIO);
+  if LPrefix = "" then
+    return 0;
+  end;
+  // Every name under the prefix is the IO itself: stb_vorbis only takes a
+  // path, so the name is a placeholder that nothing reads (the stream is
+  // always decoded as Ogg Vorbis, whatever a name would say)
+  LBuffer := MojoalExtDoLoad(LPrefix + "/stream", AMono);
+  UnregisterIO(LPrefix);
+  return LBuffer;
+end;
+
+/// Loads an Ogg Vorbis entry of a zip archive into a new OpenAL buffer
+/// (CreateZipFileIO opens the entry, LoadSoundIO decodes it, the entry's IO
+/// is closed after). An OpenAL context must be current.
+/// @param AArchive the zip file (`$P:` resolved, as CreateZipFileIO does)
+/// @param AEntry the entry's path in the archive, `/` separated
+/// @param APassword the archive's password ("" for none)
+/// @param AMono true: the channels are averaged into one, for 3D
+/// @returns the buffer name; 0 when the archive or entry cannot be opened
+///   (a wrong password included) or does not decode, or OpenAL refuses the
+///   buffer
+/// @example `LEngine := LoadSoundZip("$P:../../assets.zip", "res/assets/audio/sfx/engine_player.ogg", "PaskalCPP", true);`
+/// @see LoadSoundIO
+/// @since 0.3
+exported routine LoadSoundZip(const AArchive: string; const AEntry: string;
+  const APassword: string; const AMono: bool): ALuint;
+var
+  LIO: IO;
+  LBuffer: ALuint;
+begin
+  LIO := CreateZipFileIO(AArchive, AEntry, APassword);
+  if LIO = nil then
+    return 0;
+  end;
+  LBuffer := LoadSoundIO(LIO, AMono);
+  IOClose(LIO);
+  return LBuffer;
+end;
+
+/// LoadSoundZip for an archive with no password.
+/// @param AArchive the zip file
+/// @param AEntry the entry's path in the archive
+/// @param AMono true: the channels are averaged into one, for 3D
+/// @returns the buffer name; 0 on a failure, as LoadSoundZip
+/// @since 0.3
+exported routine LoadSoundZip(const AArchive: string; const AEntry: string;
+  const AMono: bool): ALuint;
+begin
+  return LoadSoundZip(AArchive, AEntry, "", AMono);
+end;
+
+end.

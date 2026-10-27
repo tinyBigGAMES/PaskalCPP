@@ -44,11 +44,15 @@
     StdApp.Resources (RSTst*), PaskalCPP.Common, PaskalCPP.AST,
     PaskalCPP.ZigBuild, PaskalCPP.Compiler, PaskalCPP.TestSuite.Types,
     PaskalCPP.TestSuite.Spec, PaskalCPP.TestSuite.CodeTest,
-    PaskalCPP.TestSuite.Stop
-  Notes: Builds run one at a time: they share the output folder, its
-    build.zig and pcpp-diag. Every build goes to the compiler's default
-    output folder (no -o). The suite owns its TErrors (discovery reports);
-    each compile's reports stay in that compile's own.
+    PaskalCPP.TestSuite.Stop, PaskalCPP.TestSuite.Control
+  Notes: A run takes its cells cell-major (one target's opt levels, then
+    the next target), so a target's toolchain and cache stay warm. A run
+    owns its output folder's control channel (one run per folder);
+    `testbed -rpc <command>` talks to a running one. Builds run one at a
+    time: they share the output folder, its build.zig and pcpp-diag.
+    Every build goes to the compiler's default output folder (no -o). The
+    suite owns its TErrors (discovery reports); each compile's reports
+    stay in that compile's own.
 ===============================================================================}
 
 unit PaskalCPP.TestSuite;
@@ -65,7 +69,8 @@ uses
   PaskalCPP.TestSuite.Types,
   PaskalCPP.TestSuite.Spec,
   PaskalCPP.TestSuite.CodeTest,
-  PaskalCPP.TestSuite.Stop;
+  PaskalCPP.TestSuite.Stop,
+  PaskalCPP.TestSuite.Control;
 
 const
   { PC_ERR_TS_101 }
@@ -96,6 +101,12 @@ const
   { PC_TS_EXIT_STOPPED }
   // A stop press (TestSuite.Stop) ended the run before every selected cell ran
   PC_TS_EXIT_STOPPED = 3;
+  { PC_TS_EXIT_NO_RUN }
+  // -rpc: no testbed is running on the output folder
+  PC_TS_EXIT_NO_RUN = 4;
+  { PC_TS_EXIT_WAIT_TIMEOUT }
+  // -rpc wait: the run was still going when the seconds ran out
+  PC_TS_EXIT_WAIT_TIMEOUT = 5;
 
   { PC_TS_HEAP_REPORT_PREFIX }
   // The runtime's heap report lines (pcpp_runtime.cpp), printed when the
@@ -105,6 +116,11 @@ const
   { PC_TS_RESULTS_FILE }
   // The last run's results, in the output folder: what -failed reads
   PC_TS_RESULTS_FILE = 'testsuite-results.txt';
+
+  { PC_TS_EXAMPLES_AREA }
+  // The area every example root's programs are in: id
+  // examples.<folder>.<stem> (examples.raylib.BasicWindow)
+  PC_TS_EXAMPLES_AREA = 'examples';
 
 type
   { TPCTestItem }
@@ -140,6 +156,7 @@ type
     Subsystems: TArray<TPCSubsystemType>;
     Kinds: TPCTestKinds;
     FailedOnly: Boolean;            // the cells that failed in the last run
+    AllCells: Boolean;              // -all: a test that names no opt runs at every level
     Verbose: Boolean;               // every check printed, passed ones too
 
     procedure Clear();
@@ -158,6 +175,7 @@ type
     FCases: TObjectList<TPCTestCase>;
     FItems: TList<TPCTestItem>;
     FSourceRoots: TList<string>;
+    FExampleRoots: TList<string>;
     FUnspecced: TList<string>;      // .pcpp files without a spec (support files)
     FResults: TList<TPCTestResult>;
     FCaseSetups: TDictionary<Integer, string>;  // case index -> SetupClass's error ('' = it ran)
@@ -171,11 +189,13 @@ type
     FVerbose: Boolean;
     FTeardownFailed: Boolean;
     FStop: TPCTestStop;
+    FControl: TPCTestControl;
+    FRootsOnly: Boolean;            // -root given: only its roots' tests, no code tests
 
     // Discovery
     function DoResolveRoot(const APath: string): string;
     function DoAreaOf(const AFile: string; const ARoot: string; const AStem: string): string;
-    procedure DoDiscoverRoot(const ARoot: string);
+    procedure DoDiscoverRoot(const ARoot: string; const AIsExamples: Boolean);
     procedure DoDiscoverCases();
     procedure DoSortItems();
     function DoFindStem(const AStem: string): Integer;
@@ -201,6 +221,9 @@ type
     function DoCellAllowed(const ACell: TPCTestCell; const AFilter: TPCTestFilter): Boolean;
     function DoRunCells(const AItem: TPCTestItem; const AFilter: TPCTestFilter): TPCTestCells;
     function DoReadFailed(const AKeys: TList<string>): Boolean;
+    function DoTargetRank(const ATarget: string): Integer;
+    function DoCompareCells(const ALeft: TPCTestCell; const ARight: TPCTestCell): Integer;
+    procedure DoOrderByCell(const ARuns: TList<TPCTestRun>);
     function DoSelect(const AFilter: TPCTestFilter; const ARuns: TList<TPCTestRun>;
       out AFailedCount: Integer): Boolean;
 
@@ -242,18 +265,32 @@ type
     function DoRunOne(const ARun: TPCTestRun): TPCTestResult;
     // Every run in order until a stop press; True = stopped
     function DoRunSelected(const ARuns: TList<TPCTestRun>): Boolean;
+    function DoCountCells(const ARuns: TList<TPCTestRun>): Integer;
+    procedure DoPublishResult(const AResult: TPCTestResult);
     procedure DoTeardownCases();
 
     // Report
     procedure DoPrintLn(const ALine: string); overload;
     procedure DoPrintLn(); overload;
+    procedure DoPrintData(const ALine: string);
     function DoResultsFile(): string;
     procedure DoPrintResult(const AResult: TPCTestResult);
-    procedure DoPrintSummary(const ADurationMs: Int64; const ASelected: Integer);
+    procedure DoPrintSummary(const ADurationMs: Int64; const ASelected: Integer;
+      const AStopped: Boolean);
     procedure DoWriteResults();
     procedure DoPrintHelp();
     function DoParseArgs(const AArgs: TArray<string>; out AFilter: TPCTestFilter;
       out AList: Boolean; out AHelp: Boolean; out ASelected: Boolean): Boolean;
+
+    function DoTakeRoots(const AArgs: TArray<string>; out ARest: TArray<string>): Boolean;
+
+    // Control channel
+    function DoRunFiltered(const AFilter: TPCTestFilter): Integer;
+    procedure DoControlCommand(const ACommand: TPCTestControlCommand);
+    function DoRpc(const AArgs: TArray<string>): Integer;
+    function DoRpcSend(const AClient: TPCTestControlClient; const ACommand: TPCTestControlCommand;
+      const AName: string): Integer;
+    function DoRpcWait(const AClient: TPCTestControlClient; const ASeconds: Integer): Integer;
   public
     constructor Create(); override;
     destructor Destroy(); override;
@@ -266,6 +303,11 @@ type
     // tests' fixture folder (<root>\<area>\fixtures\) and the output folder.
     // Defaults: repo = the exe's parent folder, output = <exe>\output
     procedure AddSourceRoot(const APath: string);
+    // A folder of example programs (scanned with its subfolders, fixtures
+    // folders left out): each .pcpp is a test of area examples, a build test
+    // in the default cells when it has no spec of its own, so every example
+    // must build clean on both targets
+    procedure AddExampleRoot(const APath: string);
     procedure SetRepoRoot(const APath: string);
     procedure SetFixtureRoot(const APath: string);
     procedure SetOutputRoot(const APath: string);
@@ -386,6 +428,31 @@ const
   PC_TS_ARG_FAILED = '-failed';
   { PC_TS_ARG_VERBOSE }
   PC_TS_ARG_VERBOSE = '-v';
+  { PC_TS_ARG_RPC }
+  // First argument only: talk to the testbed running on the output folder
+  PC_TS_ARG_RPC = '-rpc';
+  { PC_TS_ARG_ROOT }
+  // A folder of .pcpp tests (repeatable): the roots given replace the
+  // host's (its tests and its examples), e.g. a probe's planted fixtures
+  PC_TS_ARG_ROOT = '-root';
+
+  { PC_TS_RPC_STATUS }
+  PC_TS_RPC_STATUS = 'status';
+  { PC_TS_RPC_FAILURES }
+  PC_TS_RPC_FAILURES = 'failures';
+  { PC_TS_RPC_STOP }
+  PC_TS_RPC_STOP = 'stop';
+  { PC_TS_RPC_ABORT }
+  PC_TS_RPC_ABORT = 'abort';
+  { PC_TS_RPC_WAIT }
+  PC_TS_RPC_WAIT = 'wait';
+
+  { PC_TS_RPC_POLL_MS }
+  // How often -rpc wait and a sent command look at the block
+  PC_TS_RPC_POLL_MS = 250;
+  { PC_TS_RPC_TAKEN_MS }
+  // How long a sent stop / abort waits to be taken before saying it is queued
+  PC_TS_RPC_TAKEN_MS = 3000;
 
   { PC_TS_CHECK_INDENT }
   // A check text's continuation lines, under its first
@@ -421,13 +488,25 @@ begin
   FScanner.SetErrors(FErrors);
   FStop := TPCTestStop.Create();
   FStop.SetErrors(FErrors);
+  // The control channel: its heartbeat and mailbox ride on the stop
+  // thread, its stop / abort commands become stop presses
+  FControl := TPCTestControl.Create();
+  FControl.SetErrors(FErrors);
+  FControl.OnCommand := DoControlCommand;
+  FStop.SetPollHook(
+    procedure
+    begin
+      FControl.Service();
+    end);
   FCases := TObjectList<TPCTestCase>.Create(True);
   FItems := TList<TPCTestItem>.Create();
   FSourceRoots := TList<string>.Create();
+  FExampleRoots := TList<string>.Create();
   FUnspecced := TList<string>.Create();
   FResults := TList<TPCTestResult>.Create();
   FCaseSetups := TDictionary<Integer, string>.Create();
   FDiscovered := False;
+  FRootsOnly := False;
   FWslChecked := False;
   FWslAvailable := False;
   FWslReason := '';
@@ -454,10 +533,13 @@ begin
   FCaseSetups.Free();
   FResults.Free();
   FUnspecced.Free();
+  FExampleRoots.Free();
   FSourceRoots.Free();
   FItems.Free();
   FCases.Free();
+  // The stop thread runs the control channel's hook: it ends first
   FStop.Free();
+  FControl.Free();
   FScanner.Free();
   FreeAndNil(FErrors);
 
@@ -472,6 +554,12 @@ end;
 procedure TPCTestSuite.AddSourceRoot(const APath: string);
 begin
   FSourceRoots.Add(APath);
+  FDiscovered := False;
+end;
+
+procedure TPCTestSuite.AddExampleRoot(const APath: string);
+begin
+  FExampleRoots.Add(APath);
   FDiscovered := False;
 end;
 
@@ -574,13 +662,14 @@ begin
     Result := AStem;
 end;
 
-procedure TPCTestSuite.DoDiscoverRoot(const ARoot: string);
+procedure TPCTestSuite.DoDiscoverRoot(const ARoot: string; const AIsExamples: Boolean);
 var
   LDir: string;
   LFiles: TArray<string>;
   LFile: string;
   LSpec: TPCTestSpec;
   LHasSpec: Boolean;
+  LScanned: Boolean;
   LItem: TPCTestItem;
   LOther: Integer;
   LCollected: TList<string>;
@@ -611,8 +700,16 @@ begin
 
   for LFile in LFiles do
   begin
-    // A file whose spec is broken is reported by the scanner and left out
-    if not FScanner.Scan(LFile, LSpec, LHasSpec) then
+    // A file whose spec is broken is reported by the scanner and left out.
+    // An example always has a spec: its own, or the implied build one
+    if AIsExamples then
+    begin
+      LScanned := FScanner.ScanExample(LFile, LSpec);
+      LHasSpec := True;
+    end
+    else
+      LScanned := FScanner.Scan(LFile, LSpec, LHasSpec);
+    if not LScanned then
       Continue;
     if not LHasSpec then
     begin
@@ -630,6 +727,8 @@ begin
 
     LItem := Default(TPCTestItem);
     LItem.AreaName := DoAreaOf(LSpec.Filename, LDir, LSpec.Stem);
+    if AIsExamples then
+      LItem.AreaName := PC_TS_EXAMPLES_AREA + PC_TS_ID_SEPARATOR + LItem.AreaName;
     LItem.TestName := LSpec.Stem;
     LItem.Id := LItem.AreaName + PC_TS_ID_SEPARATOR + LItem.TestName;
     LItem.Kind := LSpec.Kind;
@@ -924,8 +1023,13 @@ begin
   FUnspecced.Clear();
 
   for LRoot in FSourceRoots do
-    DoDiscoverRoot(LRoot);
-  DoDiscoverCases();
+    DoDiscoverRoot(LRoot, False);
+  for LRoot in FExampleRoots do
+    DoDiscoverRoot(LRoot, True);
+  // -root runs only the .pcpp tests under the roots it names: the host's
+  // registered code tests are left out with its own tests and examples
+  if not FRootsOnly then
+    DoDiscoverCases();
   DoSortItems();
 
   DoCheckIds();
@@ -1099,14 +1203,15 @@ var
   LDuplicate: Boolean;
 begin
   // A source test whose spec names no opt runs at the levels the run asks
-  // for (-opt), not at its default debug; under -failed every level is
-  // offered, so a failed cell of any level is found again. A test with
-  // its own opt, and every code test, keeps the cells it declares
+  // for (-opt), not at its default debug; under -all every level is
+  // offered (the full target x opt matrix), and under -failed too, so a
+  // failed cell of any level is found again. A test with its own opt, and
+  // every code test, keeps the cells it declares
   if (AItem.CaseIndex >= 0) or (not AItem.Spec.OptDefault) then
     Exit(AItem.Cells);
   if Length(AFilter.OptLevels) > 0 then
     LLevels := AFilter.OptLevels
-  else if AFilter.FailedOnly then
+  else if AFilter.FailedOnly or AFilter.AllCells then
   begin
     LLevels := [];
     for LLevel := Low(TPCOptimizeLevel) to High(TPCOptimizeLevel) do
@@ -1168,6 +1273,81 @@ begin
   Result := True;
 end;
 
+function TPCTestSuite.DoTargetRank(const ATarget: string): Integer;
+begin
+  // The official targets first, Windows then Linux; any other after them
+  if ATarget = PC_TARGET_X86_64_WINDOWS_GNU then
+    Result := 0
+  else if ATarget = PC_TARGET_X86_64_LINUX_GNU then
+    Result := 1
+  else
+    Result := 2;
+end;
+
+function TPCTestSuite.DoCompareCells(const ALeft: TPCTestCell; const ARight: TPCTestCell): Integer;
+begin
+  // Target outer, then the opt level in its enum order (debug, safe, fast,
+  // small), then the subsystem
+  Result := DoTargetRank(ALeft.Target) - DoTargetRank(ARight.Target);
+  if Result = 0 then
+    Result := CompareStr(ALeft.Target, ARight.Target);
+  if Result = 0 then
+    Result := Ord(ALeft.OptLevel) - Ord(ARight.OptLevel);
+  if Result = 0 then
+    Result := Ord(ALeft.Subsystem) - Ord(ARight.Subsystem);
+end;
+
+procedure TPCTestSuite.DoOrderByCell(const ARuns: TList<TPCTestRun>);
+var
+  LCells: TList<TPCTestCell>;
+  LOrdered: TList<TPCTestRun>;
+  LRun: TPCTestRun;
+  LCell: TPCTestCell;
+  LHave: TPCTestCell;
+  LKnown: Boolean;
+begin
+  // Cell-major: every selected test of one cell, then the next cell, so a
+  // target's toolchain and build cache stay warm instead of every test
+  // hopping between targets. The cells are distinct, so sorting them is
+  // a total order; the runs keep their id order inside a cell
+  LCells := TList<TPCTestCell>.Create();
+  LOrdered := TList<TPCTestRun>.Create();
+  try
+    for LRun in ARuns do
+    begin
+      LKnown := False;
+      for LHave in LCells do
+      begin
+        if LHave.SameAs(LRun.Cell) then
+          LKnown := True;
+      end;
+      if not LKnown then
+        LCells.Add(LRun.Cell);
+    end;
+
+    LCells.Sort(TComparer<TPCTestCell>.Construct(
+      function(const ALeft: TPCTestCell; const ARight: TPCTestCell): Integer
+      begin
+        Result := DoCompareCells(ALeft, ARight);
+      end));
+
+    for LCell in LCells do
+    begin
+      for LRun in ARuns do
+      begin
+        if LRun.Cell.SameAs(LCell) then
+          LOrdered.Add(LRun);
+      end;
+    end;
+
+    ARuns.Clear();
+    ARuns.AddRange(LOrdered);
+  finally
+    LOrdered.Free();
+    LCells.Free();
+  end;
+end;
+
 function TPCTestSuite.DoSelect(const AFilter: TPCTestFilter; const ARuns: TList<TPCTestRun>;
   out AFailedCount: Integer): Boolean;
 var
@@ -1222,6 +1402,7 @@ begin
         ARuns.Add(LRun);
       end;
     end;
+    DoOrderByCell(ARuns);
     Result := True;
   finally
     LFailed.Free();
@@ -1987,6 +2168,19 @@ begin
   end;
 end;
 
+procedure TPCTestSuite.DoPrintData(const ALine: string);
+begin
+  // A line a program reads (-rpc's JSON): exactly the text, no colour or
+  // reset sequence around it, which TConsole.PrintLn adds
+  if Assigned(FWriter) then
+    FWriter(ALine)
+  else
+  begin
+    WriteLn(Output, ALine);
+    Flush(Output);
+  end;
+end;
+
 procedure TPCTestSuite.DoPrintLn();
 begin
   DoPrintLn('');
@@ -2051,7 +2245,8 @@ begin
   end;
 end;
 
-procedure TPCTestSuite.DoPrintSummary(const ADurationMs: Int64; const ASelected: Integer);
+procedure TPCTestSuite.DoPrintSummary(const ADurationMs: Int64; const ASelected: Integer;
+  const AStopped: Boolean);
 var
   LCells: TList<string>;
   LResult: TPCTestResult;
@@ -2114,8 +2309,9 @@ begin
       end;
     end;
 
-    // A stopped run never says ALL PASSED: cells it selected did not run
-    if FResults.Count < ASelected then
+    // A stopped run never says ALL PASSED: a cell it selected did not run,
+    // or the last one was ended by a forced stop (DoRunSelected's verdict)
+    if AStopped then
       DoPrintLn(COLOR_YELLOW + Format(RSTstSummaryStopped, [FResults.Count, ASelected]))
     else if (LTotalFailed = 0) and (not FTeardownFailed) then
       DoPrintLn(COLOR_GREEN + RSTstAllPassed)
@@ -2170,6 +2366,8 @@ begin
   DoPrintLn(RSTstHelpKind);
   DoPrintLn(RSTstHelpFailed);
   DoPrintLn(RSTstHelpVerbose);
+  DoPrintLn(RSTstHelpRoot);
+  DoPrintLn(RSTstHelpRpc);
   DoPrintLn(RSTstHelpHelp);
   DoPrintLn(Format(RSTstHelpStop, [PC_TS_STOP_FILE]));
   DoPrintLn(RSTstHelpExit);
@@ -2212,7 +2410,10 @@ begin
     if (LArg = PC_TS_ARG_HELP) or (LArg = PC_TS_ARG_HELP_LONG) then
       AHelp := True
     else if LArg = PC_TS_ARG_ALL then
-      ASelected := True
+    begin
+      AFilter.AllCells := True;
+      ASelected := True;
+    end
     else if LArg = PC_TS_ARG_LIST then
     begin
       AList := True;
@@ -2349,6 +2550,25 @@ begin
 end;
 
 function TPCTestSuite.Run(const AFilter: TPCTestFilter): Integer;
+begin
+  // One run per output folder: the control channel's name being taken
+  // means a testbed already runs here (reported by Start)
+  if not FControl.Start(FOutputRoot) then
+  begin
+    FErrors.PrintErrors();
+    Exit(PC_TS_EXIT_FAILED);
+  end;
+
+  // Whatever way the run ends, the channel says so with its exit code
+  Result := PC_TS_EXIT_FAILED;
+  try
+    Result := DoRunFiltered(AFilter);
+  finally
+    FControl.Finish(Result);
+  end;
+end;
+
+function TPCTestSuite.DoRunFiltered(const AFilter: TPCTestFilter): Integer;
 var
   LRuns: TList<TPCTestRun>;
   LResult: TPCTestResult;
@@ -2398,7 +2618,7 @@ begin
     FCaseSetups.Clear();
     LStopped := DoRunSelected(LRuns);
     DoTeardownCases();
-    DoPrintSummary(LWatch.ElapsedMilliseconds, LRuns.Count);
+    DoPrintSummary(LWatch.ElapsedMilliseconds, LRuns.Count, LStopped);
     DoWriteResults();
   finally
     LRuns.Free();
@@ -2424,32 +2644,282 @@ var
   LRun: TPCTestRun;
   LResult: TPCTestResult;
   LPresses: Integer;
+  LI: Integer;
+  LCellIndex: Integer;
+  LForced: Boolean;
 begin
+  FControl.BeginRun(ARuns.Count, DoCountCells(ARuns));
+  LCellIndex := 0;
+  LForced := False;
+
   // The stop thread runs only while cells do; its presses are read
   // between cells (first press: no next cell) and after one (second
   // press: the cell's processes were ended, so its result is no verdict)
   FStop.Start(FOutputRoot);
   try
-    for LRun in ARuns do
+    for LI := 0 to ARuns.Count - 1 do
     begin
+      LRun := ARuns[LI];
       if FStop.StopRequested() then
+      begin
+        FControl.SetStopping();
         Exit(True);
+      end;
+      if (LI = 0) or (not LRun.Cell.SameAs(ARuns[LI - 1].Cell)) then
+      begin
+        Inc(LCellIndex);
+        FControl.BeginCell(LCellIndex, LRun.Cell.ToText());
+      end;
+      FControl.BeginTest(LI + 1, FItems[LRun.ItemIndex].Id);
       LPresses := FStop.Presses();
       LResult := DoRunOne(LRun);
       if FStop.ForceRequested() and (LPresses < PC_TS_STOP_FORCE) then
       begin
         LResult.Reason := RSTstStoppedReason;
         LResult.Status := trSkip;
+        LForced := True;
         DoPrintLn(COLOR_YELLOW + RSTstForceNotice);
       end
       else if FStop.StopRequested() and (LPresses = 0) then
         DoPrintLn(COLOR_YELLOW + RSTstStopNotice);
       FResults.Add(LResult);
       DoPrintResult(LResult);
+      DoPublishResult(LResult);
     end;
-    Result := FStop.StopRequested() and (FResults.Count < ARuns.Count);
+    // Stopped = the run is incomplete: a test never started, or the one
+    // running was ended by a forced stop (no verdict), the last one included
+    Result := FStop.StopRequested() and ((FResults.Count < ARuns.Count) or LForced);
   finally
     FStop.Halt();
+  end;
+end;
+
+function TPCTestSuite.DoCountCells(const ARuns: TList<TPCTestRun>): Integer;
+var
+  LI: Integer;
+begin
+  // The runs come cell-major (DoOrderByCell): a new cell starts wherever
+  // the cell changes
+  Result := 0;
+  for LI := 0 to ARuns.Count - 1 do
+  begin
+    if (LI = 0) or (not ARuns[LI].Cell.SameAs(ARuns[LI - 1].Cell)) then
+      Inc(Result);
+  end;
+end;
+
+procedure TPCTestSuite.DoPublishResult(const AResult: TPCTestResult);
+var
+  LOutcome: TPCTestControlOutcome;
+begin
+  if AResult.Status = trPass then
+    LOutcome := coPass
+  else if AResult.Status = trFail then
+    LOutcome := coFail
+  else
+    LOutcome := coSkip;
+  FControl.EndTest(LOutcome, AResult.Id, AResult.Cell.ToText());
+  if FStop.StopRequested() then
+    FControl.SetStopping();
+end;
+
+function TPCTestSuite.DoTakeRoots(const AArgs: TArray<string>; out ARest: TArray<string>): Boolean;
+var
+  LI: Integer;
+  LRoots: TArray<string>;
+  LRoot: string;
+begin
+  // -root <dir> pairs come out of the arguments; the rest go to the filter
+  Result := False;
+  ARest := [];
+  LRoots := [];
+  LI := 0;
+  while LI <= High(AArgs) do
+  begin
+    if AArgs[LI] = PC_TS_ARG_ROOT then
+    begin
+      if LI = High(AArgs) then
+      begin
+        DoPrintLn(COLOR_RED + Format(RSTstArgNeedsValue, [PC_TS_ARG_ROOT]));
+        Exit;
+      end;
+      Inc(LI);
+      LRoots := LRoots + [AArgs[LI]];
+    end
+    else
+      ARest := ARest + [AArgs[LI]];
+    Inc(LI);
+  end;
+
+  // The roots given replace the host's tests and examples; a root that
+  // does not exist is reported by discovery (TS0101)
+  if Length(LRoots) > 0 then
+  begin
+    FSourceRoots.Clear();
+    FExampleRoots.Clear();
+    for LRoot in LRoots do
+      AddSourceRoot(LRoot);
+    FRootsOnly := True;
+    FDiscovered := False;
+  end;
+  Result := True;
+end;
+
+{ Control channel }
+
+procedure TPCTestSuite.DoControlCommand(const ACommand: TPCTestControlCommand);
+begin
+  // On the stop thread: a command is a stop press, so it takes the same
+  // path as the key and the stop file (stop = the first press, abort =
+  // up to the press that ends the running test's processes)
+  if ACommand = ccStop then
+  begin
+    if not FStop.StopRequested() then
+      FStop.Press();
+  end
+  else if ACommand = ccAbort then
+  begin
+    while not FStop.ForceRequested() do
+      FStop.Press();
+  end;
+  FControl.SetStopping();
+end;
+
+function TPCTestSuite.DoRpc(const AArgs: TArray<string>): Integer;
+var
+  LCommand: string;
+  LSeconds: Integer;
+  LClient: TPCTestControlClient;
+  LBlock: TPCTestControlBlock;
+begin
+  // testbed -rpc <command> [seconds]
+  if Length(AArgs) < 2 then
+  begin
+    DoPrintLn(COLOR_RED + Format(RSTstRpcBadCommand, ['""']));
+    Exit(PC_TS_EXIT_BAD_ARGS);
+  end;
+  LCommand := AArgs[1].ToLower();
+  LSeconds := 0;
+  if (LCommand <> PC_TS_RPC_STATUS) and (LCommand <> PC_TS_RPC_FAILURES) and
+    (LCommand <> PC_TS_RPC_STOP) and (LCommand <> PC_TS_RPC_ABORT) and
+    (LCommand <> PC_TS_RPC_WAIT) then
+  begin
+    DoPrintLn(COLOR_RED + Format(RSTstRpcBadCommand, [AArgs[1]]));
+    Exit(PC_TS_EXIT_BAD_ARGS);
+  end;
+  // wait [seconds]: no seconds (or 0) waits for as long as the run takes
+  if (LCommand = PC_TS_RPC_WAIT) and (Length(AArgs) > 2) and
+    ((not TryStrToInt(AArgs[2], LSeconds)) or (LSeconds < 0)) then
+  begin
+    DoPrintLn(COLOR_RED + Format(RSTstRpcBadCommand, [PC_TS_RPC_WAIT + ' ' + AArgs[2]]));
+    Exit(PC_TS_EXIT_BAD_ARGS);
+  end;
+
+  LClient := TPCTestControlClient.Create();
+  try
+    LClient.SetErrors(FErrors);
+    if not LClient.Open(FOutputRoot) then
+    begin
+      FErrors.PrintErrors();
+      DoPrintLn(Format(RSTstRpcNoRun, [FOutputRoot]));
+      Exit(PC_TS_EXIT_NO_RUN);
+    end;
+
+    if (LCommand = PC_TS_RPC_STATUS) or (LCommand = PC_TS_RPC_FAILURES) then
+    begin
+      if not LClient.Snapshot(LBlock) then
+      begin
+        DoPrintLn(COLOR_RED + RSTstRpcLockFailed);
+        Exit(PC_TS_EXIT_FAILED);
+      end;
+      if LCommand = PC_TS_RPC_STATUS then
+        DoPrintData(TPCTestControlFormat.StatusJson(LBlock, LClient.OwnerAlive(LBlock)))
+      else
+        DoPrintData(TPCTestControlFormat.FailuresJson(LBlock));
+      Exit(PC_TS_EXIT_PASSED);
+    end;
+
+    if LCommand = PC_TS_RPC_STOP then
+      Result := DoRpcSend(LClient, ccStop, PC_TS_RPC_STOP)
+    else if LCommand = PC_TS_RPC_ABORT then
+      Result := DoRpcSend(LClient, ccAbort, PC_TS_RPC_ABORT)
+    else
+      Result := DoRpcWait(LClient, LSeconds);
+  finally
+    LClient.Free();
+  end;
+end;
+
+function TPCTestSuite.DoRpcSend(const AClient: TPCTestControlClient;
+  const ACommand: TPCTestControlCommand; const AName: string): Integer;
+var
+  LSeq: UInt32;
+  LBlock: TPCTestControlBlock;
+  LWatch: TStopwatch;
+begin
+  if not AClient.Send(ACommand, LSeq) then
+  begin
+    DoPrintLn(COLOR_RED + RSTstRpcLockFailed);
+    Exit(PC_TS_EXIT_FAILED);
+  end;
+
+  // Taken once the run's stop thread answers the mailbox; before its cells
+  // start nothing answers, and the command waits there to be taken then
+  LWatch := TStopwatch.StartNew();
+  while LWatch.ElapsedMilliseconds < PC_TS_RPC_TAKEN_MS do
+  begin
+    if not AClient.Snapshot(LBlock) then
+    begin
+      DoPrintLn(COLOR_RED + RSTstRpcLockFailed);
+      Exit(PC_TS_EXIT_FAILED);
+    end;
+    if LBlock.ReplySeq = LSeq then
+    begin
+      DoPrintLn(Format(RSTstRpcTaken, [AName, LBlock.ProcessId]));
+      Exit(PC_TS_EXIT_PASSED);
+    end;
+    if not AClient.OwnerAlive(LBlock) then
+    begin
+      DoPrintLn(COLOR_RED + Format(RSTstRpcRunDied, [LBlock.ProcessId]));
+      Exit(PC_TS_EXIT_FAILED);
+    end;
+    Sleep(PC_TS_RPC_POLL_MS);
+  end;
+  DoPrintLn(COLOR_YELLOW + Format(RSTstRpcNotTaken, [AName]));
+  Result := PC_TS_EXIT_PASSED;
+end;
+
+function TPCTestSuite.DoRpcWait(const AClient: TPCTestControlClient; const ASeconds: Integer): Integer;
+var
+  LBlock: TPCTestControlBlock;
+  LWatch: TStopwatch;
+begin
+  // The client keeps the block mapped while it waits, so the run's last
+  // write (done, its exit code) is read even after its process has ended
+  LWatch := TStopwatch.StartNew();
+  while True do
+  begin
+    if not AClient.Snapshot(LBlock) then
+    begin
+      DoPrintLn(COLOR_RED + RSTstRpcLockFailed);
+      Exit(PC_TS_EXIT_FAILED);
+    end;
+    if LBlock.State = Ord(csDone) then
+    begin
+      DoPrintLn(Format(RSTstRpcDone, [LBlock.ExitCode]));
+      Exit(LBlock.ExitCode);
+    end;
+    if not AClient.OwnerAlive(LBlock) then
+    begin
+      DoPrintLn(COLOR_RED + Format(RSTstRpcRunDied, [LBlock.ProcessId]));
+      Exit(PC_TS_EXIT_FAILED);
+    end;
+    if (ASeconds > 0) and (LWatch.ElapsedMilliseconds >= Int64(ASeconds) * 1000) then
+    begin
+      DoPrintLn(COLOR_YELLOW + Format(RSTstRpcWaitTimeout, [ASeconds]));
+      Exit(PC_TS_EXIT_WAIT_TIMEOUT);
+    end;
+    Sleep(PC_TS_RPC_POLL_MS);
   end;
 end;
 
@@ -2470,8 +2940,15 @@ var
   LList: Boolean;
   LHelp: Boolean;
   LSelected: Boolean;
+  LArgs: TArray<string>;
 begin
-  if not DoParseArgs(AArgs, LFilter, LList, LHelp, LSelected) then
+  // A client of a running testbed: no discovery, no run of its own
+  if (Length(AArgs) > 0) and (AArgs[0] = PC_TS_ARG_RPC) then
+    Exit(DoRpc(AArgs));
+
+  if not DoTakeRoots(AArgs, LArgs) then
+    Exit(PC_TS_EXIT_BAD_ARGS);
+  if not DoParseArgs(LArgs, LFilter, LList, LHelp, LSelected) then
     Exit(PC_TS_EXIT_BAD_ARGS);
   if LHelp then
   begin

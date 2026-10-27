@@ -1946,7 +1946,7 @@ begin
     end
     else
     begin
-      // Unhook failed — call original directly (may recurse if hook still active)
+      // Unhook failed - call original directly (may recurse if hook still active)
       Result := GOrigLdrGetDllHandle(DllPath, DllCharacteristics, DllName, DllHandle);
     end;
   finally
@@ -1959,7 +1959,7 @@ begin
     LFoundHandle := FindRegisteredModule(DllName);
     if LFoundHandle <> 0 then
     begin
-      // Found in our registry — set the output handle and return success.
+      // Found in our registry - set the output handle and return success.
       PHandle(DllHandle)^ := LFoundHandle;
       Result := STATUS_SUCCESS;
     end;
@@ -1984,7 +1984,7 @@ begin
   else
     LNameStr := '(null)';
 
-  // Check our registry FIRST — if we have it, no need to call the original.
+  // Check our registry FIRST - if we have it, no need to call the original.
   LFoundHandle := FindRegisteredModule(DllName);
   if LFoundHandle <> 0 then
   begin
@@ -1993,7 +1993,7 @@ begin
     Exit;
   end;
 
-  // Not one of ours — call the original LdrLoadDll.
+  // Not one of ours - call the original LdrLoadDll.
   EnterCriticalSection(GRedirectCritSect);
   try
     if UninstallHook(GLdrLoadDllAddr, GOrigBytesLdrLoadDll) then
@@ -2034,7 +2034,7 @@ begin
   if GLdrHookInstalled then
   else
 
-  // Also hook LdrLoadDll — the import resolver calls this directly when it
+  // Also hook LdrLoadDll - the import resolver calls this directly when it
   // can't find a module, bypassing LdrGetDllHandle entirely.
   if not GLdrLoadDllHookInstalled then
   begin
@@ -2221,7 +2221,7 @@ begin
   LBufferSize := Length(LWideName) * SizeOf(WideChar);
 
   // Allocate persistent memory from the process heap for the name buffer.
-  // This must outlive the function — the LDR entry will point to it permanently.
+  // This must outlive the function - the LDR entry will point to it permanently.
   LHeap := GetProcessHeap();
   LBuffer := HeapAlloc(LHeap, 0, LBufferSize + SizeOf(WideChar));
   if LBuffer = nil then
@@ -2251,12 +2251,12 @@ begin
       Exit;
     end;
 
-    // Patch BaseDllName — this is what the loader searches by when resolving imports.
+    // Patch BaseDllName - this is what the loader searches by when resolving imports.
     LLdrEntry^.BaseDllName.Buffer := LBuffer;
     LLdrEntry^.BaseDllName.Length := LBufferSize;
     LLdrEntry^.BaseDllName.MaximumLength := LBufferSize + SizeOf(WideChar);
 
-    // Patch FullDllName — this is what LoadLibraryExW checks to detect
+    // Patch FullDllName - this is what LoadLibraryExW checks to detect
     // already-loaded modules. Without patching this, subsequent loads using
     // the same dummy file path will collide and return the existing handle
     // instead of triggering the NtMapViewOfSection hook.
@@ -2397,7 +2397,7 @@ begin
     PatchModuleName(Result, LUniqueName);
   end;
 
-  // Remove LDR hooks — they'll be re-installed on the next load call.
+  // Remove LDR hooks - they'll be re-installed on the next load call.
   UnhookLdr();
 end;
 
@@ -2439,7 +2439,7 @@ begin
   LImportDir := @LNtHeaders^.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
   if (LImportDir^.VirtualAddress = 0) or (LImportDir^.Size = 0) then
   begin
-    Result := True; // No imports — nothing to resolve
+    Result := True; // No imports - nothing to resolve
     Exit;
   end;
 
@@ -2540,7 +2540,7 @@ begin
   LEntryRVA := LNtHeaders^.OptionalHeader.AddressOfEntryPoint;
   if LEntryRVA = 0 then
   begin
-    Result := True; // No entry point — that's OK
+    Result := True; // No entry point - that's OK
     Exit;
   end;
 
@@ -2639,7 +2639,7 @@ begin
       Exit;
     end;
 
-    // Load with DONT_RESOLVE_DLL_REFERENCES — the loader will map and relocate
+    // Load with DONT_RESOLVE_DLL_REFERENCES - the loader will map and relocate
     // the DLL but will NOT resolve imports or call DllMain.
     Result := MapAndResolve(AData, ASize, DONT_RESOLVE_DLL_REFERENCES, PWideChar(LPath), LOAD_FLAGS_NONE);
     if Result = 0 then
@@ -2677,7 +2677,7 @@ begin
   end
   else
   begin
-    // No registered dependencies — load normally via the base LoadLibrary.
+    // No registered dependencies - load normally via the base LoadLibrary.
     // The Windows loader handles import resolution natively.
     if AModuleName <> '' then
       EnsureLdrGetDllHandleHooked();
@@ -2692,7 +2692,7 @@ begin
     end;
   end;
 
-  // Remove LDR hooks — they'll be re-installed on the next load call.
+  // Remove LDR hooks - they'll be re-installed on the next load call.
   UnhookLdr();
 end;
 
@@ -2987,10 +2987,10 @@ begin
         begin
           OutputDebugStringFmt('LoadLibrary(name): Failed to load dependency "%s" for "%s".',
             [LDepName, AModuleName]);
-          Exit; // Bail out — dependency failed
+          Exit; // Bail out - dependency failed
         end;
       end;
-      // If not in data registry, it's a system DLL — ManualResolveImports
+      // If not in data registry, it's a system DLL - ManualResolveImports
       // handles it later via GetModuleHandle/Windows.LoadLibrary.
     end;
 
@@ -3021,12 +3021,12 @@ begin
       Dec(GLoadingInProgressCount);
   end;
 
-  // Remove LDR hooks — they'll be re-installed on the next load call.
+  // Remove LDR hooks - they'll be re-installed on the next load call.
   UnhookLdr();
 end;
 
 // Loads all registered DLLs in dependency order. The recursive
-// LoadLibrary(AModuleName) handles the topological sort automatically —
+// LoadLibrary(AModuleName) handles the topological sort automatically -
 // dependencies are loaded before dependents, and already-loaded modules
 // are skipped.
 function LoadAll(): Boolean;
@@ -3045,7 +3045,7 @@ begin
     end;
   end;
 
-  // Remove LDR hooks — they'll be re-installed on the next load call.
+  // Remove LDR hooks - they'll be re-installed on the next load call.
   UnhookLdr();
 end;
 

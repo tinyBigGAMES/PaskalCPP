@@ -21,8 +21,10 @@
   person sets (a slider, 0 to 1) into the linear volume an audio API takes,
   so equal steps sound like equal steps; PerceivedLevel turns a volume back
   into its level. Beside them: the constants (Pi, DegToRad / RadToDeg, the
-  Epsilons, NaN), Clamp and Wrap, SameSign and SameValue, Lerp, AngleDifference,
-  SmoothMove, the Easing curves (Ease, EaseBetween) and Random, a seeded
+  Epsilons, NaN), the everyday functions under Delphi's names (Sin, Cos,
+  Sqrt, Abs, and Round / Trunc / Floor / Ceil to int64), Clamp and Wrap,
+  SameSign and SameValue, Lerp, AngleDifference, SmoothMove, the Easing
+  curves (Ease, EaseBetween) and Random, a seeded
   generator whose numbers are the same on every target. And the 2D geometry
   of a game, with no graphics library: Vector2 (laid out as SFML's, raylib's
   and SDL's {x, y}), Rect and Extent, the oriented box Obb, and the
@@ -338,6 +340,244 @@ exported const
   /// @since 0.2
   NaN: float64 = 0.0 / 0.0;
 
+/// The sine of an angle in radians (`Sin(90.0 * DegToRad)` is 1).
+/// @param AValue the angle, radians
+/// @returns its sine, in [-1, 1]; NaN for a NaN or an infinity
+/// @example `LY := CRadius * Sin(LAngle);`
+/// @since 0.3
+/// @see Cos
+exported routine Sin(const AValue: float64): float64;
+begin
+  return std::sin(AValue);
+end;
+
+/// Sin for a float32 angle, computed in float32.
+/// @param AValue the angle, radians
+/// @returns its sine
+/// @since 0.3
+exported routine Sin(const AValue: float32): float32;
+begin
+  return std::sin(AValue);
+end;
+
+/// The cosine of an angle in radians (`Cos(Pi)` is -1).
+/// @param AValue the angle, radians
+/// @returns its cosine, in [-1, 1]; NaN for a NaN or an infinity
+/// @example `LX := CRadius * Cos(LAngle);`
+/// @since 0.3
+/// @see Sin
+exported routine Cos(const AValue: float64): float64;
+begin
+  return std::cos(AValue);
+end;
+
+/// Cos for a float32 angle, computed in float32.
+/// @param AValue the angle, radians
+/// @returns its cosine
+/// @since 0.3
+exported routine Cos(const AValue: float32): float32;
+begin
+  return std::cos(AValue);
+end;
+
+/// The square root.
+/// @param AValue the value
+/// @returns its non-negative square root; NaN for a negative value or a NaN
+/// @example `LDistance := Sqrt(LDX * LDX + LDY * LDY);`
+/// @since 0.3
+exported routine Sqrt(const AValue: float64): float64;
+begin
+  return std::sqrt(AValue);
+end;
+
+/// Sqrt for a float32 value, computed in float32.
+/// @param AValue the value
+/// @returns its square root
+/// @since 0.3
+exported routine Sqrt(const AValue: float32): float32;
+begin
+  return std::sqrt(AValue);
+end;
+
+/// The absolute value: AValue without its sign.
+/// @param AValue the value
+/// @returns |AValue|; NaN stays NaN
+/// @example `LGap := Abs(LTarget - LPosition);`
+/// @since 0.3
+exported routine Abs(const AValue: float64): float64;
+begin
+  return std::fabs(AValue);
+end;
+
+/// Abs for a float32 value.
+/// @param AValue the value
+/// @returns |AValue|
+/// @since 0.3
+exported routine Abs(const AValue: float32): float32;
+begin
+  return std::fabs(AValue);
+end;
+
+/// Abs for an int64 value.
+/// @param AValue the value
+/// @returns |AValue|
+/// @raises EXC_INTEGER_OVERFLOW (5) for the lowest int64, which has no
+///   positive counterpart
+/// @since 0.3
+exported routine Abs(const AValue: int64): int64;
+begin
+  if AValue = -9223372036854775807 - 1 then
+    raisecode(::pcpp::EXC_INTEGER_OVERFLOW, "Abs: the lowest int64 has no positive counterpart");
+  end;
+  if AValue < 0 then
+    return -AValue;
+  end;
+  return AValue;
+end;
+
+/// Abs for an int32 value.
+/// @param AValue the value
+/// @returns |AValue|
+/// @raises EXC_INTEGER_OVERFLOW (5) for the lowest int32, which has no
+///   positive counterpart
+/// @since 0.3
+exported routine Abs(const AValue: int32): int32;
+begin
+  if AValue = -2147483647 - 1 then
+    raisecode(::pcpp::EXC_INTEGER_OVERFLOW, "Abs: the lowest int32 has no positive counterpart");
+  end;
+  if AValue < 0 then
+    return -AValue;
+  end;
+  return AValue;
+end;
+
+// 2^63, exact in float64: int64 holds the integral values in [-2^63, 2^63)
+const
+  KInt64Bound: float64 = 9223372036854775808.0;
+
+// AIntegral (a whole number already) as an int64. A value outside int64's
+// range, a NaN or an infinity raises EXC_INTEGER_OVERFLOW naming ARoutine:
+// converting one to an integer has no defined result in C++. Every
+// comparison with a NaN is false, so the range test catches it too.
+routine MathDoToInt64(const AIntegral: float64; const ARoutine: string): int64;
+begin
+  if not ((AIntegral >= -KInt64Bound) and (AIntegral < KInt64Bound)) then
+    raisecode(::pcpp::EXC_INTEGER_OVERFLOW, ARoutine + ": the value is outside the int64 range");
+  end;
+  return int64(AIntegral);
+end;
+
+/// The nearest whole number, as Delphi rounds: a value exactly halfway
+/// goes to the even neighbour (banker's rounding), so Round(2.5) is 2,
+/// Round(3.5) is 4 and Round(-2.5) is -2.
+/// @param AValue the value
+/// @returns the nearest whole number
+/// @raises EXC_INTEGER_OVERFLOW (5) when the result does not fit int64, or
+///   AValue is a NaN or an infinity
+/// @example `LSample := int16(Round(CAmplitude * Sin(LPhase)));`
+/// @since 0.3
+/// @see Trunc
+exported routine Round(const AValue: float64): int64;
+var
+  LFloor: float64;
+  LFraction: float64;
+begin
+  LFloor := std::floor(AValue);
+  LFraction := AValue - LFloor;
+  if LFraction < 0.5 then
+    return MathDoToInt64(LFloor, "Round");
+  end;
+  if LFraction > 0.5 then
+    return MathDoToInt64(LFloor + 1.0, "Round");
+  end;
+  // Exactly halfway (a NaN or an infinity also lands here, LFraction being
+  // NaN, and MathDoToInt64 refuses it): the even neighbour
+  if std::fmod(LFloor, 2.0) = 0.0 then
+    return MathDoToInt64(LFloor, "Round");
+  end;
+  return MathDoToInt64(LFloor + 1.0, "Round");
+end;
+
+/// Round for a float32 value (widened exactly to float64 first).
+/// @param AValue the value
+/// @returns the nearest whole number, halfway to even
+/// @raises EXC_INTEGER_OVERFLOW (5) as Round
+/// @since 0.3
+exported routine Round(const AValue: float32): int64;
+begin
+  return Round(float64(AValue));
+end;
+
+/// The whole part: the fraction dropped, toward zero (Trunc(-2.7) is -2).
+/// @param AValue the value
+/// @returns the whole part
+/// @raises EXC_INTEGER_OVERFLOW (5) when it does not fit int64, or AValue
+///   is a NaN or an infinity
+/// @example `LSeconds := Trunc(LElapsed);`
+/// @since 0.3
+/// @see Round
+exported routine Trunc(const AValue: float64): int64;
+begin
+  return MathDoToInt64(std::trunc(AValue), "Trunc");
+end;
+
+/// Trunc for a float32 value.
+/// @param AValue the value
+/// @returns the whole part
+/// @raises EXC_INTEGER_OVERFLOW (5) as Trunc
+/// @since 0.3
+exported routine Trunc(const AValue: float32): int64;
+begin
+  return Trunc(float64(AValue));
+end;
+
+/// The greatest whole number not above AValue (Floor(-2.5) is -3).
+/// @param AValue the value
+/// @returns AValue rounded down
+/// @raises EXC_INTEGER_OVERFLOW (5) when it does not fit int64, or AValue
+///   is a NaN or an infinity
+/// @example `LTileX := Floor(LWorldX / CTileSize);`
+/// @since 0.3
+/// @see Ceil
+exported routine Floor(const AValue: float64): int64;
+begin
+  return MathDoToInt64(std::floor(AValue), "Floor");
+end;
+
+/// Floor for a float32 value.
+/// @param AValue the value
+/// @returns AValue rounded down
+/// @raises EXC_INTEGER_OVERFLOW (5) as Floor
+/// @since 0.3
+exported routine Floor(const AValue: float32): int64;
+begin
+  return Floor(float64(AValue));
+end;
+
+/// The least whole number not below AValue (Ceil(-2.5) is -2).
+/// @param AValue the value
+/// @returns AValue rounded up
+/// @raises EXC_INTEGER_OVERFLOW (5) when it does not fit int64, or AValue
+///   is a NaN or an infinity
+/// @example `LPages := Ceil(LLines / CLinesPerPage);`
+/// @since 0.3
+/// @see Floor
+exported routine Ceil(const AValue: float64): int64;
+begin
+  return MathDoToInt64(std::ceil(AValue), "Ceil");
+end;
+
+/// Ceil for a float32 value.
+/// @param AValue the value
+/// @returns AValue rounded up
+/// @raises EXC_INTEGER_OVERFLOW (5) as Ceil
+/// @since 0.3
+exported routine Ceil(const AValue: float32): int64;
+begin
+  return Ceil(float64(AValue));
+end;
+
 /// AValue held inside the bounds: below the lower one it is the lower one,
 /// above the upper one the upper one. The bounds may come in either order. A
 /// NaN stays NaN.
@@ -414,6 +654,116 @@ end;
 exported routine Clamp(const AValue: int32; const AMin: int32; const AMax: int32): int32;
 begin
   return int32(Clamp(int64(AValue), int64(AMin), int64(AMax)));
+end;
+
+/// The smaller of two values (Delphi's Min): AA when it is less than AB,
+/// else AB, so a NaN in either gives AB.
+/// @param AA one value
+/// @param AB the other value
+/// @returns the smaller of AA and AB
+/// @example `LZoom := Min(LFitX, LFitY);`
+/// @since 0.3
+/// @see Max
+exported routine Min(const AA: float64; const AB: float64): float64;
+begin
+  if AA < AB then
+    return AA;
+  end;
+  return AB;
+end;
+
+/// Min for float32 values.
+/// @param AA one value
+/// @param AB the other value
+/// @returns the smaller of AA and AB
+/// @since 0.3
+exported routine Min(const AA: float32; const AB: float32): float32;
+begin
+  if AA < AB then
+    return AA;
+  end;
+  return AB;
+end;
+
+/// Min for int64 values.
+/// @param AA one value
+/// @param AB the other value
+/// @returns the smaller of AA and AB
+/// @since 0.3
+exported routine Min(const AA: int64; const AB: int64): int64;
+begin
+  if AA < AB then
+    return AA;
+  end;
+  return AB;
+end;
+
+/// Min for int32 values.
+/// @param AA one value
+/// @param AB the other value
+/// @returns the smaller of AA and AB
+/// @since 0.3
+exported routine Min(const AA: int32; const AB: int32): int32;
+begin
+  if AA < AB then
+    return AA;
+  end;
+  return AB;
+end;
+
+/// The larger of two values (Delphi's Max): AA when it is more than AB,
+/// else AB, so a NaN in either gives AB.
+/// @param AA one value
+/// @param AB the other value
+/// @returns the larger of AA and AB
+/// @example `LWidth := Max(LWidth, 1);`
+/// @since 0.3
+/// @see Min
+exported routine Max(const AA: float64; const AB: float64): float64;
+begin
+  if AA > AB then
+    return AA;
+  end;
+  return AB;
+end;
+
+/// Max for float32 values.
+/// @param AA one value
+/// @param AB the other value
+/// @returns the larger of AA and AB
+/// @since 0.3
+exported routine Max(const AA: float32; const AB: float32): float32;
+begin
+  if AA > AB then
+    return AA;
+  end;
+  return AB;
+end;
+
+/// Max for int64 values.
+/// @param AA one value
+/// @param AB the other value
+/// @returns the larger of AA and AB
+/// @since 0.3
+exported routine Max(const AA: int64; const AB: int64): int64;
+begin
+  if AA > AB then
+    return AA;
+  end;
+  return AB;
+end;
+
+/// Max for int32 values.
+/// @param AA one value
+/// @param AB the other value
+/// @returns the larger of AA and AB
+/// @since 0.3
+exported routine Max(const AA: int32; const AB: int32): int32;
+begin
+  if AA > AB then
+    return AA;
+  end;
+  return AB;
 end;
 
 /// AValue wrapped around the range [AMin, AMax): going past the top comes in

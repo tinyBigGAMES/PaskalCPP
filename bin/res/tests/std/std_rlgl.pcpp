@@ -1,0 +1,68 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_rlgl.pcpp - Std library compliance: the rlgl unit
+  (res\libs\std\rlgl.pcpp)
+
+  rlgl used from PaskalCPP next to raylib: rlGetVersion names the OpenGL
+  version raylib runs on, and a raylib draw is on the screen in the middle
+  of a frame once rlDrawRenderBatchActive has drawn raylib's batch (raylib
+  only queues it until then). raylib's own log is off
+  (SetTraceLogLevel(LOG_NONE)).
+*******************************************************************************/
+
+module exe std_rlgl;
+
+/*
+  @@test
+    kind run
+    expect
+    | opengl known true
+    | flushed draw read back true
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  raylib,
+  rlgl;
+
+var
+  LShot: Image;
+  LColor: Color;
+  LBack: Color;
+
+begin
+  SetTraceLogLevel(LOG_NONE);
+  SetConfigFlags(FLAG_WINDOW_HIDDEN);
+  InitWindow(64, 64, "std_rlgl");
+  println("opengl known {}", rlGetVersion() > 0);
+
+  LBack.r := 255;
+  LBack.g := 0;
+  LBack.b := 255;
+  LBack.a := 255;
+  BeginDrawing();
+  ClearBackground(LBack);
+  DrawRectangle(0, 0, 64, 64, RED);
+  // raylib's batch drawn now, so the screen holds the rectangle
+  rlDrawRenderBatchActive();
+  LShot := LoadImageFromScreen();
+  LColor := GetImageColor(LShot, 32, 32);
+  UnloadImage(LShot);
+  EndDrawing();
+  println("flushed draw read back {}", (LColor.r = RED.r) and (LColor.g = RED.g) and (LColor.b = RED.b));
+  CloseWindow();
+end.

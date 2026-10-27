@@ -1,0 +1,252 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  EnetChat.pcpp - ENet example (import enet): a chat room over UDP. A server
+  host listens on 127.0.0.1 (the system picks the port) and three clients,
+  each with a host of its own, join it. Every client says one line; the
+  server relays each line it receives to the whole room with
+  enet_host_broadcast, so every client hears all three, its own included.
+  Then everyone leaves with a clean disconnect and the server sees each one
+  go. All of it runs in one process, the hosts serviced in turn, so the
+  example needs no second machine or terminal; the calls are the same ones
+  a server and its clients make across a network.
+==============================================================================*/
+
+module exe EnetChat;
+
+import
+  enet;
+
+const
+  CClientCount: int32 = 3;
+  // How long one enet_host_service call waits for an event
+  CSliceMs: uint32 = 10;
+  // How long one stage (join, talk, leave) may take before the room gives up
+  CDeadlineMs: uint32 = 5000;
+
+type
+  // One person in the room: their own host and their link to the server
+  ChatClient = record
+    Nick: string;
+    Host: ptr to ENetHost;
+    Peer: ptr to ENetPeer;
+    Joined: bool;
+    Left: bool;
+    Heard: int32;
+  end;
+
+  ChatRoom = array[0..CClientCount - 1] of ChatClient;
+
+// Queues AText (its NUL included) as one reliable packet: to APeer, or to
+// every peer of AHost when APeer is nil
+routine SendLine(const AHost: ptr to ENetHost; const APeer: ptr to ENetPeer;
+  const AText: string);
+var
+  LPacket: ptr to ENetPacket;
+begin
+  LPacket := enet_packet_create(AText.c_str(), AText.length() + 1, ENET_PACKET_FLAG_RELIABLE);
+  if APeer = nil then
+    enet_host_broadcast(AHost, 0, LPacket);
+  else
+    enet_peer_send(APeer, 0, LPacket);
+  end;
+end;
+
+// The server for one slice: counts who joins and leaves, relays every line
+routine ServeRoom(const AServer: ptr to ENetHost; var AInRoom: int32);
+var
+  LEvent: ENetEvent;
+  LLine: string;
+begin
+  if enet_host_service(AServer, address of LEvent, CSliceMs) > 0 then
+    if LEvent.type = ENET_EVENT_TYPE_CONNECT then
+      AInRoom := AInRoom + 1;
+      println("server: someone joined, {} in the room", AInRoom);
+    else
+      if LEvent.type = ENET_EVENT_TYPE_RECEIVE then
+        // The sender put the text's NUL in the packet: read as a C string
+        LLine := string(ptr to const char(LEvent.packet->data));
+        enet_packet_destroy(LEvent.packet);
+        println("server: relaying '{}'", LLine);
+        SendLine(AServer, nil, LLine);
+      else
+        if LEvent.type = ENET_EVENT_TYPE_DISCONNECT then
+          AInRoom := AInRoom - 1;
+          println("server: someone left, {} in the room", AInRoom);
+        end;
+      end;
+    end;
+  end;
+end;
+
+// One client for one slice: notes joining and leaving, prints what it hears
+routine ServeClient(var AClient: ChatClient);
+var
+  LEvent: ENetEvent;
+begin
+  if enet_host_service(AClient.Host, address of LEvent, CSliceMs) > 0 then
+    if LEvent.type = ENET_EVENT_TYPE_CONNECT then
+      AClient.Joined := true;
+      println("{}: joined", AClient.Nick);
+    else
+      if LEvent.type = ENET_EVENT_TYPE_RECEIVE then
+        AClient.Heard := AClient.Heard + 1;
+        println("{} hears  {}", AClient.Nick, string(ptr to const char(LEvent.packet->data)));
+        enet_packet_destroy(LEvent.packet);
+      else
+        if LEvent.type = ENET_EVENT_TYPE_DISCONNECT then
+          AClient.Left := true;
+          println("{}: left", AClient.Nick);
+        end;
+      end;
+    end;
+  end;
+end;
+
+// The server and every client, one slice each
+routine ServeAll(const AServer: ptr to ENetHost; var AInRoom: int32; var ARoom: ChatRoom);
+var
+  LI: int32;
+begin
+  ServeRoom(AServer, AInRoom);
+  for LI := 0 to CClientCount - 1 do
+    ServeClient(ARoom[LI]);
+  end;
+end;
+
+// How many clients have joined
+routine CountJoined(const ARoom: ChatRoom): int32;
+var
+  LI: int32;
+  LCount: int32;
+begin
+  LCount := 0;
+  for LI := 0 to CClientCount - 1 do
+    if ARoom[LI].Joined then
+      LCount := LCount + 1;
+    end;
+  end;
+  return LCount;
+end;
+
+// How many clients have heard every line said in the room
+routine CountHeardAll(const ARoom: ChatRoom): int32;
+var
+  LI: int32;
+  LCount: int32;
+begin
+  LCount := 0;
+  for LI := 0 to CClientCount - 1 do
+    if ARoom[LI].Heard = CClientCount then
+      LCount := LCount + 1;
+    end;
+  end;
+  return LCount;
+end;
+
+// How many clients have left
+routine CountLeft(const ARoom: ChatRoom): int32;
+var
+  LI: int32;
+  LCount: int32;
+begin
+  LCount := 0;
+  for LI := 0 to CClientCount - 1 do
+    if ARoom[LI].Left then
+      LCount := LCount + 1;
+    end;
+  end;
+  return LCount;
+end;
+
+// A new client named ANick, connecting to AServerAddr
+routine JoinRoom(var AClient: ChatClient; const ANick: string;
+  const AServerAddr: ptr to const ENetAddress);
+begin
+  AClient.Nick := ANick;
+  AClient.Joined := false;
+  AClient.Left := false;
+  AClient.Heard := 0;
+  // A client host has no address of its own: one peer, one channel
+  AClient.Host := enet_host_create(nil, 1, 1, 0, 0);
+  if AClient.Host = nil then
+    raise("ENet could not create a client host");
+  end;
+  AClient.Peer := enet_host_connect(AClient.Host, AServerAddr, 1, 0);
+end;
+
+var
+  LAddr: ENetAddress;
+  LServer: ptr to ENetHost;
+  LRoom: ChatRoom;
+  LInRoom: int32;
+  LStart: uint32;
+  LI: int32;
+
+begin
+  if enet_initialize() <> 0 then
+    raise("ENet could not start");
+  end;
+
+  // The server listens on loopback; port 0 lets the system pick a free one
+  enet_address_set_host(address of LAddr, "127.0.0.1");
+  LAddr.port := ENET_PORT_ANY;
+  LServer := enet_host_create(address of LAddr, CClientCount, 1, 0, 0);
+  if LServer = nil then
+    enet_deinitialize();
+    raise("ENet could not create the server host");
+  end;
+  println("chat room open on 127.0.0.1:{}", LServer->address.port);
+
+  LInRoom := 0;
+  JoinRoom(LRoom[0], "Ada", address of LServer->address);
+  JoinRoom(LRoom[1], "Bob", address of LServer->address);
+  JoinRoom(LRoom[2], "Cy", address of LServer->address);
+  // A connection is made once BOTH sides saw its CONNECT event: a client
+  // can see its own before the server has serviced it, and a broadcast
+  // reaches only the peers the server has
+  LStart := enet_time_get();
+  while ((CountJoined(LRoom) < CClientCount) or (LInRoom < CClientCount)) and
+    (enet_time_get() - LStart < CDeadlineMs) do
+    ServeAll(LServer, LInRoom, LRoom);
+  end;
+
+  // Everyone says one line; the server relays each to the whole room
+  SendLine(LRoom[0].Host, LRoom[0].Peer, "Ada: hi all");
+  SendLine(LRoom[1].Host, LRoom[1].Peer, "Bob: hello Ada");
+  SendLine(LRoom[2].Host, LRoom[2].Peer, "Cy: hey, both of you");
+  LStart := enet_time_get();
+  while (CountHeardAll(LRoom) < CClientCount) and (enet_time_get() - LStart < CDeadlineMs) do
+    ServeAll(LServer, LInRoom, LRoom);
+  end;
+
+  // Everyone leaves cleanly: a DISCONNECT event on both sides
+  for LI := 0 to CClientCount - 1 do
+    enet_peer_disconnect(LRoom[LI].Peer, 0);
+  end;
+  LStart := enet_time_get();
+  while ((CountLeft(LRoom) < CClientCount) or (LInRoom > 0)) and
+    (enet_time_get() - LStart < CDeadlineMs) do
+    ServeAll(LServer, LInRoom, LRoom);
+  end;
+  println("room closed: {} joined, {} heard every line, {} left", CountJoined(LRoom),
+    CountHeardAll(LRoom), CountLeft(LRoom));
+
+  for LI := 0 to CClientCount - 1 do
+    enet_host_destroy(LRoom[LI].Host);
+  end;
+  enet_host_destroy(LServer);
+  enet_deinitialize();
+end.

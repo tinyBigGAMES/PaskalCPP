@@ -135,7 +135,7 @@ type
     procedure SetTableBoolean(const AKeyPath: string; const AIndex: Integer;
       const AField: string; const AValue: Boolean);
 
-    // Array of Tables — string array field access
+    // Array of Tables - string array field access
     function GetTableStringArray(const AKeyPath: string;
       const AIndex: Integer; const AField: string): TArray<string>;
     procedure SetTableStringArray(const AKeyPath: string;
@@ -975,7 +975,7 @@ begin
   end;
 end;
 
-// -- Array of Tables — string array field ------------------------------------
+// -- Array of Tables - string array field ------------------------------------
 
 function TConfig.GetTableStringArray(const AKeyPath: string;
   const AIndex: Integer; const AField: string): TArray<string>;

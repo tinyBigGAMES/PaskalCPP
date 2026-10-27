@@ -1,0 +1,149 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_mojoal_ext.pcpp - Std library compliance: the mojoal_ext unit
+  (res\libs\std\mojoal_ext.pcpp)
+
+  One sound, engine_player.ogg, loaded three ways on SDL's dummy audio
+  driver: LoadSound from the loose file under res\assets, LoadSoundZip from
+  its entry in bin\assets.zip (password PaskalCPP) and LoadSoundIO from a
+  CreateZipFileIO of the same entry. The zip and IO buffers equal the file's
+  (size, frequency, channels), mono and as the sound is; a mono load has
+  one channel. The IO stays the caller's (its IOClose succeeds after). The
+  refusals make no buffer (0): an entry the archive lacks, a wrong
+  password, an entry that is not Ogg Vorbis, and a load with no current
+  context. alGetError is clean after the good loads, and teardown in
+  reverse order closes the device.
+*******************************************************************************/
+
+module exe std_mojoal_ext;
+
+/*
+  @@test
+    kind run
+    expect
+    | file mono true channels 1
+    | zip mono equals file true
+    | io mono equals file true io closed true
+    | file as is true zip as is equals file true
+    | errors clean true
+    | missing entry 0
+    | wrong password 0
+    | not ogg 0
+    | no context 0
+    | closed true
+    | [Heap] Allocs: 16, Frees: 16, Leaked: 0
+  @@end
+*/
+
+import
+  mojoal,
+  mojoal_ext,
+  CustomIO;
+
+const
+  CArchive: string = "$P:../../assets.zip";
+  CPassword: string = "PaskalCPP";
+  CEntry: string = "res/assets/audio/sfx/engine_player.ogg";
+  CFile: string = "$P:../../res/assets/audio/sfx/engine_player.ogg";
+
+// True when the two buffers hold the same sound: size, frequency, channels
+routine SameBuffer(const A: ALuint; const B: ALuint): bool;
+var
+  LSizeA: ALint;
+  LSizeB: ALint;
+  LRateA: ALint;
+  LRateB: ALint;
+  LChannelsA: ALint;
+  LChannelsB: ALint;
+begin
+  if (A = 0) or (B = 0) then
+    return false;
+  end;
+  alGetBufferi(A, AL_SIZE, address of LSizeA);
+  alGetBufferi(B, AL_SIZE, address of LSizeB);
+  alGetBufferi(A, AL_FREQUENCY, address of LRateA);
+  alGetBufferi(B, AL_FREQUENCY, address of LRateB);
+  alGetBufferi(A, AL_CHANNELS, address of LChannelsA);
+  alGetBufferi(B, AL_CHANNELS, address of LChannelsB);
+  return (LSizeA > 0) and (LSizeA = LSizeB) and (LRateA = LRateB) and
+    (LChannelsA = LChannelsB);
+end;
+
+// Deletes a buffer a load made (0: none was made)
+routine Drop(const ABuffer: ALuint);
+var
+  LBuffer: ALuint;
+begin
+  LBuffer := ABuffer;
+  if LBuffer <> 0 then
+    alDeleteBuffers(1, address of LBuffer);
+  end;
+end;
+
+var
+  LDevice: ptr to ALCdevice;
+  LContext: ptr to ALCcontext;
+  LFileMono: ALuint;
+  LZipMono: ALuint;
+  LIOMono: ALuint;
+  LFileAsIs: ALuint;
+  LZipAsIs: ALuint;
+  LIO: IO;
+  LChannels: ALint;
+
+begin
+  // No sound hardware needed: SDL's dummy driver
+  SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+  LDevice := alcOpenDevice(nil);
+  LContext := alcCreateContext(LDevice, nil);
+  alcMakeContextCurrent(LContext);
+
+  // The loose file, mixed to mono
+  LFileMono := LoadSound(CFile, true);
+  alGetBufferi(LFileMono, AL_CHANNELS, address of LChannels);
+  println("file mono {} channels {}", LFileMono <> 0, LChannels);
+
+  // The same entry from the zip, and through an IO the caller keeps
+  LZipMono := LoadSoundZip(CArchive, CEntry, CPassword, true);
+  println("zip mono equals file {}", SameBuffer(LZipMono, LFileMono));
+  LIO := CreateZipFileIO(CArchive, CEntry, CPassword);
+  LIOMono := LoadSoundIO(LIO, true);
+  println("io mono equals file {} io closed {}", SameBuffer(LIOMono, LFileMono), IOClose(LIO));
+
+  // As the sound is: its own channels
+  LFileAsIs := LoadSound(CFile, false);
+  LZipAsIs := LoadSoundZip(CArchive, CEntry, CPassword, false);
+  println("file as is {} zip as is equals file {}", LFileAsIs <> 0, SameBuffer(LZipAsIs, LFileAsIs));
+  println("errors clean {}", alGetError() = AL_NO_ERROR);
+
+  // The refusals make no buffer
+  println("missing entry {}", LoadSoundZip(CArchive, "res/assets/audio/sfx/none.ogg", CPassword, true));
+  println("wrong password {}", LoadSoundZip(CArchive, CEntry, "wrong", true));
+  println("not ogg {}", LoadSoundZip(CArchive, "res/assets/images/paskalcpp.png", CPassword, true));
+  alcMakeContextCurrent(nil);
+  println("no context {}", LoadSound(CFile, true));
+
+  // Teardown in reverse order
+  alcMakeContextCurrent(LContext);
+  Drop(LFileMono);
+  Drop(LZipMono);
+  Drop(LIOMono);
+  Drop(LFileAsIs);
+  Drop(LZipAsIs);
+  alcMakeContextCurrent(nil);
+  alcDestroyContext(LContext);
+  println("closed {}", alcCloseDevice(LDevice) = ALC_TRUE);
+end.

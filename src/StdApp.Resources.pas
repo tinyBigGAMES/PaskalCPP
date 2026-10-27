@@ -2214,6 +2214,26 @@ resourcestring
   RSTstStoppedReason = 'stopped: its processes were ended by a second stop press';
   { RSTstStopFileFailed }
   RSTstStopFileFailed = 'The stop file %s cannot be used: %s (Ctrl+Shift+Alt+X still stops the run)';
+  { RSTstCtlAlreadyRunning }
+  RSTstCtlAlreadyRunning = 'A testbed is already running on %s (pid %d): one run per output folder (testbed -rpc status shows it)';
+  { RSTstCtlStartFailed }
+  RSTstCtlStartFailed = 'The control channel cannot be opened: %s (the run goes on without -rpc)';
+  { RSTstRpcNoRun }
+  RSTstRpcNoRun = 'No testbed is running on %s';
+  { RSTstRpcBadCommand }
+  RSTstRpcBadCommand = '-rpc does not take %s (status, failures, stop, abort, wait [seconds])';
+  { RSTstRpcTaken }
+  RSTstRpcTaken = '%s taken by the run (pid %d)';
+  { RSTstRpcNotTaken }
+  RSTstRpcNotTaken = '%s sent; the run has not taken it yet (it is taken once its cells run)';
+  { RSTstRpcLockFailed }
+  RSTstRpcLockFailed = 'The running testbed''s control block cannot be locked';
+  { RSTstRpcWaitTimeout }
+  RSTstRpcWaitTimeout = 'The run is still going after %d s';
+  { RSTstRpcRunDied }
+  RSTstRpcRunDied = 'The run (pid %d) ended without finishing';
+  { RSTstRpcDone }
+  RSTstRpcDone = 'The run finished: exit code %d';
   { RSTstNothingSelected }
   RSTstNothingSelected = 'No test matches the selection';
   { RSTstNoFailures }
@@ -2247,7 +2267,7 @@ resourcestring
   { RSTstHelpUsage }
   RSTstHelpUsage = 'USAGE: testbed <selection> [options]';
   { RSTstHelpAll }
-  RSTstHelpAll = '  -all                 every test';
+  RSTstHelpAll = '  -all                 every test in every cell (each target x every opt level), cell by cell: one target''s levels, then the next target';
   { RSTstHelpIds }
   RSTstHelpIds = '  <id> | <glob>        the tests whose id matches (mod.*, *.kinds)';
   { RSTstHelpList }
@@ -2271,7 +2291,11 @@ resourcestring
   { RSTstHelpStop }
   RSTstHelpStop = 'Stop a run: Ctrl+Shift+Alt+X (from any window) or make output\%s; the running test finishes and nothing more starts. Press again to end the running test now.';
   { RSTstHelpExit }
-  RSTstHelpExit = 'Exit code: 0 = every selected cell passed, 1 = a failure, 2 = bad arguments, 3 = stopped';
+  RSTstHelpExit = 'Exit code: 0 = every selected cell passed, 1 = a failure, 2 = bad arguments, 3 = stopped, 4 = no testbed running (-rpc), 5 = -rpc wait timed out';
+  { RSTstHelpRoot }
+  RSTstHelpRoot = '  -root <dir>          run the .pcpp tests under this folder instead of the installed tests and examples (repeatable)';
+  { RSTstHelpRpc }
+  RSTstHelpRpc = '  -rpc <command>       talk to the testbed running on this output folder: status (JSON), failures (JSON), stop (finish the running test, then end), abort (end the running test now), wait [seconds] (until the run ends; its exit code)';
 
 implementation
 

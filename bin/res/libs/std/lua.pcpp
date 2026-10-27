@@ -1,0 +1,77 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  lua.pcpp - the Lua unit: `import lua;` embeds Lua (a small, fast scripting
+  language) in a PaskalCPP program. A self-describing vendor module: it owns
+  every include path, library path and link library it needs, per official
+  target. The library is liblua.a (one per target: the Lua core and its
+  standard libraries), built by PaskalCPP-Libs' build-lua.cmd from the
+  official release, linked by @linklibrary: every module of the program
+  shares the one copy, and a program links only the libraries it imports.
+
+  The API is Lua's C API as it ships (https://www.lua.org/manual/5.5/), called
+  straight from PaskalCPP through lua.hpp: luaL_newstate gives a
+  `ptr to lua_State`, luaL_openlibs opens the standard libraries,
+  luaL_loadstring / luaL_loadfile compile a chunk and lua_pcall runs it
+  (LUA_OK, or an error code with the message on top of the stack), and
+  lua_close frees the state. Values cross through Lua's stack: lua_push* put
+  them on, lua_to* / luaL_check* read them, lua_getglobal / lua_setglobal
+  reach the globals, lua_getfield the fields of a table.
+
+  A PaskalCPP routine Lua can call is a `routine clink Name(AL: ptr to
+  lua_State): int32` (a C function, as lua_CFunction is): it reads its
+  arguments from the stack, pushes its results and returns how many it
+  pushed; lua_register(AL, "name", Name) makes it a global. Strings cross as
+  UTF-8 C strings: a PaskalCPP string's .c_str() goes in, lua_tostring gives
+  `ptr to const char`.
+
+  Lua's errors are C longjmp's (the library is compiled as C): lua_error,
+  luaL_error and a failing luaL_check* jump out of the routine that calls
+  them, past the C++ destructors of anything that routine or its callers
+  between there and the lua_pcall hold. A routine Lua calls therefore checks
+  its arguments before it makes any value that needs freeing (a string, an
+  array), and returns rather than raises once it holds one. Run chunks with
+  lua_pcall (or luaL_dostring), never lua_call, so an error comes back as a
+  code rather than ending the program.
+==============================================================================*/
+
+module unit lua;
+
+@addincludepath "$P:res/libs/vendor/lua/include";
+
+// Lua needs the C runtime: on Windows mingw's CRT (linked by default), on
+// Linux libc, libm (the math library) and libdl (require of C modules)
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/lua/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/lua/lib/x86_64-linux-gnu";
+  @linklibrary "m";
+  @linklibrary "dl";
+@else
+  @message error "lua: unsupported target";
+@endif
+
+@linklibrary "lua";
+
+// The header goes to this unit's header, so every importer sees Lua's API;
+// lua.hpp wraps Lua's C headers in extern "C"
+cpp header;
+
+#include <lua.hpp>
+
+end.

@@ -1,0 +1,463 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_raylib_ext_frame.pcpp - std compliance: raylib_ext's frame window
+
+  The rules, with no window: GetScaledFrameSize (base x DPI / 96, rounded;
+  120 DPI gives 562.5, rounded away from zero), GetLetterboxRect (a window
+  of the frame's aspect, a wider one: bars left and right, a taller one:
+  bars above and below, a resize, a size of 0: the whole window) and
+  GetFramePoint (a point through the letterbox in base units, clamped to
+  the frame in a bar and past the edge, an empty letterbox: 0, 0).
+
+  The window, hidden: InitFrameWindow opens at GetScaledFrameSize of its
+  own GetFrameDpi (any monitor), a second one is refused, a frame drawn
+  sets the camera's zoom to window units per base unit and keeps the mouse
+  in the frame. RestoreFrameClip: the window widened to twice the frame's
+  aspect (bars left and right), the clip turned off inside a frame and a
+  red fill drawn far past it, the screen read back: with RestoreFrameClip
+  the left bar keeps the bar colour, the centre is red; the control row
+  (no RestoreFrameClip) shows the same fill reaching the bar.
+  BeginFrameMode3D: the window made square (the 16:9 letterbox has bars
+  above and below, so the window's aspect and the base size's differ), a
+  9 x 9 cube seen orthographically 18 units high lands on its base rect
+  (base 115..205 x 45..135, the frame colour around it), the top bar keeps
+  the bar colour; the control row (raylib's BeginMode3D) draws it larger
+  (the window's aspect and height); after EndFrameMode3D a base-unit square
+  lands at the frame's origin and a fill far past the frame stops at the
+  letterbox (the camera and clip back); a perspective cube is centred. In a
+  plain window (no frame) BeginFrameMode3D gives raylib's pixels. Closed: after
+  CloseWindow GetFrameWidth / Height and the camera's zoom are 0, the frame
+  calls do nothing, a colour set before the close is kept, a new frame
+  window opens, and a plain raylib window opened right after a frame's
+  close (no frame call between) is not taken for the frame.
+
+  Negatives: a base size of 0 x 0 or a negative one is refused (false, no
+  window, GetFrameWidth 0) before any window exists.
+
+  Each row prints ok or FAIL with its name; the last is `done <failures>`.
+  raylib's own log is off (SetTraceLogLevel(LOG_NONE)).
+*******************************************************************************/
+
+module exe std_raylib_ext_frame;
+
+/*
+  @@test
+    kind run
+    expect
+    | ok scaled 96
+    | ok scaled 144
+    | ok scaled 120 rounded
+    | ok scaled 192
+    | ok letterbox same aspect
+    | ok letterbox wider window
+    | ok letterbox taller window
+    | ok letterbox resized
+    | ok letterbox zero window
+    | ok letterbox zero base
+    | ok point centre
+    | ok point left bar clamped
+    | ok point past edge clamped
+    | ok point empty letterbox
+    | ok refused 0 x 0
+    | ok refused negative
+    | ok no window after refusal
+    | ok frame window opens
+    | ok frame base size
+    | ok frame dpi scale
+    | ok window at scaled size
+    | ok second window refused
+    | ok frame camera zoom
+    | ok frame mouse in frame
+    | ok window widened
+    | ok unclipped fill reaches the bar
+    | ok restored clip keeps the bar
+    | ok window made square
+    | ok 3d ortho cube at its base rect
+    | ok 3d outside the cube is the frame
+    | ok 3d top bar kept
+    | ok after 3d the frame camera
+    | ok plain mode3d takes the window aspect
+    | ok after 3d the clip
+    | ok 3d perspective centred
+    | ok closed no frame
+    | ok closed frame calls do nothing
+    | ok closed colours kept
+    | ok reopened
+    | ok plain window after close no frame
+    | ok plain window 3d is raylib's
+    | done 0
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  raylib,
+  raylib_ext;
+
+var
+  GFails: int32;
+
+routine Check(const AName: string; const AOk: bool);
+begin
+  if AOk then
+    println("ok {}", AName);
+  else
+    println("FAIL {}", AName);
+    GFails := GFails + 1;
+  end;
+end;
+
+// Float results compared to a thousandth (they are whole or half units)
+routine Near(const AGot: float32; const AWant: float32): bool;
+begin
+  return (AGot - AWant < 0.001) and (AWant - AGot < 0.001);
+end;
+
+routine CheckSize(const AName: string; const AGot: ::Vector2; const AWidth: float32; const AHeight: float32);
+begin
+  Check(AName, Near(AGot.x, AWidth) and Near(AGot.y, AHeight));
+end;
+
+routine CheckRect(const AName: string; const AGot: Rectangle; const AX: float32; const AY: float32; const AWidth: float32; const AHeight: float32);
+begin
+  Check(AName, Near(AGot.x, AX) and Near(AGot.y, AY) and Near(AGot.width, AWidth) and Near(AGot.height, AHeight));
+end;
+
+routine TestRules();
+var
+  LBox: Rectangle;
+  LEmpty: Rectangle;
+  LPoint: ::Vector2;
+begin
+  CheckSize("scaled 96", GetScaledFrameSize(800, 450, 96), 800.0, 450.0);
+  CheckSize("scaled 144", GetScaledFrameSize(800, 450, 144), 1200.0, 675.0);
+  CheckSize("scaled 120 rounded", GetScaledFrameSize(800, 450, 120), 1000.0, 563.0);
+  CheckSize("scaled 192", GetScaledFrameSize(800, 450, 192), 1600.0, 900.0);
+
+  CheckRect("letterbox same aspect", GetLetterboxRect(1920, 1080, 800, 450), 0.0, 0.0, 1920.0, 1080.0);
+  CheckRect("letterbox wider window", GetLetterboxRect(1920, 1080, 800, 600), 240.0, 0.0, 1440.0, 1080.0);
+  CheckRect("letterbox taller window", GetLetterboxRect(800, 800, 800, 450), 0.0, 175.0, 800.0, 450.0);
+  CheckRect("letterbox resized", GetLetterboxRect(1000, 450, 800, 450), 100.0, 0.0, 800.0, 450.0);
+  CheckRect("letterbox zero window", GetLetterboxRect(0, 1080, 800, 450), 0.0, 0.0, 0.0, 1080.0);
+  CheckRect("letterbox zero base", GetLetterboxRect(640, 480, 0, 450), 0.0, 0.0, 640.0, 480.0);
+
+  LBox := GetLetterboxRect(1920, 1080, 800, 600);
+  LPoint.x := 960.0;
+  LPoint.y := 540.0;
+  CheckSize("point centre", GetFramePoint(LPoint, LBox, 800, 600), 400.0, 300.0);
+  LPoint.x := 100.0;
+  CheckSize("point left bar clamped", GetFramePoint(LPoint, LBox, 800, 600), 0.0, 300.0);
+  LPoint.x := 1900.0;
+  LPoint.y := 1100.0;
+  CheckSize("point past edge clamped", GetFramePoint(LPoint, LBox, 800, 600), 799.0, 599.0);
+  LEmpty.x := 0.0;
+  LEmpty.y := 0.0;
+  LEmpty.width := 0.0;
+  LEmpty.height := 0.0;
+  CheckSize("point empty letterbox", GetFramePoint(LPoint, LEmpty, 800, 600), 0.0, 0.0);
+end;
+
+routine TestRefused();
+begin
+  Check("refused 0 x 0", not InitFrameWindow(0, 0, "std_raylib_ext_frame"));
+  Check("refused negative", not InitFrameWindow(-5, 450, "std_raylib_ext_frame"));
+  Check("no window after refusal", (not IsWindowReady()) and (GetFrameWidth() = 0));
+end;
+
+// One frame with the clip turned off inside it (EndScissorMode), then back
+// on when ARestore (RestoreFrameClip), then a red fill far past the frame:
+// the screen read back before EndDrawing, the pixels at (AX, AY) and at the
+// window's centre given back
+routine ShotFill(const ARestore: bool; const AX: int32; const AY: int32; var AAt: Color; var ACentre: Color);
+var
+  LShot: Image;
+begin
+  BeginDrawing();
+  BeginFrame();
+  EndScissorMode();
+  if ARestore then
+    RestoreFrameClip();
+  end;
+  DrawRectangle(-1000, -1000, 5000, 5000, RED);
+  EndFrame();
+  LShot := LoadImageFromScreen();
+  AAt := GetImageColor(LShot, AX, AY);
+  ACentre := GetImageColor(LShot, LShot.width div 2, LShot.height div 2);
+  UnloadImage(LShot);
+  EndDrawing();
+end;
+
+routine SameColor(const AA: Color; const AB: Color): bool;
+begin
+  return (AA.r = AB.r) and (AA.g = AB.g) and (AA.b = AB.b);
+end;
+
+// RestoreFrameClip: in a window twice the frame's aspect (bars left and
+// right), a fill after it stays in the frame; without it (the control row)
+// the same fill reaches the bar, so the pixel read sees the difference
+routine TestRestoreClip();
+var
+  LWant: int32;
+  LTry: int32;
+  LBar: Color;
+  LCentre: Color;
+  LBarX: int32;
+begin
+  LWant := GetScreenWidth() * 2;
+  SetWindowSize(LWant, GetScreenHeight());
+  // The window system's resize is seen once events are polled
+  LTry := 0;
+  while (GetScreenWidth() <> LWant) and (LTry < 120) do
+    BeginDrawing();
+    EndDrawing();
+    LTry := LTry + 1;
+  end;
+  Check("window widened", GetScreenWidth() = LWant);
+  // Inside the left bar: a quarter of its width in
+  LBarX := int32(GetLetterboxRect(GetScreenWidth(), GetScreenHeight(), 320, 180).x) div 4;
+
+  ShotFill(false, LBarX, GetScreenHeight() div 2, LBar, LCentre);
+  Check("unclipped fill reaches the bar", SameColor(LBar, RED) and SameColor(LCentre, RED));
+  ShotFill(true, LBarX, GetScreenHeight() div 2, LBar, LCentre);
+  Check("restored clip keeps the bar", SameColor(LBar, GetFrameBarColor()) and SameColor(LCentre, RED));
+end;
+
+routine At(const AX: float32; const AY: float32; const AZ: float32): ::Vector3;
+var
+  LResult: ::Vector3;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  LResult.z := AZ;
+  return LResult;
+end;
+
+// Looking at the origin along -z: orthographic 18 units high (10 base
+// units each in the frame's 180), or perspective with a 45 degree fovy
+routine CubeCamera(const AOrtho: bool): Camera3D;
+var
+  LCamera: Camera3D;
+begin
+  LCamera.position := At(0.0, 0.0, 10.0);
+  LCamera.target := At(0.0, 0.0, 0.0);
+  LCamera.up := At(0.0, 1.0, 0.0);
+  if AOrtho then
+    LCamera.fovy := 18.0;
+    LCamera.projection := CAMERA_ORTHOGRAPHIC;
+  else
+    LCamera.fovy := 45.0;
+    LCamera.projection := CAMERA_PERSPECTIVE;
+  end;
+  return LCamera;
+end;
+
+// One frame: a red 9 x 9 cube at the origin through BeginFrameMode3D
+// (AFrameMode) or raylib's own BeginMode3D (the control), then a blue 8 x 8
+// square at the frame's origin or, with AFlood, a green fill far past the
+// frame; the screen read back before EndDrawing (the caller unloads it)
+routine CubeShot(const AFrameMode: bool; const AOrtho: bool; const AFlood: bool): Image;
+var
+  LShot: Image;
+begin
+  BeginDrawing();
+  BeginFrame();
+  if AFrameMode then
+    BeginFrameMode3D(CubeCamera(AOrtho));
+  else
+    BeginMode3D(CubeCamera(AOrtho));
+  end;
+  DrawCube(At(0.0, 0.0, 0.0), 9.0, 9.0, 1.0, RED);
+  if AFrameMode then
+    EndFrameMode3D();
+  else
+    EndMode3D();
+  end;
+  if AFlood then
+    DrawRectangle(-1000, -1000, 5000, 5000, GREEN);
+  else
+    DrawRectangle(0, 0, 8, 8, BLUE);
+  end;
+  EndFrame();
+  LShot := LoadImageFromScreen();
+  EndDrawing();
+  return LShot;
+end;
+
+// The pixel of AShot at the frame's base point (ABX, ABY), through the
+// camera the last BeginFrame set
+routine FramePixel(const AShot: Image; const ABX: float32; const ABY: float32): Color;
+var
+  LCamera: Camera2D;
+begin
+  LCamera := GetFrameCamera();
+  return GetImageColor(AShot, int32(LCamera.offset.x + ABX * LCamera.zoom), int32(LCamera.offset.y + ABY * LCamera.zoom));
+end;
+
+// The pixel of AShot halfway down the top bar, at the window's centre
+routine TopBarPixel(const AShot: Image): Color;
+begin
+  return GetImageColor(AShot, AShot.width div 2, int32(GetFrameCamera().offset.y) div 2);
+end;
+
+// BeginFrameMode3D in a square window (bars above and below the 16:9
+// letterbox): the scene takes the letterbox's pixels and the base size's
+// aspect; raylib's BeginMode3D (the control) takes the whole window's
+routine TestFrame3D();
+var
+  LSide: int32;
+  LTry: int32;
+  LShot: Image;
+begin
+  LSide := GetScreenHeight();
+  SetWindowSize(LSide, LSide);
+  // The window system's resize is seen once events are polled; on X11 the
+  // framebuffer's size (raylib's render size, the screenshot's) comes a poll
+  // after the window's, so both are waited for (no HIGHDPI: they are equal)
+  LTry := 0;
+  while ((GetScreenWidth() <> LSide) or (GetScreenHeight() <> LSide) or (GetRenderWidth() <> LSide) or
+    (GetRenderHeight() <> LSide)) and (LTry < 120) do
+    BeginDrawing();
+    EndDrawing();
+    LTry := LTry + 1;
+  end;
+  Check("window made square", (GetScreenWidth() = LSide) and (GetScreenHeight() = LSide) and
+    (GetRenderWidth() = LSide) and (GetRenderHeight() = LSide));
+
+  // 18 units over the base height of 180: the cube is base 115..205 x 45..135
+  LShot := CubeShot(true, true, false);
+  Check("3d ortho cube at its base rect", SameColor(FramePixel(LShot, 160.0, 90.0), RED) and
+    SameColor(FramePixel(LShot, 120.0, 50.0), RED) and SameColor(FramePixel(LShot, 200.0, 130.0), RED));
+  Check("3d outside the cube is the frame", SameColor(FramePixel(LShot, 100.0, 90.0), GetFrameColor()) and
+    SameColor(FramePixel(LShot, 160.0, 30.0), GetFrameColor()));
+  Check("3d top bar kept", SameColor(TopBarPixel(LShot), GetFrameBarColor()));
+  Check("after 3d the frame camera", SameColor(FramePixel(LShot, 4.0, 4.0), BLUE));
+  UnloadImage(LShot);
+
+  // raylib's BeginMode3D: 18 units over the whole window's height, so the
+  // cube is base 80..240 x 10..170, past the points the frame left clear
+  LShot := CubeShot(false, true, false);
+  Check("plain mode3d takes the window aspect", SameColor(FramePixel(LShot, 100.0, 90.0), RED) and
+    SameColor(FramePixel(LShot, 160.0, 30.0), RED));
+  UnloadImage(LShot);
+
+  LShot := CubeShot(true, true, true);
+  Check("after 3d the clip", SameColor(TopBarPixel(LShot), GetFrameBarColor()) and
+    SameColor(FramePixel(LShot, 4.0, 4.0), GREEN));
+  UnloadImage(LShot);
+
+  LShot := CubeShot(true, false, false);
+  Check("3d perspective centred", SameColor(FramePixel(LShot, 160.0, 90.0), RED) and
+    SameColor(TopBarPixel(LShot), GetFrameBarColor()));
+  UnloadImage(LShot);
+end;
+
+// In a plain window (no frame) BeginFrameMode3D is raylib's BeginMode3D:
+// the same pixels at a few points of the cube's edge and around it
+routine SamePlain3D(): bool;
+var
+  LFrame: Image;
+  LPlain: Image;
+  LSame: bool;
+begin
+  LFrame := CubeShot(true, true, false);
+  LPlain := CubeShot(false, true, false);
+  LSame := SameColor(GetImageColor(LFrame, 80, 45), GetImageColor(LPlain, 80, 45)) and
+    SameColor(GetImageColor(LFrame, 20, 45), GetImageColor(LPlain, 20, 45)) and
+    SameColor(GetImageColor(LFrame, 80, 10), GetImageColor(LPlain, 80, 10)) and
+    SameColor(GetImageColor(LFrame, 80, 45), RED);
+  UnloadImage(LFrame);
+  UnloadImage(LPlain);
+  return LSame;
+end;
+
+routine TestWindow();
+var
+  LSize: ::Vector2;
+  LMouse: ::Vector2;
+  LCamera: Camera2D;
+begin
+  SetConfigFlags(FLAG_WINDOW_HIDDEN);
+  Check("frame window opens", InitFrameWindow(320, 180, "std_raylib_ext_frame"));
+  if not IsWindowReady() then
+    return;
+  end;
+  Check("frame base size", (GetFrameWidth() = 320) and (GetFrameHeight() = 180));
+  Check("frame dpi scale", Near(GetFrameScale(), float32(float32(GetFrameDpi()) / 96.0)));
+
+  // One frame first: the window system's resize is seen once events are
+  // polled (EndDrawing), on X11 later than the call
+  BeginDrawing();
+  BeginFrame();
+  DrawRectangle(10, 10, 20, 20, RED);
+  EndFrame();
+  EndDrawing();
+  LSize := GetScaledFrameSize(320, 180, GetFrameDpi());
+  Check("window at scaled size", (float32(GetScreenWidth()) = LSize.x) and (float32(GetScreenHeight()) = LSize.y));
+  Check("second window refused", not InitFrameWindow(320, 180, "std_raylib_ext_frame"));
+
+  // A frame at the window's settled size: its camera and mouse
+  BeginDrawing();
+  BeginFrame();
+  EndFrame();
+  EndDrawing();
+  LCamera := GetFrameCamera();
+  Check("frame camera zoom", Near(LCamera.zoom, float32(GetLetterboxRect(GetScreenWidth(), GetScreenHeight(), 320, 180).width / 320.0)));
+  LMouse := GetFrameMousePosition();
+  Check("frame mouse in frame", (LMouse.x >= 0.0) and (LMouse.x <= 319.0) and (LMouse.y >= 0.0) and (LMouse.y <= 179.0));
+  TestRestoreClip();
+  TestFrame3D();
+  // A setting of the program's, kept over the close (TestClosed)
+  SetFrameBarColor(DARKBLUE);
+  CloseWindow();
+end;
+
+// After CloseWindow the frame is closed too: no base size, the frame calls
+// do nothing, the colours kept; a new frame window opens again
+routine TestClosed();
+begin
+  Check("closed no frame", (GetFrameWidth() = 0) and (GetFrameHeight() = 0) and (GetFrameCamera().zoom = 0.0));
+  BeginFrame();
+  EndFrame();
+  RestoreFrameClip();
+  ToggleFrameFullscreen();
+  Check("closed frame calls do nothing", not IsWindowReady());
+  Check("closed colours kept", SameColor(GetFrameBarColor(), DARKBLUE));
+  SetConfigFlags(FLAG_WINDOW_HIDDEN);
+  Check("reopened", InitFrameWindow(200, 100, "std_raylib_ext_frame") and (GetFrameWidth() = 200) and
+    (GetFrameHeight() = 100));
+  if IsWindowReady() then
+    CloseWindow();
+  end;
+  // A plain raylib window right after the frame's close, no frame call
+  // between: never taken for the frame
+  SetConfigFlags(FLAG_WINDOW_HIDDEN);
+  InitWindow(160, 90, "std_raylib_ext_frame");
+  Check("plain window after close no frame", IsWindowReady() and (GetFrameWidth() = 0));
+  if IsWindowReady() then
+    Check("plain window 3d is raylib's", SamePlain3D());
+    CloseWindow();
+  end;
+end;
+
+begin
+  GFails := 0;
+  SetTraceLogLevel(LOG_NONE);
+  TestRules();
+  TestRefused();
+  TestWindow();
+  TestClosed();
+  println("done {}", GFails);
+end.

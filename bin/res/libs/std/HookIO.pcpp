@@ -37,17 +37,30 @@
                       that IO and closes it.
 
   Any other path goes to the C runtime untouched, except while a path source
-  is set (SetIOPathSource): a plain path that source holds opens and answers
-  as its entry, any other still goes to the C runtime. `io://` is matched
-  exactly (lowercase); `<n>` is the decimal number RegisterIO /
-  RegisterIOSource gave, without leading zeros. A leading `./` (on Windows
-  `.\` too), once or more, before `io://` names the same path: a C library
-  that joins a folder and a name writes a folder with no root that way
-  (raylib does for a model's textures).
+  is set (SetIOPathSource for the program, SetIOThreadPathSource for one
+  thread, which takes the program's place on that thread): a plain path that
+  source holds opens and answers as its entry, any other still goes to the
+  C runtime. `io://` is matched exactly (lowercase); `<n>` is the decimal
+  number RegisterIO / RegisterIOSource gave, without leading zeros. A
+  leading `./` (on Windows `.\` too), once or more, before `io://` names the
+  same path: a C library that joins a folder and a name writes a folder with
+  no root that way (raylib does for a model's textures).
 
   A handle is HookIO's own object, never a C runtime FILE: it is valid only
-  with the names HookIO hooks. Those are the open family (Windows fopen,
-  fopen_s, _wfopen; Linux fopen, fopen64), fclose, and the stream family:
+  with the names HookIO hooks. On Linux it begins as glibc's FILE does (its
+  flags and empty buffer areas), so glibc's inline getc_unlocked /
+  putc_unlocked / feof_unlocked / ferror_unlocked, which read those fields
+  straight, fall through to the hooked __uflow / __overflow and see the
+  handle's end and error state. freopen (Linux also freopen64) reopens a
+  handle in place, on a virtual path or a disk file (the handle then holds
+  the disk file through CustomIO's file IOs, every fopen mode). A real FILE
+  reopened onto a virtual path is the C runtime's and fails as it does
+  (ENOENT): the CRT owns that object. The names HookIO hooks are the open
+  family (Windows fopen, fopen_s, _wfopen; Linux fopen, fopen64), freopen,
+  fclose, the
+  lock-free forms (glibc's *_unlocked, ucrt's *_nolock), the stream lock
+  calls (Linux flockfile, funlockfile, ftrylockfile; Windows _lock_file,
+  _unlock_file: nothing on a handle) and the stream family:
   fread, fwrite, fseek, ftell, fseeko64, ftello64, rewind, feof, ferror,
   clearerr, fflush, fgetc, getc, fgets, fputc, putc, fputs, fputws, fputwc,
   putwc, ungetc, setbuf, setvbuf, fileno, fprintf; Windows also _fileno,
@@ -251,6 +264,7 @@ cpp source;
 #include <cerrno>
 #include <climits>
 #include <cstdarg>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -517,10 +531,45 @@ struct HookIODoCrtModel
   bool WideSaveInBackup = true;
   std::shared_ptr<HookIODoCrtConverter> Converter;
 };
+
+// The head of glibc's FILE (bits/types/struct_FILE.h): _flags and the six
+// area pointers, laid out as struct _IO_FILE begins. A Linux handle is known
+// by this head's address (HookIODoFileOf): glibc's inline getc_unlocked /
+// putc_unlocked / feof_unlocked / ferror_unlocked (bits/stdio.h, built in
+// wherever C is optimized: lua's file loader) read these fields straight,
+// with no call HookIO could hook. The areas stay empty (every pointer
+// nullptr), so each inline read finds its get area used up and calls
+// __uflow, and each inline write calls __overflow, both hooked. Flags holds
+// only _IO_EOF_SEEN / _IO_ERR_SEEN, mirrored from AtEnd / Failed whenever a
+// call on the handle ends (HookIODoMirrorFlags). glibc's own functions never
+// see the head: every name that takes a FILE* is hooked.
+struct HookIODoGlibcHead
+{
+  int Flags = 0;
+  char* ReadPtr = nullptr;
+  char* ReadEnd = nullptr;
+  char* ReadBase = nullptr;
+  char* WriteBase = nullptr;
+  char* WritePtr = nullptr;
+  char* WriteEnd = nullptr;
+};
+
+// The fields the inline forms read sit where glibc's FILE has them
+static_assert(offsetof(HookIODoGlibcHead, Flags) == offsetof(FILE, _flags));
+static_assert(offsetof(HookIODoGlibcHead, ReadPtr) == offsetof(FILE, _IO_read_ptr));
+static_assert(offsetof(HookIODoGlibcHead, ReadEnd) == offsetof(FILE, _IO_read_end));
+static_assert(offsetof(HookIODoGlibcHead, ReadBase) == offsetof(FILE, _IO_read_base));
+static_assert(offsetof(HookIODoGlibcHead, WriteBase) == offsetof(FILE, _IO_write_base));
+static_assert(offsetof(HookIODoGlibcHead, WritePtr) == offsetof(FILE, _IO_write_ptr));
+static_assert(offsetof(HookIODoGlibcHead, WriteEnd) == offsetof(FILE, _IO_write_end));
 #endif
 
 struct HookIODoHandle
 {
+#if !defined(_WIN32)
+  // What a caller holds as the handle's FILE* (HookIODoGlibcHead above)
+  HookIODoGlibcHead GlibcHead;
+#endif
   HookIODoIO Stream = nullptr;
   bool Owned = false;
   std::int64_t Position = 0;
@@ -551,8 +600,44 @@ struct HookIODoHandle
   HookIODoSource Source = nullptr;
   std::string EntryName;
   bool Temporary = false;
+  // A folder IOSource the handle made for itself (a freopen onto a real
+  // path, HookIODoReopen): closed once the handle's entry use is given back
+  HookIODoSource OwnedSource = nullptr;
+  // The path the handle was opened by, as the caller gave it: glibc's
+  // freopen with no path reopens that file in the new mode
+  std::string OpenedPath;
   HookIODoCrtModel Crt;
 };
+
+// The FILE* a handle is known by: its glibc head on Linux (HookIODoGlibcHead),
+// the object itself on Windows, where ucrt's FILE is opaque (no inline form
+// reads into it)
+std::FILE* HookIODoFileOf(HookIODoHandle& AHandle)
+{
+#if defined(_WIN32)
+  return reinterpret_cast<std::FILE*>(&AHandle);
+#else
+  return reinterpret_cast<std::FILE*>(&AHandle.GlibcHead);
+#endif
+}
+
+// The head's _IO_EOF_SEEN / _IO_ERR_SEEN set as AHandle's AtEnd / Failed
+// stand, so glibc's inline feof_unlocked / ferror_unlocked read what feof /
+// ferror answer. Nothing to mirror on Windows.
+void HookIODoMirrorFlags(HookIODoHandle& AHandle)
+{
+#if defined(_WIN32)
+  (void)AHandle;
+#else
+  int LFlags = 0;
+
+  if (AHandle.AtEnd)
+    LFlags |= _IO_EOF_SEEN;
+  if (AHandle.Failed)
+    LFlags |= _IO_ERR_SEEN;
+  AHandle.GlibcHead.Flags = LFlags;
+#endif
+}
 
 using HookIODoHandleRef = std::shared_ptr<HookIODoHandle>;
 
@@ -1122,6 +1207,21 @@ bool HookIODoFind(const std::uint64_t AId, HookIODoEntry& AEntry)
 // Constant-initialized: valid before any constructor runs.
 std::atomic<std::uint64_t> HookIODoPathSourceId{0};
 
+// The prefix number of this thread's own path source (SetIOThreadPathSource;
+// 0: none). While it is set, this thread's plain paths are looked up in it
+// instead of HookIODoPathSourceId's source; other threads never see it.
+// Trivially destructible: registers no thread exit work.
+thread_local std::uint64_t HookIODoThreadPathSourceId = 0;
+
+// The prefix number a plain path on this thread is looked up in: the
+// thread's own path source when one is set, else the program's (0: none)
+std::uint64_t HookIODoActivePathSourceId()
+{
+  if (HookIODoThreadPathSourceId != 0)
+    return HookIODoThreadPathSourceId;
+  return HookIODoPathSourceId.load();
+}
+
 // How deep this thread is inside HookIO's own path work (a hooked open or
 // query, the path source lookup). While it is above 0 a plain path is never
 // looked up in the path source: the source's own opens (a folder source
@@ -1147,12 +1247,12 @@ struct HookIODoPathGuard
   HookIODoPathGuard& operator=(const HookIODoPathGuard&) = delete;
 };
 
-// True when a plain path may be looked up in the path source: one is set and
-// this thread is inside neither HookIO's own path work nor CustomIO's real
-// file system work
+// True when a plain path may be looked up in the path source: one is set
+// (this thread's own or the program's) and this thread is inside neither
+// HookIO's own path work nor CustomIO's real file system work
 bool HookIODoPathSourceActive()
 {
-  return (HookIODoPathDepth == 0) && (HookIODoPathSourceId.load() != 0) &&
+  return (HookIODoPathDepth == 0) && (HookIODoActivePathSourceId() != 0) &&
     (!::pcpp_customio_internal::InFileSystemWork());
 }
 
@@ -1204,7 +1304,8 @@ const char* HookIODoSkipCurrentFolder(const char* APath)
 }
 
 // As HookIODoParse (after HookIODoSkipCurrentFolder), and a plain path the
-// path source holds: then AId is the path source's prefix number and ARest
+// path source holds (this thread's own when set, else the program's): then
+// AId is that path source's prefix number and ARest
 // "/<entry>" (kept in AStorage). A plain path the source lacks (or any path
 // while no source is set, inside HookIO's own path work, or out of memory)
 // is false: the C runtime gets it.
@@ -1219,7 +1320,7 @@ bool HookIODoResolve(const char* APath, std::uint64_t& AId, const char*& ARest,
     return true;
   if ((APath == nullptr) || (*APath == '\0') || (!HookIODoPathSourceActive()))
     return false;
-  LSourceId = HookIODoPathSourceId.load();
+  LSourceId = HookIODoActivePathSourceId();
   if ((LSourceId == 0) || (!HookIODoFind(LSourceId, LEntry)) || (LEntry.Source == nullptr))
     return false;
   try
@@ -1253,7 +1354,7 @@ bool HookIODoAddHandle(const HookIODoHandleRef& AHandle)
   try
   {
     std::lock_guard<std::mutex> LGuard(HookIODoLock());
-    HookIODoHandles().emplace(AHandle.get(), AHandle);
+    HookIODoHandles().emplace(HookIODoFileOf(*AHandle), AHandle);
     HookIODoOpenCount.fetch_add(1);
     HookIODoArmExitFlush();
     return true;
@@ -1623,6 +1724,26 @@ bool HookIODoOpenEntry(const HookIODoSource ASource, const char* ARest,
 #endif
 }
 
+// Closes the folder source a handle made for itself (HookIODoReopen), once
+// its entry use is given back. False when closing the source failed.
+bool HookIODoCloseOwnedSource(HookIODoHandle& AHandle)
+{
+  bool LOk = true;
+
+  if (AHandle.OwnedSource == nullptr)
+    return true;
+  try
+  {
+    LOk = ::pcpp_m_CustomIO::IOSourceClose(AHandle.OwnedSource);
+  }
+  catch (...)
+  {
+    LOk = false;
+  }
+  AHandle.OwnedSource = nullptr;
+  return LOk;
+}
+
 // Undoes an open that succeeded but cannot be handed out: closes the
 // handle's own IO and gives its entry use back (a D entry goes, as the OS
 // deletes the file when the failed open's handle closes). errno is kept.
@@ -1634,6 +1755,7 @@ void HookIODoAbandon(HookIODoHandle& AHandle)
     ::pcpp_m_CustomIO::IOClose(AHandle.Stream);
   AHandle.Stream = nullptr;
   HookIODoGiveBackEntry(AHandle, true);
+  HookIODoCloseOwnedSource(AHandle);
   errno = LError;
 }
 
@@ -1647,52 +1769,76 @@ bool HookIODoConfigureTextMode(HookIODoHandle& AHandle, const HookIODoOpenMode& 
 bool HookIODoNamedWide(HookIODoHandle& AHandle, const std::string& ACharset);
 #endif
 
+// The open once a path has named its target. AEntry: the registered IO or
+// IOSource the path names (nullptr: nothing is registered under it, ENOENT
+// once the mode is read); ARest: the entry's name in an IOSource; APath: the
+// path as the caller gave it (kept for glibc's freopen with no path);
+// ACallerErrno: errno as the caller left it. AResult: the new handle, or
+// nullptr with errno set (see the unit header). HookIODoOpen calls it for a
+// virtual path, HookIODoReopen for a real one (a folder source's entry).
+void HookIODoOpenOn(const HookIODoEntry* AEntry, const char* ARest, const char* APath,
+  const char* AMode, const int ACallerErrno, std::FILE*& AResult);
+
 bool HookIODoOpen(const char* APath, const char* AMode, std::FILE*& AResult)
 {
   std::uint64_t LId;
   const char* LRest;
-  HookIODoOpenMode LParsed;
-  HookIODoMode LMode;
   HookIODoEntry LEntry;
-  HookIODoHandleRef LHandle;
-  bool LOpened;
-  bool LText;
-  bool LExists;
   std::string LMapped;
+  bool LFound;
   // errno as the caller left it: a successful open leaves it so (neither
   // CRT clears or sets it on success), except where a CRT's own open sets
   // it on the way (ucrt's Ctrl-Z step, below); what the source's work set
   // (a missing entry's ENOENT before it is created) never leaks out
   const int LCallerErrno = errno;
-  int LOpenErrno = LCallerErrno;
 
   AResult = nullptr;
   if (!HookIODoResolve(APath, LId, LRest, LMapped))
     return false;
   // The open's own work (the source's real files) never maps a plain path
   HookIODoPathGuard LPathGuard;
+  LFound = (LId != 0) && HookIODoFind(LId, LEntry);
+  errno = LCallerErrno;
+  // LRest points into LMapped or APath: both live until the open returns
+  HookIODoOpenOn(LFound ? &LEntry : nullptr, LRest, APath, AMode, LCallerErrno, AResult);
+  return true;
+}
+
+void HookIODoOpenOn(const HookIODoEntry* AEntry, const char* ARest, const char* APath,
+  const char* AMode, const int ACallerErrno, std::FILE*& AResult)
+{
+  HookIODoOpenMode LParsed;
+  HookIODoMode LMode;
+  HookIODoHandleRef LHandle;
+  bool LOpened;
+  bool LText;
+  bool LExists;
+  const int LCallerErrno = ACallerErrno;
+  int LOpenErrno = LCallerErrno;
+
+  AResult = nullptr;
   // Both CRTs read the mode before they touch the file
   if ((!HookIODoParseMode(AMode, LParsed)) || HookIODoModeNotBuilt(LParsed))
   {
     errno = EINVAL;
-    return true;
+    return;
   }
   LMode = LParsed.Mode;
   LText = LParsed.Text;
-  if ((LId == 0) || (!HookIODoFind(LId, LEntry)))
+  if (AEntry == nullptr)
   {
     errno = ENOENT;
-    return true;
+    return;
   }
   // x: the creating open fails when its target exists
   if (HookIODoExclusive(LParsed))
   {
-    if (!HookIODoExists(LEntry, LRest, LExists))
-      return true;
+    if (!HookIODoExists(*AEntry, ARest, LExists))
+      return;
     if (LExists)
     {
       errno = EEXIST;
-      return true;
+      return;
     }
   }
   try
@@ -1702,11 +1848,20 @@ bool HookIODoOpen(const char* APath, const char* AMode, std::FILE*& AResult)
   catch (...)
   {
     errno = ENOMEM;
-    return true;
+    return;
   }
   LHandle->Mode = LMode;
   LHandle->Appending = LParsed.First == 'a';
   LHandle->Text = LText;
+  try
+  {
+    LHandle->OpenedPath = APath;
+  }
+  catch (...)
+  {
+    errno = ENOMEM;
+    return;
+  }
 #if defined(_WIN32)
   // ucrt's open: 'r' sets _IOREAD, 'w' / 'a' _IOWRITE, '+' _IOUPDATE and
   // neither of the other two
@@ -1715,26 +1870,26 @@ bool HookIODoOpen(const char* APath, const char* AMode, std::FILE*& AResult)
   LHandle->Crt.StreamWrite = (LMode == HookIODoMode::Write) || (LMode == HookIODoMode::Append);
 #endif
   // errno is set by the open that fails
-  if (LEntry.Stream != nullptr)
-    LOpened = HookIODoOpenShared(LEntry, LParsed, *LHandle);
+  if (AEntry->Stream != nullptr)
+    LOpened = HookIODoOpenShared(*AEntry, LParsed, *LHandle);
   else
-    LOpened = HookIODoOpenEntry(LEntry.Source, LRest, LParsed, *LHandle);
+    LOpened = HookIODoOpenEntry(AEntry->Source, ARest, LParsed, *LHandle);
   if (!LOpened)
-    return true;
+    return;
   errno = LCallerErrno;
 #if defined(_WIN32)
   // A text open for reading and writing drops a trailing Ctrl-Z, as ucrt's
   if (LText && (LMode == HookIODoMode::ReadWrite) && (!HookIODoDropCtrlZ(*LHandle)))
   {
     HookIODoAbandon(*LHandle);
-    return true;
+    return;
   }
   LOpenErrno = errno;
   // Then the text mode a ccs= open asks for (its BOM read or written)
   if (!HookIODoConfigureTextMode(*LHandle, LParsed))
   {
     HookIODoAbandon(*LHandle);
-    return true;
+    return;
   }
 #else
   // ",ccs=NAME": the stream is wide from its open, converting through the
@@ -1743,18 +1898,17 @@ bool HookIODoOpen(const char* APath, const char* AMode, std::FILE*& AResult)
   {
     HookIODoAbandon(*LHandle);
     errno = EINVAL;
-    return true;
+    return;
   }
 #endif
   if (!HookIODoAddHandle(LHandle))
   {
     errno = ENOMEM;
     HookIODoAbandon(*LHandle);
-    return true;
+    return;
   }
   errno = LOpenErrno;
-  AResult = reinterpret_cast<std::FILE*>(LHandle.get());
-  return true;
+  AResult = HookIODoFileOf(*LHandle);
 }
 
 // The CRT flushes fclose runs, defined with each CRT's FILE model below
@@ -1764,6 +1918,11 @@ int HookIODoCrtFlushLocked(HookIODoHandle& AHandle);
 int HookIODoCrtDoFlushLocked(HookIODoHandle& AHandle);
 #endif
 
+// What fclose does to a handle once it is out of the open list: the CRT's
+// flush of written bytes, its own IO closed, its entry use given back. False
+// when the flush or closing the IO failed (the handle still closes).
+bool HookIODoShutHandle(const HookIODoHandleRef& AHandle);
+
 // A hooked fclose. False: not a HookIO handle, the caller passes it to the C
 // runtime. True: closed; AResult 0, or EOF when the CRT's flush of written
 // bytes or closing its own IO failed.
@@ -1771,7 +1930,6 @@ int HookIODoCrtDoFlushLocked(HookIODoHandle& AHandle);
 bool HookIODoClose(std::FILE* AFile, int& AResult)
 {
   HookIODoHandleRef LHandle;
-  bool LOk = true;
 
   AResult = 0;
   if ((AFile == nullptr) || (HookIODoOpenCount.load() == 0))
@@ -1790,6 +1948,16 @@ bool HookIODoClose(std::FILE* AFile, int& AResult)
   {
     return false;
   }
+  if (!HookIODoShutHandle(LHandle))
+    AResult = EOF;
+  return true;
+}
+
+bool HookIODoShutHandle(const HookIODoHandleRef& AHandle)
+{
+  const HookIODoHandleRef LHandle = AHandle;
+  bool LOk = true;
+
   try
   {
     std::lock_guard<std::mutex> LGuard(*LHandle->StreamLock);
@@ -1820,8 +1988,191 @@ bool HookIODoClose(std::FILE* AFile, int& AResult)
   // The entry use goes back once the IO is closed: a D entry's last handle
   // removes it, as the OS deletes the file at the last close
   HookIODoGiveBackEntry(*LHandle, true);
-  if (!LOk)
-    AResult = EOF;
+  if (!HookIODoCloseOwnedSource(*LHandle))
+    LOk = false;
+  return LOk;
+}
+
+// Takes AFile out of the open list (freopen's failure leaves the stream
+// closed); the handle object lives on while a call still holds it
+void HookIODoForgetHandle(std::FILE* AFile)
+{
+  try
+  {
+    std::lock_guard<std::mutex> LGuard(HookIODoLock());
+    const auto LFound = HookIODoHandles().find(AFile);
+    if (LFound == HookIODoHandles().end())
+      return;
+    HookIODoHandles().erase(LFound);
+    HookIODoOpenCount.fetch_sub(1);
+  }
+  catch (...)
+  {
+    // erase and find do not allocate: nothing to report
+  }
+}
+
+// A freopen onto a path that is not a virtual one: the file opens as an
+// entry of a folder IOSource over its folder (CustomIO's file IOs take every
+// fopen mode; create / truncate / append / x and the CRT model are a virtual
+// open's, HookIODoOpenOn), and the source is handed back for the handle to
+// own (HookIODoCloseOwnedSource). AResult: the new handle, or nullptr with
+// errno set (ENOENT when the folder does not exist); ASource nullptr then.
+void HookIODoOpenReal(const std::string& APath, const char* AMode, const int ACallerErrno,
+  std::FILE*& AResult, HookIODoSource& ASource)
+{
+  std::string LFolder;
+  std::string LName;
+  std::size_t LCut;
+  HookIODoEntry LEntry;
+  int LError;
+
+  AResult = nullptr;
+  ASource = nullptr;
+  // The source's own file opens never map a plain path
+  HookIODoPathGuard LPathGuard;
+  try
+  {
+#if defined(_WIN32)
+    LCut = APath.find_last_of("/\\");
+#else
+    LCut = APath.find_last_of('/');
+#endif
+    if (LCut == std::string::npos)
+    {
+      // A bare name is the current folder's, as fopen's
+      LFolder = ".";
+      LName = APath;
+    }
+    else
+    {
+      // "/name" keeps the root as its folder (and "C:\name" its drive root)
+      LFolder = APath.substr(0, LCut);
+      if (LFolder.empty() || (LFolder.back() == ':'))
+        LFolder.push_back(APath[LCut]);
+      LName = APath.substr(LCut + 1);
+    }
+    ASource = ::pcpp_m_CustomIO::CreateFolderIOSource(LFolder);
+  }
+  catch (...)
+  {
+    errno = ENOMEM;
+    return;
+  }
+  if (ASource == nullptr)
+  {
+    errno = ENOENT;
+    return;
+  }
+  LEntry.Source = ASource;
+  errno = ACallerErrno;
+  HookIODoOpenOn(&LEntry, LName.c_str(), APath.c_str(), AMode, ACallerErrno, AResult);
+  if (AResult != nullptr)
+    return;
+  // The open failed: its errno stands, the source goes
+  LError = errno;
+  try
+  {
+    ::pcpp_m_CustomIO::IOSourceClose(ASource);
+  }
+  catch (...)
+  {
+    // Closing a folder source frees its record only: nothing to report
+  }
+  ASource = nullptr;
+  errno = LError;
+}
+
+// A hooked freopen. False: AFile is not a HookIO handle (a real FILE, or
+// nil): the caller passes the call to the C runtime, whatever the path.
+// True: answered; AResult is AFile, reopened in place, or nullptr (errno
+// set) when the reopen failed.
+// C's order: the old stream is closed first (its flush or close failing is
+// ignored), then APath opened in AMode, and the stream keeps its address:
+// the new handle's state moves into the object AFile names and the new
+// handle's own entry is dropped. A path that is not a virtual one opens as
+// an entry of a folder source over its folder (HookIODoOpenReal; a real
+// FILE is the C runtime's object, so the stream stays a HookIO handle over
+// the disk file, which owns that source). No path: ucrt refuses
+// it before touching the stream (EINVAL, the stream stays open); glibc
+// reopens the file the stream was opened by.
+bool HookIODoReopen(const char* APath, const char* AMode, std::FILE* AFile, std::FILE*& AResult)
+{
+  const HookIODoHandleRef LOld = HookIODoFindHandle(AFile);
+  HookIODoHandleRef LNew;
+  std::string LPath;
+  std::FILE* LNewFile = nullptr;
+  HookIODoSource LSource = nullptr;
+  const int LCallerErrno = errno;
+
+  AResult = nullptr;
+  if (!LOld)
+    return false;
+  try
+  {
+    if (APath != nullptr)
+      LPath = APath;
+    else
+    {
+#if defined(_WIN32)
+      errno = EINVAL;
+      return true;
+#else
+      std::lock_guard<std::mutex> LGuard(*LOld->StreamLock);
+      LPath = LOld->OpenedPath;
+#endif
+    }
+  }
+  catch (...)
+  {
+    errno = ENOMEM;
+    return true;
+  }
+  // Closed first; the open list keeps AFile so the address stays ours
+  HookIODoShutHandle(LOld);
+  if (!HookIODoOpen(LPath.c_str(), AMode, LNewFile))
+  {
+    // A real path: the disk file opens as a folder source's entry, the
+    // source the handle's own from here on
+    errno = LCallerErrno;
+    HookIODoOpenReal(LPath, AMode, LCallerErrno, LNewFile, LSource);
+  }
+  if (LNewFile == nullptr)
+  {
+    // The open failed (errno is its own): the stream stays closed
+    HookIODoForgetHandle(AFile);
+    return true;
+  }
+  try
+  {
+    std::lock_guard<std::mutex> LGuard(HookIODoLock());
+    const auto LFound = HookIODoHandles().find(LNewFile);
+    if (LFound != HookIODoHandles().end())
+    {
+      LNew = LFound->second;
+      HookIODoHandles().erase(LFound);
+      HookIODoOpenCount.fetch_sub(1);
+    }
+  }
+  catch (...)
+  {
+    // find and erase do not allocate: LNew stays empty
+  }
+  if (!LNew)
+  {
+    HookIODoForgetHandle(AFile);
+    if (LSource != nullptr)
+      ::pcpp_m_CustomIO::IOSourceClose(LSource);
+    errno = EBADF;
+    return true;
+  }
+  // The new state at the old address; the moved-from handle is only dropped
+  // (it owns nothing now: no close of its own). A real path's folder source
+  // is the stream's from here (closed with it, HookIODoShutHandle)
+  *LOld = std::move(*LNew);
+  LOld->OwnedSource = LSource;
+  HookIODoMirrorFlags(*LOld);
+  AResult = AFile;
   return true;
 }
 
@@ -6240,7 +6591,9 @@ int HookIODoSeekLocked(HookIODoHandle& AHandle, const std::int64_t AOffset, cons
 // Runs AWork(handle) under AFile's stream lock. False: AFile is not a HookIO
 // handle. A handle closed by a call that raced this one fails with EBADF
 // (AWork does not run); out of memory inside AWork is ENOMEM. The caller
-// sets its result to the failure value before the call.
+// sets its result to the failure value before the call. Every call that
+// can move the handle's end / error state runs here, so the glibc head's
+// flags are mirrored here once AWork is done (still under the lock).
 template <typename TWork>
 bool HookIODoWith(std::FILE* AFile, TWork&& AWork)
 {
@@ -6256,7 +6609,16 @@ bool HookIODoWith(std::FILE* AFile, TWork&& AWork)
       errno = EBADF;
       return true;
     }
-    AWork(*LHandle);
+    try
+    {
+      AWork(*LHandle);
+    }
+    catch (...)
+    {
+      HookIODoMirrorFlags(*LHandle);
+      throw;
+    }
+    HookIODoMirrorFlags(*LHandle);
   }
   catch (...)
   {
@@ -8229,6 +8591,51 @@ bool HookIODoResetPathSourceIf(const HookIODoSource ASource)
   }
 }
 
+// Makes ASource this thread's own path source (nil: none, the program's
+// applies again). Registered under a prefix of its own first (false, nothing
+// changed, when that fails); the one it replaces is unregistered after. Only
+// this thread reads HookIODoThreadPathSourceId, so the swap needs no atomic.
+bool HookIODoSetThreadPathSource(const HookIODoSource ASource)
+{
+  std::uint64_t LNewId = 0;
+  std::uint64_t LOldId;
+
+  if (ASource != nullptr)
+  {
+    const std::string LPrefix(HookIODoRegister(nullptr, ASource));
+    const char* LRest;
+    if (LPrefix.empty() || (!HookIODoParse(LPrefix.c_str(), LNewId, LRest)) || (LNewId == 0))
+      return false;
+  }
+  LOldId = HookIODoThreadPathSourceId;
+  HookIODoThreadPathSourceId = LNewId;
+  if (LOldId != 0)
+  {
+    try
+    {
+      std::lock_guard<std::mutex> LGuard(HookIODoLock());
+      HookIODoEntries().erase(LOldId);
+    }
+    catch (...)
+    {
+      // Only the lock can throw; the old entry stays unreachable
+    }
+  }
+  return true;
+}
+
+// The source this thread's own path source was set from (nil: none set)
+HookIODoSource HookIODoThreadPathSource()
+{
+  HookIODoEntry LEntry;
+
+  if (HookIODoThreadPathSourceId == 0)
+    return nullptr;
+  if (!HookIODoFind(HookIODoThreadPathSourceId, LEntry))
+    return nullptr;
+  return LEntry.Source;
+}
+
 }
 
 // For raylib_ext (a unit above HookIO): SetRaylibIOSource(nil) unsets only
@@ -9392,6 +9799,98 @@ extern "C" int fileno_unlocked(FILE* AFile)
   return LReal(AFile);
 }
 
+// glibc's underflow and overflow: what the inline getc_unlocked /
+// putc_unlocked call once the FILE's get / put area is used up, and a HookIO
+// handle's areas are always empty (HookIODoGlibcHead), so every inline read
+// and write of one lands here. __uflow is getc on the handle. __overflow
+// puts AChar; with EOF it writes out what is pending, as glibc's
+// _IO_new_file_overflow does (0, or EOF on a failure).
+extern "C" int __uflow(FILE* AFile)
+{
+  using TReal = int (*)(FILE*);
+  int LResult;
+
+  if (HookIODoGetc(AFile, LResult))
+    return LResult;
+  HOOKIO_DO_REAL(TReal, "__uflow");
+  if (LReal == nullptr)
+  {
+    errno = ENOSYS;
+    return EOF;
+  }
+  return LReal(AFile);
+}
+
+extern "C" int __overflow(FILE* AFile, int AChar)
+{
+  using TReal = int (*)(FILE*, int);
+  int LResult;
+
+  if (AChar == EOF)
+  {
+    if (HookIODoFlush(AFile, LResult))
+      return LResult;
+  }
+  else if (HookIODoPutc(AChar, AFile, LResult))
+    return LResult;
+  HOOKIO_DO_REAL(TReal, "__overflow");
+  if (LReal == nullptr)
+  {
+    errno = ENOSYS;
+    return EOF;
+  }
+  return LReal(AFile, AChar);
+}
+
+// The stream lock glibc's *_unlocked callers take around their reads
+// (lua's loader). A HookIO handle takes its own lock in every call (as
+// _lock_file on Windows), so locking one is nothing and trying always
+// succeeds (0); a real FILE goes to glibc.
+extern "C" void flockfile(FILE* AFile)
+{
+  using TReal = void (*)(FILE*);
+
+  if (HookIODoOwns(AFile))
+    return;
+  HOOKIO_DO_REAL(TReal, "flockfile");
+  if (LReal == nullptr)
+  {
+    errno = ENOSYS;
+    return;
+  }
+  LReal(AFile);
+}
+
+extern "C" void funlockfile(FILE* AFile)
+{
+  using TReal = void (*)(FILE*);
+
+  if (HookIODoOwns(AFile))
+    return;
+  HOOKIO_DO_REAL(TReal, "funlockfile");
+  if (LReal == nullptr)
+  {
+    errno = ENOSYS;
+    return;
+  }
+  LReal(AFile);
+}
+
+extern "C" int ftrylockfile(FILE* AFile)
+{
+  using TReal = int (*)(FILE*);
+
+  if (HookIODoOwns(AFile))
+    return 0;
+  HOOKIO_DO_REAL(TReal, "ftrylockfile");
+  if (LReal == nullptr)
+  {
+    errno = ENOSYS;
+    return -1;
+  }
+  return LReal(AFile);
+}
+
 extern "C" wchar_t* fgetws_unlocked(wchar_t* AText, int ACount, FILE* AFile)
 {
   using TReal = wchar_t* (*)(wchar_t*, int, FILE*);
@@ -9725,6 +10224,33 @@ begin
   return LReal(AFile);
 end;
 HOOKABI_IMPORT_SLOT(fclose);
+
+type
+  FreopenFn = routine clink(const APath: ptr to const char; const AMode: ptr to const char;
+    const AFile: ptr to FILE): ptr to FILE;
+
+var
+  GRealFreopen: ptr;
+
+// A HookIO handle is reopened in place (HookIODoReopen); a real FILE goes to
+// the C runtime, whatever the path
+routine clink freopen(const APath: ptr to const char; const AMode: ptr to const char;
+  const AFile: ptr to FILE): ptr to FILE;
+var
+  LFile: ptr to FILE;
+  LReal: FreopenFn;
+begin
+  if HookIODoReopen(APath, AMode, AFile, LFile) then
+    return LFile;
+  end;
+  LReal := reinterpret_cast<FreopenFn>(HookReal(GRealFreopen, "freopen"));
+  if LReal = nil then
+    errno := ENOSYS;
+    return nil;
+  end;
+  return LReal(APath, AMode, AFile);
+end;
+HOOKABI_IMPORT_SLOT(freopen);
 
 // The stream family: every name C code can pass a handle to. A handle is
 // answered by HookIO (HookIODoXxx true), a real FILE by the C runtime. Inside
@@ -10420,6 +10946,29 @@ begin
 end;
 HOOKABI_IMPORT_SLOT(_unlock_file);
 
+var
+  GRealPclose: ptr;
+
+// A HookIO handle is never a pipe: ucrt's _pclose refuses a stream _popen
+// did not open with -1 and EBADF, leaving it open (measured 2026-10-26,
+// tests\probe\hookabi\pclose_plain.pcpp), and so does this hook
+routine clink _pclose(const AFile: ptr to FILE): int32;
+var
+  LReal: StreamFn;
+begin
+  if HookIODoOwns(AFile) then
+    errno := EBADF;
+    return -1;
+  end;
+  LReal := reinterpret_cast<StreamFn>(HookReal(GRealPclose, "_pclose"));
+  if LReal = nil then
+    errno := ENOSYS;
+    return -1;
+  end;
+  return LReal(AFile);
+end;
+HOOKABI_IMPORT_SLOT(_pclose);
+
 #pragma clang diagnostic pop
 
 // The query family (HookIODoQuery), the names raylib reaches: FileExists
@@ -10532,6 +11081,49 @@ begin
     return nil;
   end;
   return LReal(APath, AMode);
+end;
+
+var
+  GRealFreopen64: ptr;
+
+// freopen's large-file name (what lua's loader binds on Linux)
+routine clink freopen64(const APath: ptr to const char; const AMode: ptr to const char;
+  const AFile: ptr to FILE): ptr to FILE;
+var
+  LFile: ptr to FILE;
+  LReal: FreopenFn;
+begin
+  if HookIODoReopen(APath, AMode, AFile, LFile) then
+    return LFile;
+  end;
+  LReal := reinterpret_cast<FreopenFn>(HookReal(GRealFreopen64, "freopen64"));
+  if LReal = nil then
+    errno := ENOSYS;
+    return nil;
+  end;
+  return LReal(APath, AMode, AFile);
+end;
+
+var
+  GRealPclose: ptr;
+
+// A HookIO handle is never a pipe: glibc's pclose closes a stream popen
+// did not open as fclose does (0, errno untouched; measured 2026-10-26,
+// tests\probe\hookabi\pclose_plain.pcpp), and so does this hook
+routine clink pclose(const AFile: ptr to FILE): int32;
+var
+  LResult: int32;
+  LReal: StreamFn;
+begin
+  if HookIODoClose(AFile, LResult) then
+    return LResult;
+  end;
+  LReal := reinterpret_cast<StreamFn>(HookReal(GRealPclose, "pclose"));
+  if LReal = nil then
+    errno := ENOSYS;
+    return -1;
+  end;
+  return LReal(AFile);
 end;
 
 // fwide reads and sets glibc's orientation (Windows' is mingw's own inline
@@ -10747,10 +11339,46 @@ end;
 ///   nothing changed
 /// @example `SetIOPathSource(CreateZipIOSource("$P:assets.zip")); LFile := fopen("music/song.ogg", "rb");`
 /// @see RegisterIOSource
+/// @see SetIOThreadPathSource
 /// @since 0.2
 exported routine SetIOPathSource(const ASource: IOSource): bool;
 begin
   return HookIODoSetPathSource(ASource);
+end;
+
+/// Makes an IOSource the calling thread's own path source: while it is set,
+/// a plain path that a hooked open or query names on this thread is looked
+/// up in it, as SetIOPathSource describes, instead of in the program's path
+/// source; every other thread keeps the program's. A loader that pulls in
+/// files by plain relative paths (a map's tilesets and images) sets one for
+/// the load and unsets it after, without moving the program's path source
+/// under another thread (a music stream reading through it). Set and unset
+/// it on the same thread, unset it (nil) before the thread ends and before
+/// closing the source. The source stays the caller's.
+/// @param ASource the files, or nil: the program's path source applies to
+///   this thread again
+/// @returns false when the source could not be registered (out of memory):
+///   nothing changed
+/// @example `SetIOThreadPathSource(LZip); LOk := LMap.load("maps/level.tmx"); SetIOThreadPathSource(nil);`
+/// @see SetIOPathSource
+/// @see GetIOThreadPathSource
+/// @since 0.3
+exported routine SetIOThreadPathSource(const ASource: IOSource): bool;
+begin
+  return HookIODoSetThreadPathSource(ASource);
+end;
+
+/// The calling thread's own path source, as SetIOThreadPathSource last set
+/// it on this thread, so a loader can set its own for a call and put the
+/// caller's back after.
+/// @returns the source; nil when none is set on this thread (the program's
+///   path source, if any, applies)
+/// @example `LBefore := GetIOThreadPathSource(); SetIOThreadPathSource(LZip); ... SetIOThreadPathSource(LBefore);`
+/// @see SetIOThreadPathSource
+/// @since 0.3
+exported routine GetIOThreadPathSource(): IOSource;
+begin
+  return HookIODoThreadPathSource();
 end;
 
 end.

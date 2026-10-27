@@ -1,0 +1,233 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_enet.pcpp - Std library compliance: the enet vendor unit
+  (res\libs\std\enet.pcpp)
+
+  ENet's C API called straight from PaskalCPP: the linked library is the one
+  its header names. A server host on 127.0.0.1 (the system picks the port,
+  read back from the host) and a client host run in one process, serviced in
+  turn: the client connects passing a value the server's CONNECT event
+  carries, sends a reliable packet on channel 1, the server reads it and
+  replies on channel 0, the client disconnects passing a value the server's
+  DISCONNECT event carries. The negative: a client connects to a port that
+  was just closed; with a short peer timeout it ends in a DISCONNECT event
+  well inside the test's deadline, never a CONNECT.
+*******************************************************************************/
+
+module exe std_enet;
+
+/*
+  @@test
+    kind run
+    expect
+    | initialize 0
+    | header matches lib true
+    | server created true port picked true
+    | client created true
+    | connected client true server true data 7
+    | send hello 0
+    | server got hello over enet channel 1 length 16
+    | send reply 0
+    | client got welcome, client channel 0
+    | disconnected client true server true data 42
+    | closed port connect peer true
+    | closed port disconnect true connected false
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  enet;
+
+const
+  // How long any one wait may take before the test gives up on it
+  CDeadlineMs: uint32 = 5000;
+  // How long one enet_host_service call waits for an event
+  CSliceMs: uint32 = 10;
+
+type
+  // What one host saw while the test serviced it
+  SideState = record
+    Host: ptr to ENetHost;
+    Peer: ptr to ENetPeer;
+    Connected: bool;
+    Disconnected: bool;
+    ConnectData: uint32;
+    DisconnectData: uint32;
+    Received: string;
+    Channel: uint8;
+    Length: size_t;
+  end;
+
+// A side with nothing seen yet, servicing AHost
+routine ResetSide(var ASide: SideState; const AHost: ptr to ENetHost);
+begin
+  ASide.Host := AHost;
+  ASide.Peer := nil;
+  ASide.Connected := false;
+  ASide.Disconnected := false;
+  ASide.ConnectData := 0;
+  ASide.DisconnectData := 0;
+  ASide.Received := "";
+  ASide.Channel := 0;
+  ASide.Length := 0;
+end;
+
+// Services one host for one slice and records the event it gives, if any
+routine ServiceOnce(var ASide: SideState);
+var
+  LEvent: ENetEvent;
+begin
+  if enet_host_service(ASide.Host, address of LEvent, CSliceMs) > 0 then
+    if LEvent.type = ENET_EVENT_TYPE_CONNECT then
+      ASide.Peer := LEvent.peer;
+      ASide.Connected := true;
+      ASide.ConnectData := LEvent.data;
+    else
+      if LEvent.type = ENET_EVENT_TYPE_RECEIVE then
+        // The sender put the text's NUL in the packet: read as a C string
+        ASide.Received := string(ptr to const char(LEvent.packet->data));
+        ASide.Channel := LEvent.channelID;
+        ASide.Length := LEvent.packet->dataLength;
+        // A received packet belongs to the caller
+        enet_packet_destroy(LEvent.packet);
+      else
+        if LEvent.type = ENET_EVENT_TYPE_DISCONNECT then
+          ASide.Disconnected := true;
+          ASide.DisconnectData := LEvent.data;
+        end;
+      end;
+    end;
+  end;
+end;
+
+// Services both hosts once each
+routine ServiceBoth(var AServer: SideState; var AClient: SideState);
+begin
+  ServiceOnce(AServer);
+  ServiceOnce(AClient);
+end;
+
+// True once CDeadlineMs have passed since AStart (enet_time_get's clock)
+routine Expired(const AStart: uint32): bool;
+begin
+  return enet_time_get() - AStart >= CDeadlineMs;
+end;
+
+// Queues AText (its NUL included) as one reliable packet to APeer
+routine SendText(const APeer: ptr to ENetPeer; const AChannel: uint8;
+  const AText: string): int32;
+var
+  LPacket: ptr to ENetPacket;
+begin
+  LPacket := enet_packet_create(AText.c_str(), AText.length() + 1, ENET_PACKET_FLAG_RELIABLE);
+  return enet_peer_send(APeer, AChannel, LPacket);
+end;
+
+// A client connects to a port nothing listens on any more: the peer must
+// time out into a DISCONNECT event, never connect
+routine CheckClosedPort();
+var
+  LAddr: ENetAddress;
+  LGone: ptr to ENetHost;
+  LGoneAddr: ENetAddress;
+  LProbe: SideState;
+  LPeer: ptr to ENetPeer;
+  LStart: uint32;
+begin
+  // A host bound to a system-picked port, destroyed at once: the port is closed
+  enet_address_set_host(address of LAddr, "127.0.0.1");
+  LAddr.port := ENET_PORT_ANY;
+  LGone := enet_host_create(address of LAddr, 1, 1, 0, 0);
+  LGoneAddr := LGone->address;
+  enet_host_destroy(LGone);
+
+  ResetSide(LProbe, enet_host_create(nil, 1, 1, 0, 0));
+  LPeer := enet_host_connect(LProbe.Host, address of LGoneAddr, 1, 0);
+  println("closed port connect peer {}", LPeer <> nil);
+  // Give up on an unanswered peer after 200..500 ms instead of ENet's 5..30 s
+  enet_peer_timeout(LPeer, 1, 200, 500);
+  LStart := enet_time_get();
+  while not LProbe.Disconnected and not Expired(LStart) do
+    ServiceOnce(LProbe);
+  end;
+  println("closed port disconnect {} connected {}", LProbe.Disconnected, LProbe.Connected);
+  enet_host_destroy(LProbe.Host);
+end;
+
+var
+  LAddr: ENetAddress;
+  LServer: SideState;
+  LClient: SideState;
+  LStart: uint32;
+
+begin
+  println("initialize {}", enet_initialize());
+  println("header matches lib {}", enet_linked_version() = ENET_VERSION);
+
+  // The server listens on loopback; port 0 lets the system pick a free one
+  enet_address_set_host(address of LAddr, "127.0.0.1");
+  LAddr.port := ENET_PORT_ANY;
+  ResetSide(LServer, enet_host_create(address of LAddr, 4, 2, 0, 0));
+  println("server created {} port picked {}", LServer.Host <> nil,
+    LServer.Host->address.port <> 0);
+
+  // The client has no address of its own; it connects to the server's
+  ResetSide(LClient, enet_host_create(nil, 1, 2, 0, 0));
+  println("client created {}", LClient.Host <> nil);
+  LClient.Peer := enet_host_connect(LClient.Host, address of LServer.Host->address, 2, 7);
+
+  // Connect: both sides see a CONNECT event; the server's carries the 7
+  LStart := enet_time_get();
+  while not (LServer.Connected and LClient.Connected) and not Expired(LStart) do
+    ServiceBoth(LServer, LClient);
+  end;
+  println("connected client {} server {} data {}", LClient.Connected, LServer.Connected,
+    LServer.ConnectData);
+
+  // Client -> server on channel 1, reliable
+  println("send hello {}", SendText(LClient.Peer, 1, "hello over enet"));
+  LStart := enet_time_get();
+  while (LServer.Received = "") and not Expired(LStart) do
+    ServiceBoth(LServer, LClient);
+  end;
+  println("server got {} channel {} length {}", LServer.Received, LServer.Channel,
+    LServer.Length);
+
+  // Server -> client on channel 0, to the peer its CONNECT event named
+  println("send reply {}", SendText(LServer.Peer, 0, "welcome, client"));
+  LStart := enet_time_get();
+  while (LClient.Received = "") and not Expired(LStart) do
+    ServiceBoth(LServer, LClient);
+  end;
+  println("client got {} channel {}", LClient.Received, LClient.Channel);
+
+  // A clean close: both sides see a DISCONNECT event; the server's carries the 42
+  enet_peer_disconnect(LClient.Peer, 42);
+  LStart := enet_time_get();
+  while not (LServer.Disconnected and LClient.Disconnected) and not Expired(LStart) do
+    ServiceBoth(LServer, LClient);
+  end;
+  println("disconnected client {} server {} data {}", LClient.Disconnected,
+    LServer.Disconnected, LServer.DisconnectData);
+
+  enet_host_destroy(LClient.Host);
+  enet_host_destroy(LServer.Host);
+
+  CheckClosedPort();
+
+  enet_deinitialize();
+end.

@@ -1,0 +1,274 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_ldtkloader.pcpp - Std library compliance: the ldtkloader unit
+  (res\libs\std\ldtkloader.pcpp)
+
+  LDtkLoader's API used straight from PaskalCPP over the fixtures written
+  by scripts\vendor\gen_ldtk_fixtures.py: the project's one world and its
+  two levels (size, place, background, a level field), the Start level's
+  five layers (every kind: entities, a hidden tile layer, a tile layer with
+  an offset, tiles, int grid) with their tiles (ids, flips, alpha, place,
+  texture rect), int grid values, entities and their Int / String / enum
+  fields, the tileset; a project whose level is saved in its own file.
+
+  The refusals are LDtkLoader's exceptions, caught by guard: a file that is
+  not there, a file that is not valid JSON, a level and a field asked for by
+  a name that is not there.
+*******************************************************************************/
+
+module exe std_ldtkloader;
+
+/*
+  @@test
+    kind run
+    expect
+    | load true worlds 1 levels 2 layout 0 tilesets 1
+    | level Start uid 50 size 40x16 at 0,0 bg 32 32 32 music town layers 5
+    | level Cave uid 51 size 16x8 at 40,0 bg 32 32 32 music drip layers 2
+    | layer Objects type 1 visible true cell 8 grid 5x2 offset 0,0 opacity 1 tileset false tiles 0 entities 3
+    | layer Hidden type 2 visible false cell 8 grid 5x2 offset 0,0 opacity 1 tileset true tiles 10 entities 0
+    | layer Badge type 2 visible true cell 8 grid 5x2 offset 8,0 opacity 1 tileset true tiles 1 entities 0
+    | layer Ground type 2 visible true cell 8 grid 5x2 offset 0,0 opacity 1 tileset true tiles 7 entities 0
+    | layer Collision type 0 visible true cell 8 grid 5x2 offset 0,0 opacity 1 tileset false tiles 0 entities 0
+    | ground t0@0,0 t0x@8,0 t0y@16,0 t0xy@24,0 t1@32,0 t1@0,8 t0x@16,8
+    | ground alpha 1 last 0.5 rect of t1 8,0 8x8
+    | badge at 24,8 grid 2,1
+    | intgrid 0,0 -1 1,0 1 wall 0,1 1 4,0 1 3,1 -1
+    | player at 8,8 size 8x8 grid 1,1 tags 1
+    | coins 2
+    | coin gold 10 Gold at 24,0
+    | coin silver 25 Silver at 32,8
+    | tileset Quads uid 1 path std_ldtkloader.png size 16x8 tile 8 at 8,0 data solid
+    | ext load true level Outside music wind tiles 2
+    | missing caught true from LDtkLoader true cannot open true
+    | bad json caught true parse error true
+    | no level LDtkLoader exception (in getLevel) : Level name "Nope" not found in World "".
+    | no field LDtkLoader exception (in getField) : Field "nope" does not exist.
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  ldtkloader,
+  SysUtils;
+
+const
+  CFixtures: string = "$P:../../res/tests/std/fixtures/";
+
+// One tile as t<id>[x][y]@<x>,<y>: its id, its flips and its place in pixels
+routine TileText(const ATile: ldtk::Tile): string;
+var
+  LText: string;
+begin
+  LText := " t" + std::to_string(ATile.tileId);
+  if ATile.flipX then
+    LText := LText + "x";
+  end;
+  if ATile.flipY then
+    LText := LText + "y";
+  end;
+  return LText + "@" + std::to_string(ATile.getPosition().x) + "," +
+    std::to_string(ATile.getPosition().y);
+end;
+
+// A level's name, uid, size, place, background and its music field
+routine ShowLevel(const ALevel: ldtk::Level);
+begin
+  println("level {} uid {} size {}x{} at {},{} bg {} {} {} music {} layers {}", ALevel.name,
+    ALevel.uid, ALevel.size.x, ALevel.size.y, ALevel.position.x, ALevel.position.y,
+    int32(ALevel.bg_color.r), int32(ALevel.bg_color.g), int32(ALevel.bg_color.b),
+    ALevel.getField<std::string>("music").value(), ALevel.allLayers().size());
+end;
+
+// A layer's kind, visibility, grid, offset, opacity and what it holds
+routine ShowLayer(const ALayer: ldtk::Layer);
+begin
+  println("layer {} type {} visible {} cell {} grid {}x{} offset {},{} opacity {} tileset {} tiles {} entities {}",
+    ALayer.getName(), int32(ALayer.getType()), ALayer.isVisible(), ALayer.getCellSize(),
+    ALayer.getGridSize().x, ALayer.getGridSize().y, ALayer.getOffset().x, ALayer.getOffset().y,
+    ALayer.getOpacity(), ALayer.hasTileset(), ALayer.allTiles().size(),
+    ALayer.allEntities().size());
+end;
+
+// One int grid cell as <x>,<y> <value>[ <name>]; -1: an empty cell
+routine IntGridText(const ALayer: ldtk::Layer; const AX: int32; const AY: int32): string;
+var
+  LText: string;
+begin
+  LText := " " + std::to_string(AX) + "," + std::to_string(AY) + " " +
+    std::to_string(ALayer.getIntGridVal(AX, AY).value);
+  if (AX = 1) and (AY = 0) then
+    LText := LText + " " + ALayer.getIntGridVal(AX, AY).name;
+  end;
+  return LText;
+end;
+
+// The Start level's layers, tiles, int grid and entities
+routine ShowStart(const ALevel: ldtk::Level);
+var
+  LIndex: int32;
+  LGround: ptr to const ldtk::Layer;
+  LBadge: ptr to const ldtk::Layer;
+  LCollision: ptr to const ldtk::Layer;
+  LObjects: ptr to const ldtk::Layer;
+  LPlayer: ptr to const ldtk::Entity;
+  LCoin: ptr to const ldtk::Entity;
+  LText: string;
+begin
+  for LIndex := 0 to int32(ALevel.allLayers().size()) - 1 do
+    ShowLayer(ALevel.allLayers()[LIndex]);
+  end;
+
+  LGround := address of ALevel.getLayer("Ground");
+  LText := "ground";
+  for LIndex := 0 to int32(LGround^.allTiles().size()) - 1 do
+    LText := LText + TileText(LGround^.allTiles()[LIndex]);
+  end;
+  println("{}", LText);
+  println("ground alpha {} last {} rect of t1 {},{} {}x{}", LGround^.allTiles()[0].alpha,
+    LGround^.allTiles()[6].alpha, LGround^.allTiles()[4].getTextureRect().x,
+    LGround^.allTiles()[4].getTextureRect().y, LGround^.allTiles()[4].getTextureRect().width,
+    LGround^.allTiles()[4].getTextureRect().height);
+
+  // A tile's place takes in its layer's offset; its grid cell does not
+  LBadge := address of ALevel.getLayer("Badge");
+  println("badge at {},{} grid {},{}", LBadge^.allTiles()[0].getPosition().x,
+    LBadge^.allTiles()[0].getPosition().y, LBadge^.allTiles()[0].getGridPosition().x,
+    LBadge^.allTiles()[0].getGridPosition().y);
+
+  LCollision := address of ALevel.getLayer("Collision");
+  println("intgrid{}{}{}{}{}", IntGridText(LCollision^, 0, 0), IntGridText(LCollision^, 1, 0),
+    IntGridText(LCollision^, 0, 1), IntGridText(LCollision^, 4, 0),
+    IntGridText(LCollision^, 3, 1));
+
+  LObjects := address of ALevel.getLayer("Objects");
+  LPlayer := address of LObjects^.getEntitiesByName("Player")[0].get();
+  println("player at {},{} size {}x{} grid {},{} tags {}", LPlayer^.getPosition().x,
+    LPlayer^.getPosition().y, LPlayer^.getSize().x, LPlayer^.getSize().y,
+    LPlayer^.getGridPosition().x, LPlayer^.getGridPosition().y, LPlayer^.getTags().size());
+  println("coins {}", LObjects^.getEntitiesByName("Coin").size());
+  for LIndex := 0 to int32(LObjects^.getEntitiesByName("Coin").size()) - 1 do
+    LCoin := address of LObjects^.getEntitiesByName("Coin")[LIndex].get();
+    println("coin {} {} {} at {},{}", LCoin^.getField<std::string>("label").value(),
+      LCoin^.getField<int>("value").value(), LCoin^.getField<ldtk::EnumValue>("kind").value().name,
+      LCoin^.getPosition().x, LCoin^.getPosition().y);
+  end;
+end;
+
+// The main fixture: its world, levels and tileset
+routine TestProject();
+var
+  LProject: ldtk::Project;
+  LLoaded: bool;
+  LWorld: ptr to const ldtk::World;
+  LSet: ptr to const ldtk::Tileset;
+  LIndex: int32;
+begin
+  LLoaded := false;
+  guard
+    LProject.loadFromFile(ResolvePath(CFixtures + "std_ldtkloader.ldtk"));
+    LLoaded := true;
+  except
+    println("load failed: {}", excmsg());
+  end;
+  if not LLoaded then
+    return;
+  end;
+  LWorld := address of LProject.getWorld();
+  println("load {} worlds {} levels {} layout {} tilesets {}", LLoaded,
+    LProject.allWorlds().size(), LWorld^.allLevels().size(), int32(LWorld^.getLayout()),
+    LProject.allTilesets().size());
+  for LIndex := 0 to int32(LWorld^.allLevels().size()) - 1 do
+    ShowLevel(LWorld^.allLevels()[LIndex]);
+  end;
+  ShowStart(LWorld^.getLevel("Start"));
+
+  LSet := address of LProject.getTileset("Quads");
+  println("tileset {} uid {} path {} size {}x{} tile {} at {},{} data {}", LSet^.name, LSet^.uid,
+    LSet^.path, LSet^.texture_size.x, LSet^.texture_size.y, LSet^.tile_size,
+    LSet^.getTileTexturePos(1).x, LSet^.getTileTexturePos(1).y, LSet^.getTileCustomData(1));
+end;
+
+// A project that saves its level in its own file, read relative to it
+routine TestExternal();
+var
+  LProject: ldtk::Project;
+  LLoaded: bool;
+  LLevel: ptr to const ldtk::Level;
+begin
+  LLoaded := false;
+  guard
+    LProject.loadFromFile(ResolvePath(CFixtures + "std_ldtkloader_ext.ldtk"));
+    LLoaded := true;
+  except
+    println("ext load failed: {}", excmsg());
+  end;
+  if not LLoaded then
+    return;
+  end;
+  LLevel := address of LProject.getWorld().allLevels()[0];
+  println("ext load {} level {} music {} tiles {}", LLoaded, LLevel^.name,
+    LLevel^.getField<std::string>("music").value(),
+    LLevel^.getLayer("Ground").allTiles().size());
+end;
+
+// LDtkLoader's exceptions, each caught by a guard
+routine TestRefusals();
+var
+  LProject: ldtk::Project;
+  LCaught: bool;
+  LText: string;
+begin
+  LCaught := false;
+  LText := "";
+  guard
+    LProject.loadFromFile(ResolvePath(CFixtures + "std_ldtkloader_nowhere.ldtk"));
+  except
+    LCaught := true;
+    LText := excmsg();
+  end;
+  println("missing caught {} from LDtkLoader {} cannot open {}", LCaught,
+    LText.starts_with("LDtkLoader exception"), LText.contains("Failed to open file"));
+
+  LCaught := false;
+  LText := "";
+  guard
+    LProject.loadFromFile(ResolvePath(CFixtures + "std_ldtkloader_bad.ldtk"));
+  except
+    LCaught := true;
+    LText := excmsg();
+  end;
+  println("bad json caught {} parse error {}", LCaught, LText.contains("parse_error"));
+
+  // The project read whole: the lookups by a name it does not have throw
+  LProject.loadFromFile(ResolvePath(CFixtures + "std_ldtkloader.ldtk"));
+  guard
+    println("{}", LProject.getWorld().getLevel("Nope").name);
+  except
+    println("no level {}", excmsg());
+  end;
+  guard
+    println("{}", LProject.getWorld().getLevel("Start").getField<int>("nope").value());
+  except
+    println("no field {}", excmsg());
+  end;
+end;
+
+begin
+  TestProject();
+  TestExternal();
+  TestRefusals();
+end.

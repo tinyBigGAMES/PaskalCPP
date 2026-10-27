@@ -1,0 +1,72 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  sqlite.pcpp - the SQLite unit: `import sqlite;` uses SQLite (an embedded SQL
+  database engine: a whole database in one file, or in memory) from
+  PaskalCPP. A self-describing vendor module: it owns every include path,
+  library path and link library it needs, per official target. The library is
+  libsqlite3.a (one per target), built by PaskalCPP-Libs' build-sqlite.cmd from
+  the official amalgamation release, linked by @linklibrary: every module of
+  the program shares the one copy, and a program links only the libraries it
+  imports.
+
+  The API is SQLite's C API as it ships (https://sqlite.org/c3ref/intro.html),
+  called straight from PaskalCPP: sqlite3_open / sqlite3_open_v2 give a
+  `ptr to sqlite3` (":memory:" = a private database in memory),
+  sqlite3_prepare_v2 compiles one statement into a `ptr to sqlite3_stmt`,
+  sqlite3_bind_* fill its ? parameters (from 1), sqlite3_step runs it
+  (SQLITE_ROW per result row, SQLITE_DONE at the end), sqlite3_column_* read a
+  row (from 0), sqlite3_finalize frees the statement and sqlite3_close the
+  database. sqlite3_exec runs SQL text with no results to read. A call that
+  fails returns its result code; sqlite3_errmsg(db) is the reason in UTF-8.
+  Text crosses as UTF-8: a PaskalCPP string's .c_str() goes in, and
+  sqlite3_column_text gives `ptr to const uint8`, read as text through
+  `ptr to const char(...)`. A string bound with SQLITE_TRANSIENT is copied by
+  SQLite, so the string may change before the statement runs.
+
+  Built with: SQLITE_THREADSAFE=1 (serialized: a connection may be used from
+  several threads), FTS5 (full-text search), R*Tree indexes and the SQL math
+  functions; JSON is built in.
+==============================================================================*/
+
+module unit sqlite;
+
+@addincludepath "$P:res/libs/vendor/sqlite/include";
+
+// SQLite needs the C runtime: on Windows mingw's CRT and kernel32 (threads,
+// file locking; both linked by default), on Linux libc, libm (the math
+// functions), libpthread (its mutexes) and libdl (sqlite3_load_extension)
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/sqlite/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/sqlite/lib/x86_64-linux-gnu";
+  @linklibrary "m";
+  @linklibrary "pthread";
+  @linklibrary "dl";
+@else
+  @message error "sqlite: unsupported target";
+@endif
+
+@linklibrary "sqlite3";
+
+// The header goes to this unit's header, so every importer sees SQLite's API
+cpp header;
+
+#include <sqlite3.h>
+
+end.

@@ -1,0 +1,121 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_mojoal.pcpp - Std library compliance: the mojoal vendor unit
+  (res\libs\std\mojoal.pcpp)
+
+  OpenAL 1.1 through mojoAL, called straight from PaskalCPP, on SDL's dummy
+  audio driver so it runs with no sound hardware on both targets: the
+  default device opens, a context is made current, a buffer is loaded with
+  a generated 440 Hz tone (16-bit mono) and reads back its frequency and
+  channels, a source placed in 3D plays it and stops. The error paths: a
+  call on a source name that does not exist sets AL_INVALID_NAME, which
+  alGetError reports once and then clears; alcCloseDevice refuses while
+  the device still has a context and a buffer. Teardown in reverse order
+  then closes the device, and alGetError is clean throughout.
+*******************************************************************************/
+
+module exe std_mojoal;
+
+/*
+  @@test
+    kind run
+    expect
+    | device true
+    | context current true
+    | renderer MojoAL
+    | buffer frequency 44100 channels 1
+    | buffer error clean true
+    | source playing true
+    | source stopped true
+    | bad source invalid name true
+    | error cleared true
+    | close while in use false
+    | closed true
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  Math,
+  mojoal;
+
+const
+  CRate: int32 = 44100;
+  CToneHz: float64 = 440.0;
+  CToneSamples: int32 = 4410;
+  CAmplitude: float64 = 12000.0;
+  CBadSource: ALuint = 9999;
+
+var
+  LTone: array[0..CToneSamples - 1] of int16;
+  LDevice: ptr to ALCdevice;
+  LContext: ptr to ALCcontext;
+  LBuffer: ALuint;
+  LSource: ALuint;
+  LValue: ALint;
+  LChannels: ALint;
+  LI: int32;
+
+begin
+  // No sound hardware needed: SDL's dummy driver, chosen before mojoAL
+  // starts SDL's audio subsystem in alcOpenDevice
+  SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+
+  LDevice := alcOpenDevice(nil);
+  println("device {}", LDevice <> nil);
+  LContext := alcCreateContext(LDevice, nil);
+  println("context current {}", alcMakeContextCurrent(LContext) = ALC_TRUE);
+  println("renderer {}", alGetString(AL_RENDERER));
+
+  // 0.1 s of a 440 Hz sine, 16-bit mono
+  for LI := 0 to CToneSamples - 1 do
+    LTone[LI] := int16(Round(CAmplitude *
+      Sin(2.0 * Pi * CToneHz * float64(LI) / float64(CRate))));
+  end;
+  alGenBuffers(1, address of LBuffer);
+  alBufferData(LBuffer, AL_FORMAT_MONO16, address of LTone[0],
+    ALsizei(CToneSamples * size(int16)), ALsizei(CRate));
+  alGetBufferi(LBuffer, AL_FREQUENCY, address of LValue);
+  alGetBufferi(LBuffer, AL_CHANNELS, address of LChannels);
+  println("buffer frequency {} channels {}", LValue, LChannels);
+  println("buffer error clean {}", alGetError() = AL_NO_ERROR);
+
+  // A source in front of the listener plays the buffer, then stops
+  alGenSources(1, address of LSource);
+  alSourcei(LSource, AL_BUFFER, ALint(LBuffer));
+  alSource3f(LSource, AL_POSITION, 0.0, 0.0, -1.0);
+  alSourcePlay(LSource);
+  alGetSourcei(LSource, AL_SOURCE_STATE, address of LValue);
+  println("source playing {}", LValue = AL_PLAYING);
+  alSourceStop(LSource);
+  alGetSourcei(LSource, AL_SOURCE_STATE, address of LValue);
+  println("source stopped {}", (LValue = AL_STOPPED) and (alGetError() = AL_NO_ERROR));
+
+  // A name no source has: AL_INVALID_NAME once, then the error is cleared
+  alSourcePlay(CBadSource);
+  println("bad source invalid name {}", alGetError() = AL_INVALID_NAME);
+  println("error cleared {}", alGetError() = AL_NO_ERROR);
+
+  // The device still has its context and buffer: closing it is refused
+  println("close while in use {}", alcCloseDevice(LDevice) = ALC_TRUE);
+
+  // Teardown in reverse order
+  alDeleteSources(1, address of LSource);
+  alDeleteBuffers(1, address of LBuffer);
+  alcMakeContextCurrent(nil);
+  alcDestroyContext(LContext);
+  println("closed {}", alcCloseDevice(LDevice) = ALC_TRUE);
+end.

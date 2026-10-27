@@ -1,0 +1,87 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  TiledTownZip.pcpp - tmxlite + raylib example: TiledTown's map read straight
+  from bin\assets.zip (password "PaskalCPP"). LoadTiledMapZip reads the
+  .tmx, its tileset (tinytown.tsx) and the tileset's image
+  (../tilesets/tinytown/tinytown.png) from the archive, as Tiled wrote them
+  relative to the map; nothing is unpacked to disk. The map is drawn zoomed
+  2x in raylib_ext's frame window (960 x 544 units, sized for the monitor's
+  DPI, scaled and letterboxed on resize); F11 toggles fullscreen; Escape or
+  the close button ends it.
+==============================================================================*/
+
+module exe TiledTownZip;
+
+import
+  tmxlite,
+  tmxlite_ext,
+  raylib,
+  raylib_ext,
+  Math;
+
+const
+  CZoom: float32 = 2.0f;
+
+var
+  LWorld: TiledMap;
+  LCamera: Camera2D;
+  LSize: ::Vector2;
+
+begin
+  SetConfigFlags(FLAG_VSYNC_HINT);
+  // The frame opens before the map loads: the map's textures need the window
+  if not InitFrameWindow(960, 544, "PaskalCPP + tmxlite: Tiled Town from a zip") then
+    println("the window did not open");
+    return;
+  end;
+  SetTargetFPS(60);
+  SetFrameColor(BLACK);
+  if not LoadTiledMapZip("$P:../../assets.zip", "res/assets/maps/overworld.tmx", "PaskalCPP",
+    LWorld) then
+    println("the map could not be loaded from assets.zip");
+    CloseWindow();
+    return;
+  end;
+  // The whole map fills the frame: CZoom, or less when the map is bigger
+  LSize := GetTiledMapSize(LWorld);
+  LCamera.offset.x := 0.0f;
+  LCamera.offset.y := 0.0f;
+  LCamera.target.x := 0.0f;
+  LCamera.target.y := 0.0f;
+  LCamera.rotation := 0.0f;
+  LCamera.zoom := CZoom;
+  if (LSize.x > 0.0f) and (LSize.y > 0.0f) then
+    LCamera.zoom := Min(CZoom, Min(float32(GetFrameWidth()) / LSize.x, float32(GetFrameHeight()) / LSize.y));
+  end;
+  while not WindowShouldClose() do
+    if IsKeyPressed(KEY_F11) then
+      ToggleFrameFullscreen();
+    end;
+    BeginDrawing();
+    BeginFrame();
+    // The map's camera composed with the frame's
+    BeginFrameMode2D(LCamera);
+    DrawTiledMap(LWorld, 0.0f, 0.0f, WHITE);
+    EndFrameMode2D();
+    DrawRectangle(0, 0, GetFrameWidth(), 28, Fade(BLACK, 0.6f));
+    DrawText(TextFormat("loaded from assets.zip: %d layers, %d image(s)",
+      int32(LWorld.Map.getLayers().size()), int32(len(LWorld.Images))), 10, 6, 20, RAYWHITE);
+    EndFrame();
+    EndDrawing();
+  end;
+  UnloadTiledMap(LWorld);
+  CloseWindow();
+end.

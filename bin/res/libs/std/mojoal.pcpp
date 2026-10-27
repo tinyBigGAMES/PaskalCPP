@@ -1,0 +1,80 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  mojoal.pcpp - the mojoAL unit: `import mojoal;` gives a PaskalCPP program
+  OpenAL 1.1 (3D positional audio: a listener, sources placed around it,
+  buffers of sound data) through mojoAL, an OpenAL implementation over
+  SDL3's audio. A self-describing vendor module: it owns every path it needs
+  and imports sdl3 for SDL's own. The library is libmojoal.a (one per
+  target, upstream's mojoal.c built by PaskalCPP-Libs' build-mojoal.cmd),
+  linked by @linklibrary: every module of the program shares the one copy.
+
+  The API is OpenAL 1.1 as it ships (AL/al.h, AL/alc.h), called straight
+  from PaskalCPP: alcOpenDevice(nil) opens the default playback device,
+  alcCreateContext + alcMakeContextCurrent make a context current (the SDL
+  audio device is opened here, at the first context), alGenBuffers +
+  alBufferData load sound data (AL_FORMAT_MONO8 / MONO16 / STEREO8 /
+  STEREO16, and the AL_EXT_FLOAT32 / AL_EXT_32bit_formats formats),
+  alGenSources + alSourcei(AL_BUFFER) attach it, alSourcePlay /
+  alSourceStop / alGetSourcei(AL_SOURCE_STATE) drive a source, and
+  alListener3f / alSource3f(AL_POSITION) place them in 3D. alGetError
+  (and alcGetError for the device) report the last error, then clear it.
+  mojoAL also offers ALC_EXT_CAPTURE, ALC_EXT_DISCONNECT and
+  ALC_EXT_thread_local_context.
+
+  mojoAL starts SDL's audio subsystem itself (SDL_Init(SDL_INIT_AUDIO) in
+  alcOpenDevice): a program that uses only OpenAL calls no SDL routine. To
+  pick an SDL audio driver, set it before alcOpenDevice, e.g.
+  SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy") for a run with no sound
+  hardware. Tear down in reverse: alDeleteSources, alDeleteBuffers,
+  alcMakeContextCurrent(nil), alcDestroyContext, then alcCloseDevice, which
+  returns ALC_FALSE (and closes nothing) while the device still has a
+  context or a buffer.
+
+  The library is static: AL_LIBTYPE_STATIC is defined for every includer
+  (below), so the AL headers declare plain symbols, never dllimport.
+==============================================================================*/
+
+module unit mojoal;
+
+@addincludepath "$P:res/libs/vendor/mojoal/include";
+
+// libmojoal.a is static: every includer must see AL_LIBTYPE_STATIC (no
+// dllimport in AL/al.h and AL/alc.h)
+@cppdefine "AL_LIBTYPE_STATIC";
+
+// The library of each target; everything it calls is SDL3's (import sdl3)
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/mojoal/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/mojoal/lib/x86_64-linux-gnu";
+@else
+  @message error "mojoal: unsupported target";
+@endif
+
+@linklibrary "mojoal";
+
+import sdl3;
+
+// The headers go to this unit's header, so every importer sees OpenAL's API
+cpp header;
+
+#include <AL/al.h>
+#include <AL/alc.h>
+
+end.

@@ -1,0 +1,110 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  Mojoal3DSoundZip.pcpp - mojoAL example (import mojoal_ext): OpenAL 3D
+  sound from a zip. Mojoal3DSound's circling engine, its sound read from
+  the entry res/assets/audio/sfx/engine_player.ogg of bin\assets.zip
+  (password PaskalCPP): LoadSoundZip opens the entry, stb_vorbis decodes it
+  through the HookIO hooks, and the samples arrive mixed down to mono in an
+  OpenAL buffer. No file is unpacked to disk. Listen with headphones.
+==============================================================================*/
+
+module exe Mojoal3DSoundZip;
+
+import
+  Math,
+  SysUtils,
+  mojoal,
+  mojoal_ext;
+
+const
+  CArchive: string = "$P:../../assets.zip";
+  CEntry: string = "res/assets/audio/sfx/engine_player.ogg";
+  CPassword: string = "PaskalCPP";
+  CSeconds: int32 = 6;
+  CStepsPerSecond: int32 = 20;
+  CRadius: float64 = 3.0;
+
+var
+  LDevice: ptr to ALCdevice;
+  LContext: ptr to ALCcontext;
+  LBuffer: ALuint;
+  LSource: ALuint;
+  LSize: ALint;
+  LRate: ALint;
+  LStep: int32;
+  LAngle: float64;
+  LX: float64;
+  LZ: float64;
+
+begin
+  // nil = the default playback device
+  LDevice := alcOpenDevice(nil);
+  if LDevice = nil then
+    println("no playback device could be opened");
+    return;
+  end;
+  LContext := alcCreateContext(LDevice, nil);
+  if (LContext = nil) or (alcMakeContextCurrent(LContext) <> ALC_TRUE) then
+    println("no audio context could be made");
+    alcCloseDevice(LDevice);
+    return;
+  end;
+  println("OpenAL {} ({})", alGetString(AL_VERSION), alGetString(AL_RENDERER));
+
+  // The zip entry as one channel, so OpenAL can place it
+  LBuffer := LoadSoundZip(CArchive, CEntry, CPassword, true);
+  if LBuffer = 0 then
+    println("cannot load {} from assets.zip", CEntry);
+    alcMakeContextCurrent(nil);
+    alcDestroyContext(LContext);
+    alcCloseDevice(LDevice);
+    return;
+  end;
+  alGetBufferi(LBuffer, AL_SIZE, address of LSize);
+  alGetBufferi(LBuffer, AL_FREQUENCY, address of LRate);
+
+  // The listener stays at the origin facing -Z (OpenAL's default); the
+  // source loops on a circle around it
+  alGenSources(1, address of LSource);
+  alSourcei(LSource, AL_BUFFER, ALint(LBuffer));
+  alSourcei(LSource, AL_LOOPING, AL_TRUE);
+  alSource3f(LSource, AL_POSITION, 0.0, 0.0, float32(-CRadius));
+  alSourcePlay(LSource);
+  println("{} (zip): {} samples at {} Hz, circling for {} seconds", CEntry,
+    LSize div 2, LRate, CSeconds);
+
+  // Angle 0 is straight ahead (-Z), 90 degrees to the right (+X)
+  for LStep := 0 to CSeconds * CStepsPerSecond do
+    LAngle := 2.0 * Pi * float64(LStep) / float64(CSeconds * CStepsPerSecond);
+    LX := CRadius * Sin(LAngle);
+    LZ := -CRadius * Cos(LAngle);
+    alSource3f(LSource, AL_POSITION, float32(LX), 0.0, float32(LZ));
+    if LStep mod CStepsPerSecond = 0 then
+      println("  {} s: x {:5.2f}  z {:5.2f}  ({:3.0f} degrees)",
+        LStep div CStepsPerSecond, LX, LZ, LAngle * RadToDeg);
+    end;
+    Delay(1000 div CStepsPerSecond);
+  end;
+
+  // Teardown in reverse: alcCloseDevice refuses while a buffer or context is left
+  alSourceStop(LSource);
+  alDeleteSources(1, address of LSource);
+  alDeleteBuffers(1, address of LBuffer);
+  alcMakeContextCurrent(nil);
+  alcDestroyContext(LContext);
+  alcCloseDevice(LDevice);
+  println("done");
+end.

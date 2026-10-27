@@ -17,7 +17,20 @@
   (RUNTIME-EXCEPTION.md).
 -------------------------------------------------------------------------------
   raylib_ext.pcpp - the raylib_ext unit: `import raylib_ext;` gives raylib's
-  file loaders an IO form.
+  file loaders an IO form, MPEG-1 video, and the frame window.
+
+  The frame window (sfml_ext's sfx::RenderWindow, raylib style):
+  InitFrameWindow opens raylib's window at a base (virtual) size x the
+  monitor's scale (DPI / 96; Windows the window's monitor, Linux X11's
+  Xft.dpi, 96 unset: one rule on every target), centred, resizable, and
+  follows a DPI change. BeginFrame / EndFrame (inside BeginDrawing) draw in
+  base units through a letterboxed Camera2D, the aspect kept on resize,
+  maximize and ToggleFrameFullscreen, bars outside it; BeginFrameMode2D /
+  BeginFrameMode3D draw the program's own Camera2D / Camera3D through the
+  letterbox (the 3D scene at the base size's aspect); RestoreFrameClip turns
+  the frame's clip on again for code that turned it off (rlimgui_ext's ImGui);
+  GetFrameMousePosition is the mouse in base units. GetLetterboxRect,
+  GetScaledFrameSize and GetFramePoint are its rules, usable with no window.
 
   Every raylib routine that loads data from a file name has a form taking a
   CustomIO IO in its place, `<Name>IO(...)`: pass the IO CreateZipFileIO
@@ -1038,11 +1051,16 @@ using RaylibExtDoXChangeProperty = int (*)(void*, unsigned long, unsigned long, 
 using RaylibExtDoXFlush = int (*)(void*);
 using RaylibExtDoXCreateWindow = unsigned long (*)(void*, unsigned long, int, int, unsigned int,
   unsigned int, unsigned int, int, unsigned int, void*, unsigned long, void*);
+using RaylibExtDoXDestroyWindow = int (*)(void*, unsigned long);
 
 struct RaylibExtDoX11
 {
   void* Library = nullptr;
   RaylibExtDoXCreateWindow CreateWindow = nullptr;
+  // The real XDestroyWindow (the frame window's close)
+  RaylibExtDoXDestroyWindow DestroyWindow = nullptr;
+  // GLFW's display, from its first XCreateWindow (the frame window's DPI query)
+  void* Display = nullptr;
 };
 
 RaylibExtDoX11& RaylibExtDoX11State()
@@ -1124,8 +1142,27 @@ unsigned long RaylibExtDoXCreateWindowHook(void* ADisplay, unsigned long AParent
   LWindow = LReal(ADisplay, AParent, AX, AY, AWidth, AHeight, ABorder, ADepth, AClass, AVisual,
     AMask, AAttributes);
   if (LWindow != 0)
+  {
+    RaylibExtDoX11State().Display = ADisplay;
     RaylibExtDoSetX11Icon(ADisplay, LWindow);
+  }
   return LWindow;
+}
+
+// The frame window's close, seen as its native window goes (defined with
+// the frame below)
+void RaylibExtDoFrameWindowGone(std::uintptr_t AWindow);
+
+// XDestroyWindow as GLFW gets it from this unit's dlsym: the frame learns
+// its window is gone, then the real one
+int RaylibExtDoXDestroyWindowHook(void* ADisplay, unsigned long AWindow)
+{
+  const RaylibExtDoXDestroyWindow LReal = RaylibExtDoX11State().DestroyWindow;
+
+  RaylibExtDoFrameWindowGone(static_cast<std::uintptr_t>(AWindow));
+  if (LReal == nullptr)
+    return 0;
+  return LReal(ADisplay, AWindow);
 }
 #endif
 
@@ -1182,7 +1219,8 @@ HOOKABI_IMPORT_SLOT(CreateWindowExW);
 #else
 // GLFW loads libX11 at run time (dlopen) and takes its names with dlsym:
 // the program's dlsym (this definition) hands back the icon-setting
-// XCreateWindow for that one name and the real answer for every other;
+// XCreateWindow and the frame-closing XDestroyWindow for those two names
+// and the real answer for every other;
 // the real dlsym is glibc's own, found by version (dlvsym is not this
 // name, so nothing comes back here)
 extern "C" void* dlsym(void* AHandle, const char* AName)
@@ -1204,8 +1242,561 @@ extern "C" void* dlsym(void* AHandle, const char* AName)
     LState.CreateWindow = reinterpret_cast<RaylibExtDoXCreateWindow>(LFound);
     return reinterpret_cast<void*>(&RaylibExtDoXCreateWindowHook);
   }
+  if ((LFound != nullptr) && (std::strcmp(AName, "XDestroyWindow") == 0) &&
+    (AHandle != RTLD_NEXT) && (AHandle != RTLD_DEFAULT))
+  {
+    RaylibExtDoX11State().DestroyWindow = reinterpret_cast<RaylibExtDoXDestroyWindow>(LFound);
+    return reinterpret_cast<void*>(&RaylibExtDoXDestroyWindowHook);
+  }
   return LFound;
 }
+#endif
+
+// The frame window (sfml_ext's sfx::RenderWindow CONCEPT): a window opened
+// at a base (virtual) size x the monitor's scale (DPI / 96), drawn in base
+// units through a letterboxed Camera2D, the mouse mapped back to them. The
+// DPI is the OS's, the same rule on every target: Windows the window's own
+// (GetDpiForWindow, per monitor; GLFW makes the process per-monitor aware),
+// Linux X11's Xft.dpi (read live from RESOURCE_MANAGER), 96 when unset.
+// GLFW names raylib links statically, declared here (its header is not
+// shipped): the monitor list and a monitor's work area.
+extern "C" void** glfwGetMonitors(int* ACount);
+extern "C" void glfwGetMonitorWorkarea(void* AMonitor, int* AX, int* AY, int* AWidth, int* AHeight);
+
+namespace {
+
+constexpr int CRaylibExtDoBaseDpi = 96;
+
+struct RaylibExtDoFrame
+{
+  bool Open = false;
+  int BaseWidth = 0;
+  int BaseHeight = 0;
+  int Dpi = CRaylibExtDoBaseDpi;
+  // FLAG_WINDOW_HIGHDPI was set too: raylib sized the window and maps the
+  // mouse itself, so the frame window never resizes for the DPI (no stacking)
+  bool RaylibScales = false;
+  Color FrameColor = WHITE;
+  Color BarColor = BLACK;
+  Camera2D Camera{};
+  Rectangle Letterbox{};
+  Vector2 Mouse{};
+  double LastDpiCheck = 0.0;
+  // The native window (Windows' HWND, X11's Window id): its destruction is
+  // the frame's close
+  std::uintptr_t NativeWindow = 0;
+};
+
+RaylibExtDoFrame& RaylibExtDoFrameState()
+{
+  static RaylibExtDoFrame* LState = new RaylibExtDoFrame();
+  return *LState;
+}
+
+// AFrame back to "no frame window", the frame and bar colours (the
+// program's settings) kept
+void RaylibExtDoFrameReset(RaylibExtDoFrame& AFrame)
+{
+  const Color LFrameColor = AFrame.FrameColor;
+  const Color LBarColor = AFrame.BarColor;
+
+  AFrame = RaylibExtDoFrame();
+  AFrame.FrameColor = LFrameColor;
+  AFrame.BarColor = LBarColor;
+}
+
+// The frame as it stands, read by every frame routine. Its close is seen
+// as its native window goes (RaylibExtDoFrameWindowGone, from CloseWindow
+// through GLFW), so a window opened after it is never taken for the frame;
+// a frame whose raylib window is not there is closed too.
+RaylibExtDoFrame& RaylibExtDoFrameLive()
+{
+  RaylibExtDoFrame& LFrame = RaylibExtDoFrameState();
+  if (LFrame.Open && !IsWindowReady())
+    RaylibExtDoFrameReset(LFrame);
+  return LFrame;
+}
+
+// raylib's window as the OS names it: Windows' HWND, X11's Window id
+// (GetWindowHandle gives a pointer to raylib's copy of it there)
+std::uintptr_t RaylibExtDoNativeWindow()
+{
+  void* LHandle = GetWindowHandle();
+
+  if (LHandle == nullptr)
+    return 0;
+#if defined(_WIN32)
+  return reinterpret_cast<std::uintptr_t>(LHandle);
+#else
+  return static_cast<std::uintptr_t>(*static_cast<const unsigned long*>(LHandle));
+#endif
+}
+
+void RaylibExtDoFrameWindowGone(const std::uintptr_t AWindow)
+{
+  RaylibExtDoFrame& LFrame = RaylibExtDoFrameState();
+
+  if (LFrame.Open && (AWindow != 0) && (AWindow == LFrame.NativeWindow))
+    RaylibExtDoFrameReset(LFrame);
+}
+
+#if defined(_WIN32)
+void* GRaylibExtDoGetDpiForWindow = nullptr;
+void* GRaylibExtDoGetDpiForSystem = nullptr;
+
+int RaylibExtDoQueryDpi()
+{
+  // Looked up (Windows 10 1607+): the window's monitor, else the system's
+  using TDpiForWindow = unsigned int (*)(void*);
+  using TDpiForSystem = unsigned int (*)();
+  const auto LForWindow = reinterpret_cast<TDpiForWindow>(::pcpp_m_HookABI::HookReal(
+    GRaylibExtDoGetDpiForWindow, "user32.dll", "GetDpiForWindow"));
+  const auto LForSystem = reinterpret_cast<TDpiForSystem>(::pcpp_m_HookABI::HookReal(
+    GRaylibExtDoGetDpiForSystem, "user32.dll", "GetDpiForSystem"));
+  unsigned int LDpi = 0;
+
+  if ((LForWindow != nullptr) && (GetWindowHandle() != nullptr))
+    LDpi = LForWindow(GetWindowHandle());
+  if ((LDpi == 0) && (LForSystem != nullptr))
+    LDpi = LForSystem();
+  if (LDpi == 0)
+    return CRaylibExtDoBaseDpi;
+  return static_cast<int>(LDpi);
+}
+#else
+// libX11's names the Xft.dpi read needs (Xlib.h and Xresource.h are not
+// included: their Font is raylib's too)
+struct RaylibExtDoXrmValue
+{
+  unsigned int Size;
+  char* Addr;
+};
+using RaylibExtDoXDefaultRootWindow = unsigned long (*)(void*);
+using RaylibExtDoXGetWindowProperty = int (*)(void*, unsigned long, unsigned long, long, long, int,
+  unsigned long, unsigned long*, int*, unsigned long*, unsigned long*, unsigned char**);
+using RaylibExtDoXFree = int (*)(void*);
+using RaylibExtDoXrmGetStringDatabase = void* (*)(const char*);
+using RaylibExtDoXrmGetResource = int (*)(void*, const char*, const char*, char**, RaylibExtDoXrmValue*);
+using RaylibExtDoXrmDestroyDatabase = void (*)(void*);
+
+int RaylibExtDoQueryDpi()
+{
+  // Xlib's XA_STRING, AnyPropertyType-free read of the whole property
+  constexpr unsigned long CXaString = 31;
+  constexpr long CWholeProperty = 0x7FFFFFFFL;
+  using TDlsym = void* (*)(void*, const char*);
+  static const TDlsym LDlsym = reinterpret_cast<TDlsym>(dlvsym(RTLD_NEXT, "dlsym", "GLIBC_2.2.5"));
+  const RaylibExtDoX11& LState = RaylibExtDoX11State();
+  unsigned long LType = 0;
+  int LFormat = 0;
+  unsigned long LCount = 0;
+  unsigned long LAfter = 0;
+  unsigned char* LData = nullptr;
+  int LResult = CRaylibExtDoBaseDpi;
+
+  if ((LDlsym == nullptr) || (LState.Library == nullptr) || (LState.Display == nullptr))
+    return LResult;
+  const auto LRoot = reinterpret_cast<RaylibExtDoXDefaultRootWindow>(
+    LDlsym(LState.Library, "XDefaultRootWindow"));
+  const auto LIntern = reinterpret_cast<RaylibExtDoXInternAtom>(LDlsym(LState.Library, "XInternAtom"));
+  const auto LGet = reinterpret_cast<RaylibExtDoXGetWindowProperty>(
+    LDlsym(LState.Library, "XGetWindowProperty"));
+  const auto LFree = reinterpret_cast<RaylibExtDoXFree>(LDlsym(LState.Library, "XFree"));
+  const auto LGetDatabase = reinterpret_cast<RaylibExtDoXrmGetStringDatabase>(
+    LDlsym(LState.Library, "XrmGetStringDatabase"));
+  const auto LGetResource = reinterpret_cast<RaylibExtDoXrmGetResource>(
+    LDlsym(LState.Library, "XrmGetResource"));
+  const auto LDestroy = reinterpret_cast<RaylibExtDoXrmDestroyDatabase>(
+    LDlsym(LState.Library, "XrmDestroyDatabase"));
+  if ((LRoot == nullptr) || (LIntern == nullptr) || (LGet == nullptr) || (LFree == nullptr) ||
+    (LGetDatabase == nullptr) || (LGetResource == nullptr) || (LDestroy == nullptr))
+    return LResult;
+
+  // The X resources as they are now (RESOURCE_MANAGER on the root window),
+  // so a changed setting is seen; 0 = Success
+  if (LGet(LState.Display, LRoot(LState.Display), LIntern(LState.Display, "RESOURCE_MANAGER", 0), 0,
+    CWholeProperty, 0, CXaString, &LType, &LFormat, &LCount, &LAfter, &LData) != 0)
+    return LResult;
+  if (LData == nullptr)
+    return LResult;
+  void* LDatabase = LGetDatabase(reinterpret_cast<const char*>(LData));
+  if (LDatabase != nullptr)
+  {
+    char* LValueType = nullptr;
+    RaylibExtDoXrmValue LValue{};
+    if ((LGetResource(LDatabase, "Xft.dpi", "Xft.Dpi", &LValueType, &LValue) != 0) &&
+      (LValue.Addr != nullptr))
+    {
+      const double LDpi = std::strtod(LValue.Addr, nullptr);
+      if (LDpi >= 1.0)
+        LResult = static_cast<int>(std::lround(LDpi));
+    }
+    LDestroy(LDatabase);
+  }
+  LFree(LData);
+  return LResult;
+}
+#endif
+
+// ABase scaled for ADpi, each side rounded
+Vector2 RaylibExtDoScaledSize(const int ABaseWidth, const int ABaseHeight, const int ADpi)
+{
+  const double LScale = static_cast<double>(ADpi) / CRaylibExtDoBaseDpi;
+  return Vector2{static_cast<float>(std::lround(ABaseWidth * LScale)),
+    static_cast<float>(std::lround(ABaseHeight * LScale))};
+}
+
+// The rectangle (window units) that fits ABase's aspect into AWindow,
+// centred, bars outside it; the whole window when a size is 0
+Rectangle RaylibExtDoLetterbox(const int AWindowWidth, const int AWindowHeight, const int ABaseWidth,
+  const int ABaseHeight)
+{
+  Rectangle LRect{0.0f, 0.0f, static_cast<float>(AWindowWidth), static_cast<float>(AWindowHeight)};
+  if ((AWindowWidth <= 0) || (AWindowHeight <= 0) || (ABaseWidth <= 0) || (ABaseHeight <= 0))
+    return LRect;
+
+  const float LWindowRatio = static_cast<float>(AWindowWidth) / static_cast<float>(AWindowHeight);
+  const float LBaseRatio = static_cast<float>(ABaseWidth) / static_cast<float>(ABaseHeight);
+  if (LWindowRatio >= LBaseRatio)
+  {
+    // Wider than the frame: bars left and right
+    LRect.width = static_cast<float>(AWindowHeight) * LBaseRatio;
+    LRect.x = (static_cast<float>(AWindowWidth) - LRect.width) / 2.0f;
+  }
+  else
+  {
+    // Taller than the frame: bars above and below
+    LRect.height = static_cast<float>(AWindowWidth) / LBaseRatio;
+    LRect.y = (static_cast<float>(AWindowHeight) - LRect.height) / 2.0f;
+  }
+  return LRect;
+}
+
+// A window point (window units) in frame units through the letterbox
+// ALetterbox of a ABase frame, clamped to the frame and rounded
+Vector2 RaylibExtDoFramePoint(const Vector2 APoint, const Rectangle ALetterbox, const int ABaseWidth,
+  const int ABaseHeight)
+{
+  if ((ALetterbox.width <= 0.0f) || (ALetterbox.height <= 0.0f) || (ABaseWidth <= 0) || (ABaseHeight <= 0))
+    return Vector2{0.0f, 0.0f};
+  const float LX = (APoint.x - ALetterbox.x) * static_cast<float>(ABaseWidth) / ALetterbox.width;
+  const float LY = (APoint.y - ALetterbox.y) * static_cast<float>(ABaseHeight) / ALetterbox.height;
+  return Vector2{static_cast<float>(std::lround(std::clamp(LX, 0.0f, static_cast<float>(ABaseWidth - 1)))),
+    static_cast<float>(std::lround(std::clamp(LY, 0.0f, static_cast<float>(ABaseHeight - 1))))};
+}
+
+// The window at the base size x the scale (a window at its normal size
+// only: fullscreen, borderless, maximized and minimized are the system's),
+// centred on its monitor's work area when ACenter
+void RaylibExtDoFrameApplyScale(const bool ACenter)
+{
+  RaylibExtDoFrame& LFrame = RaylibExtDoFrameLive();
+  int LCount = 0;
+  int LAreaX = 0;
+  int LAreaY = 0;
+  int LAreaWidth = 0;
+  int LAreaHeight = 0;
+
+  if (LFrame.RaylibScales || IsWindowFullscreen() || IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE) ||
+    IsWindowMaximized() || IsWindowMinimized())
+    return;
+  const Vector2 LSize = RaylibExtDoScaledSize(LFrame.BaseWidth, LFrame.BaseHeight, LFrame.Dpi);
+  SetWindowSize(static_cast<int>(LSize.x), static_cast<int>(LSize.y));
+  if (!ACenter)
+    return;
+
+  const int LMonitor = GetCurrentMonitor();
+  void** LMonitors = glfwGetMonitors(&LCount);
+  if ((LMonitors != nullptr) && (LMonitor >= 0) && (LMonitor < LCount))
+    glfwGetMonitorWorkarea(LMonitors[LMonitor], &LAreaX, &LAreaY, &LAreaWidth, &LAreaHeight);
+  if ((LAreaWidth <= 0) || (LAreaHeight <= 0))
+  {
+    const Vector2 LPosition = GetMonitorPosition(LMonitor);
+    LAreaX = static_cast<int>(LPosition.x);
+    LAreaY = static_cast<int>(LPosition.y);
+    LAreaWidth = GetMonitorWidth(LMonitor);
+    LAreaHeight = GetMonitorHeight(LMonitor);
+  }
+  // Centred; a window larger than the area starts at its top left
+  SetWindowPosition(LAreaX + std::max(0, (LAreaWidth - static_cast<int>(LSize.x)) / 2),
+    LAreaY + std::max(0, (LAreaHeight - static_cast<int>(LSize.y)) / 2));
+}
+
+bool RaylibExtDoFrameInit(const int ABaseWidth, const int ABaseHeight, const char* ATitle)
+{
+  RaylibExtDoFrame& LFrame = RaylibExtDoFrameLive();
+
+  // A frame has a size; one window per program (raylib's rule)
+  if ((ABaseWidth <= 0) || (ABaseHeight <= 0) || IsWindowReady())
+    return false;
+  SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+  InitWindow(ABaseWidth, ABaseHeight, ATitle);
+  if (!IsWindowReady())
+    return false;
+
+  LFrame.Open = true;
+  LFrame.NativeWindow = RaylibExtDoNativeWindow();
+  LFrame.BaseWidth = ABaseWidth;
+  LFrame.BaseHeight = ABaseHeight;
+  LFrame.RaylibScales = IsWindowState(FLAG_WINDOW_HIGHDPI);
+  LFrame.Dpi = RaylibExtDoQueryDpi();
+  LFrame.LastDpiCheck = GetTime();
+  RaylibExtDoFrameApplyScale(true);
+  return true;
+}
+
+void RaylibExtDoFrameFollowDpi()
+{
+  // Each frame on Windows (a cheap call; a move to another monitor), once a
+  // second on X11 (a round trip to the server)
+  RaylibExtDoFrame& LFrame = RaylibExtDoFrameLive();
+#if defined(_WIN32)
+  const bool LCheck = true;
+#else
+  const bool LCheck = (GetTime() - LFrame.LastDpiCheck) >= 1.0;
+#endif
+  if (!LCheck)
+    return;
+  LFrame.LastDpiCheck = GetTime();
+  const int LDpi = RaylibExtDoQueryDpi();
+  if (LDpi == LFrame.Dpi)
+    return;
+  LFrame.Dpi = LDpi;
+  RaylibExtDoFrameApplyScale(false);
+}
+
+// The frame's clip: drawing held to the letterbox, in whole window units
+// (BeginFrame's and RestoreFrameClip's one rule)
+void RaylibExtDoFrameClip(const RaylibExtDoFrame& AFrame)
+{
+  BeginScissorMode(static_cast<int>(std::lround(AFrame.Letterbox.x)),
+    static_cast<int>(std::lround(AFrame.Letterbox.y)), static_cast<int>(std::lround(AFrame.Letterbox.width)),
+    static_cast<int>(std::lround(AFrame.Letterbox.height)));
+}
+
+void RaylibExtDoFrameRestoreClip()
+{
+  if (!RaylibExtDoFrameLive().Open)
+    return;
+  RaylibExtDoFrameClip(RaylibExtDoFrameLive());
+}
+
+void RaylibExtDoFrameBegin()
+{
+  RaylibExtDoFrame& LFrame = RaylibExtDoFrameLive();
+
+  if (!LFrame.Open)
+    return;
+  RaylibExtDoFrameFollowDpi();
+
+  // The letterbox follows the window's size as it is now (a resize needs no call)
+  LFrame.Letterbox = RaylibExtDoLetterbox(GetScreenWidth(), GetScreenHeight(), LFrame.BaseWidth,
+    LFrame.BaseHeight);
+  LFrame.Camera.offset = Vector2{LFrame.Letterbox.x, LFrame.Letterbox.y};
+  LFrame.Camera.target = Vector2{0.0f, 0.0f};
+  LFrame.Camera.rotation = 0.0f;
+  LFrame.Camera.zoom = LFrame.Letterbox.width / static_cast<float>(LFrame.BaseWidth);
+
+  // The bars: the whole window; then the frame, clipped to it
+  ClearBackground(LFrame.BarColor);
+  RaylibExtDoFrameClip(LFrame);
+  BeginMode2D(LFrame.Camera);
+  DrawRectangle(0, 0, LFrame.BaseWidth, LFrame.BaseHeight, LFrame.FrameColor);
+
+  LFrame.Mouse = RaylibExtDoFramePoint(GetMousePosition(), LFrame.Letterbox, LFrame.BaseWidth,
+    LFrame.BaseHeight);
+}
+
+void RaylibExtDoFrameEnd()
+{
+  if (!RaylibExtDoFrameLive().Open)
+    return;
+  EndMode2D();
+  EndScissorMode();
+}
+
+// ACamera (in base units) composed with the frame's camera: raylib's
+// BeginMode2D replaces the matrix, so the two are folded into one. The
+// frame's camera is T(offset) S(zoom) (target 0, no rotation); a uniform
+// scale commutes with a rotation, so the product is again one Camera2D
+Camera2D RaylibExtDoFrameCompose(const Camera2D ACamera)
+{
+  const Camera2D& LFrame = RaylibExtDoFrameLive().Camera;
+  Camera2D LResult = ACamera;
+  LResult.offset.x = LFrame.offset.x + LFrame.zoom * ACamera.offset.x;
+  LResult.offset.y = LFrame.offset.y + LFrame.zoom * ACamera.offset.y;
+  LResult.zoom = LFrame.zoom * ACamera.zoom;
+  return LResult;
+}
+
+void RaylibExtDoFrameMode2DBegin(const Camera2D ACamera)
+{
+  if (!RaylibExtDoFrameLive().Open)
+  {
+    BeginMode2D(ACamera);
+    return;
+  }
+  BeginMode2D(RaylibExtDoFrameCompose(ACamera));
+}
+
+void RaylibExtDoFrameMode2DEnd()
+{
+  // Back to the frame's own camera (raylib's EndMode2D would leave window units)
+  if (!RaylibExtDoFrameLive().Open)
+  {
+    EndMode2D();
+    return;
+  }
+  BeginMode2D(RaylibExtDoFrameLive().Camera);
+}
+
+// The letterbox in framebuffer pixels, as rlViewport takes it: HIGHDPI
+// renders above the window's size (render / screen is the pixel scale), and
+// GL's viewport origin is the framebuffer's bottom-left corner
+void RaylibExtDoFrameViewport(const RaylibExtDoFrame& AFrame)
+{
+  float LScaleX = 1.0f;
+  float LScaleY = 1.0f;
+
+  if ((GetScreenWidth() > 0) && (GetScreenHeight() > 0))
+  {
+    LScaleX = static_cast<float>(GetRenderWidth()) / static_cast<float>(GetScreenWidth());
+    LScaleY = static_cast<float>(GetRenderHeight()) / static_cast<float>(GetScreenHeight());
+  }
+  const int LX = static_cast<int>(std::lround(AFrame.Letterbox.x * LScaleX));
+  const int LWidth = static_cast<int>(std::lround(AFrame.Letterbox.width * LScaleX));
+  const int LHeight = static_cast<int>(std::lround(AFrame.Letterbox.height * LScaleY));
+  const int LBottom = static_cast<int>(std::lround((AFrame.Letterbox.y + AFrame.Letterbox.height) * LScaleY));
+  rlViewport(LX, GetRenderHeight() - LBottom, LWidth, LHeight);
+}
+
+// ACamera's projection at the frame's base aspect: raylib's BeginMode3D rule
+// (rcore.c), with the base size in place of the framebuffer's
+void RaylibExtDoFrameProjection(const RaylibExtDoFrame& AFrame, const Camera3D ACamera)
+{
+  const double LAspect = static_cast<double>(AFrame.BaseWidth) / static_cast<double>(AFrame.BaseHeight);
+  const double LNear = rlGetCullDistanceNear();
+  const double LFar = rlGetCullDistanceFar();
+
+  rlMatrixMode(RL_PROJECTION);
+  rlLoadIdentity();
+  if (ACamera.projection == CAMERA_PERSPECTIVE)
+  {
+    const double LTop = LNear * std::tan(ACamera.fovy * 0.5 * DEG2RAD);
+    const double LRight = LTop * LAspect;
+    rlFrustum(-LRight, LRight, -LTop, LTop, LNear, LFar);
+  }
+  else if (ACamera.projection == CAMERA_ORTHOGRAPHIC)
+  {
+    const double LTop = ACamera.fovy / 2.0;
+    const double LRight = LTop * LAspect;
+    rlOrtho(-LRight, LRight, -LTop, LTop, LNear, LFar);
+  }
+  rlMatrixMode(RL_MODELVIEW);
+}
+
+void RaylibExtDoFrameMode3DBegin(const Camera3D ACamera)
+{
+  RaylibExtDoFrame& LFrame = RaylibExtDoFrameLive();
+
+  // raylib's BeginMode3D first: the batch drawn, the 2D projection saved,
+  // the view matrix, the depth test; then the projection and the viewport
+  // are the letterbox's (the frame's Camera2D and clip stay as they are)
+  BeginMode3D(ACamera);
+  if (!LFrame.Open)
+    return;
+  RaylibExtDoFrameProjection(LFrame, ACamera);
+  RaylibExtDoFrameViewport(LFrame);
+}
+
+void RaylibExtDoFrameMode3DEnd()
+{
+  // raylib's EndMode3D: the batch drawn, the 2D projection back, the depth
+  // test off; then raylib's own viewport (desktop GLFW sets no render offset)
+  // and the frame's camera and clip, as BeginFrame left them
+  EndMode3D();
+  if (!RaylibExtDoFrameLive().Open)
+    return;
+  rlViewport(0, 0, GetRenderWidth(), GetRenderHeight());
+  BeginMode2D(RaylibExtDoFrameLive().Camera);
+  RaylibExtDoFrameClip(RaylibExtDoFrameLive());
+}
+
+int RaylibExtDoFrameWidth()
+{
+  return RaylibExtDoFrameLive().BaseWidth;
+}
+
+int RaylibExtDoFrameHeight()
+{
+  return RaylibExtDoFrameLive().BaseHeight;
+}
+
+int RaylibExtDoFrameDpi()
+{
+  return RaylibExtDoFrameLive().Dpi;
+}
+
+Vector2 RaylibExtDoFrameMouse()
+{
+  return RaylibExtDoFrameLive().Mouse;
+}
+
+Camera2D RaylibExtDoFrameCamera()
+{
+  return RaylibExtDoFrameLive().Camera;
+}
+
+void RaylibExtDoFrameSetColor(const Color AColor)
+{
+  RaylibExtDoFrameLive().FrameColor = AColor;
+}
+
+Color RaylibExtDoFrameColor()
+{
+  return RaylibExtDoFrameLive().FrameColor;
+}
+
+void RaylibExtDoFrameSetBarColor(const Color AColor)
+{
+  RaylibExtDoFrameLive().BarColor = AColor;
+}
+
+Color RaylibExtDoFrameBarColor()
+{
+  return RaylibExtDoFrameLive().BarColor;
+}
+
+void RaylibExtDoFrameToggleFullscreen()
+{
+  // A borderless window over the monitor (the context kept); toggled back,
+  // raylib returns the window to its place and size
+  if (RaylibExtDoFrameLive().Open)
+    ToggleBorderlessWindowed();
+}
+
+} // namespace
+
+#if defined(_WIN32)
+// GLFW destroys its window with user32's DestroyWindow (raylib's
+// CloseWindow): the frame learns its window is gone, then the real one.
+// Declared as user32 has it (BOOL = int, the x64 calling convention).
+namespace {
+void* GRaylibExtDoRealDestroyWindow = nullptr;
+}
+
+extern "C" int DestroyWindow(void* AWindow)
+{
+  using TReal = int (*)(void*);
+  const TReal LReal = reinterpret_cast<TReal>(::pcpp_m_HookABI::HookReal(
+    GRaylibExtDoRealDestroyWindow, "user32.dll", "DestroyWindow"));
+
+  RaylibExtDoFrameWindowGone(reinterpret_cast<std::uintptr_t>(AWindow));
+  if (LReal == nullptr)
+    return 0;
+  return LReal(AWindow);
+}
+HOOKABI_IMPORT_SLOT(DestroyWindow);
 #endif
 
 // The prefix no registration ever gives: its paths open as missing files
@@ -2091,6 +2682,291 @@ end;
 exported routine DrawVideoPro(const AVideo: Video; const ASource: Rectangle; const ADest: Rectangle; const AOrigin: ::Vector2; const ARotation: float32; const ATint: Color);
 begin
   RaylibExtDoVDraw(AVideo.ctxData, ASource, ADest, AOrigin, ARotation, ATint);
+end;
+
+/// Opens the frame window: raylib's window at a base (virtual) size the
+/// program draws in, whatever the window's real size. It opens at the base
+/// size x the monitor's scale (DPI / 96), centred on the monitor's work area,
+/// resizable, and follows a DPI change (a move to another monitor). The DPI
+/// is the OS's, the same rule on every target: Windows the window's monitor,
+/// Linux X11's Xft.dpi (96 when the desktop sets none). Draw between
+/// BeginFrame and EndFrame in base units; on resize, maximize or fullscreen
+/// the frame is scaled with its aspect kept, bars outside it. SetConfigFlags
+/// before it still applies (vsync, MSAA, ...); FLAG_WINDOW_HIGHDPI is not
+/// needed, and when set raylib's own scaling is used instead (never both).
+/// CloseWindow closes the frame too (GetFrameWidth 0 again, the frame and
+/// bar colours kept), and a new frame window may then be opened.
+/// @param ABaseWidth the frame's width in base units (more than 0)
+/// @param ABaseHeight the frame's height in base units (more than 0)
+/// @param ATitle the window's title
+/// @returns true when the window is open; false (no window) for a size of
+///   0 or less, a window already open, or a window raylib could not make
+/// @example `if not InitFrameWindow(800, 450, "Game") then return; end;`
+/// @see BeginFrame
+/// @since 0.3
+exported routine InitFrameWindow(const ABaseWidth: int32; const ABaseHeight: int32; const ATitle: ptr to const char): bool;
+begin
+  return RaylibExtDoFrameInit(ABaseWidth, ABaseHeight, ATitle);
+end;
+
+/// Starts drawing the frame, inside BeginDrawing / EndDrawing: the window
+/// cleared with the bar colour, the letterbox fitted to the window's size
+/// now (a resize needs no call), drawing clipped to it and in base units
+/// (GetFrameCamera's Camera2D), the frame filled with its colour, and the
+/// mouse taken (GetFrameMousePosition). Does nothing with no frame window.
+/// @example `BeginDrawing(); BeginFrame(); DrawCircle(400, 225, 50.0f, RED); EndFrame(); EndDrawing();`
+/// @see EndFrame
+/// @since 0.3
+exported routine BeginFrame();
+begin
+  RaylibExtDoFrameBegin();
+end;
+
+/// Ends drawing the frame: the camera and the clip set back, so drawing
+/// after it (a HUD in window units) covers the whole window.
+/// @example `EndFrame(); DrawFPS(10, 10); EndDrawing();`
+/// @see BeginFrame
+/// @since 0.3
+exported routine EndFrame();
+begin
+  RaylibExtDoFrameEnd();
+end;
+
+/// A Camera2D of the program's own inside the frame (a scrolling map, a
+/// zoom): ACamera is in base units (its offset too) and is drawn through the
+/// frame's letterbox. raylib's BeginMode2D replaces the frame's camera, so
+/// use this pair inside BeginFrame / EndFrame. With no frame window it is
+/// raylib's BeginMode2D.
+/// @param ACamera the program's camera, in base units
+/// @example `BeginFrameMode2D(LCamera); DrawTexture(LMap, 0, 0, WHITE); EndFrameMode2D();`
+/// @see EndFrameMode2D
+/// @since 0.3
+exported routine BeginFrameMode2D(const ACamera: Camera2D);
+begin
+  RaylibExtDoFrameMode2DBegin(ACamera);
+end;
+
+/// Ends BeginFrameMode2D: drawing is in base units through the frame's own
+/// camera again. With no frame window it is raylib's EndMode2D.
+/// @example `EndFrameMode2D(); DrawText("HUD", 10, 10, 20, WHITE);`
+/// @see BeginFrameMode2D
+/// @since 0.3
+exported routine EndFrameMode2D();
+begin
+  RaylibExtDoFrameMode2DEnd();
+end;
+
+/// A Camera3D drawn through the frame's letterbox: the scene fills the
+/// letterbox at the base size's aspect, kept on resize, maximize and
+/// fullscreen, as the frame's 2D drawing is. raylib's BeginMode3D takes the
+/// whole window's aspect, so use this pair inside BeginFrame / EndFrame. With
+/// no frame window it is raylib's BeginMode3D.
+/// @param ACamera the program's 3D camera
+/// @example `BeginFrameMode3D(LCamera); DrawGrid(10, 1.0f); EndFrameMode3D();`
+/// @see EndFrameMode3D
+/// @since 0.3
+exported routine BeginFrameMode3D(const ACamera: Camera3D);
+begin
+  RaylibExtDoFrameMode3DBegin(ACamera);
+end;
+
+/// Ends BeginFrameMode3D: drawing is in base units through the frame's own
+/// camera and clip again, as BeginFrame set them. With no frame window it is
+/// raylib's EndMode3D.
+/// @example `EndFrameMode3D(); DrawText("HUD", 10, 10, 20, WHITE);`
+/// @see BeginFrameMode3D
+/// @since 0.3
+exported routine EndFrameMode3D();
+begin
+  RaylibExtDoFrameMode3DEnd();
+end;
+
+/// Turns the frame's clip on again, as BeginFrame set it (drawing held to
+/// the letterbox): for code between BeginFrame and EndFrame that turned
+/// scissoring off or clipped elsewhere (raylib's EndScissorMode, a renderer
+/// such as rlImGui's). The camera is left as it is. Does nothing with no
+/// frame window.
+/// @example `EndScissorMode(); RestoreFrameClip(); DrawText("clipped again", 10, 10, 20, WHITE);`
+/// @see BeginFrame
+/// @since 0.3
+exported routine RestoreFrameClip();
+begin
+  RaylibExtDoFrameRestoreClip();
+end;
+
+/// The frame's base width (InitFrameWindow's); 0 with no frame window.
+/// @returns the width in base units
+/// @example `LWidth := GetFrameWidth();`
+/// @see GetFrameHeight
+/// @since 0.3
+exported routine GetFrameWidth(): int32;
+begin
+  return RaylibExtDoFrameWidth();
+end;
+
+/// The frame's base height (InitFrameWindow's); 0 with no frame window.
+/// @returns the height in base units
+/// @example `LHeight := GetFrameHeight();`
+/// @see GetFrameWidth
+/// @since 0.3
+exported routine GetFrameHeight(): int32;
+begin
+  return RaylibExtDoFrameHeight();
+end;
+
+/// The monitor's DPI the frame window is sized for (96 = scale 1).
+/// @returns the DPI
+/// @example `println(GetFrameDpi());`
+/// @see GetFrameScale
+/// @since 0.3
+exported routine GetFrameDpi(): int32;
+begin
+  return RaylibExtDoFrameDpi();
+end;
+
+/// The monitor's scale the frame window is sized for: GetFrameDpi / 96.
+/// @returns the scale (1.0 at 96 DPI, 1.5 at 144)
+/// @example `LScale := GetFrameScale();`
+/// @see GetFrameDpi
+/// @since 0.3
+exported routine GetFrameScale(): float32;
+begin
+  return float32(float32(RaylibExtDoFrameDpi()) / 96.0);
+end;
+
+/// The DPI of raylib's window as the OS reports it now, frame window or
+/// not: the frame's own rule on every target (Windows the window's monitor,
+/// the system's with no window; Linux X11's Xft.dpi, 96 when the desktop
+/// sets none or there is no window). raylib's GetWindowScaleDPI reports 1.0 unless
+/// FLAG_WINDOW_HIGHDPI is set; this is the monitor's whatever the flags.
+/// @returns the DPI (96 = scale 1, 144 = scale 1.5)
+/// @example `LScale := float32(GetWindowDpi()) / 96.0f;`
+/// @see GetFrameDpi
+/// @since 0.3
+exported routine GetWindowDpi(): int32;
+begin
+  return RaylibExtDoQueryDpi();
+end;
+
+/// The mouse at BeginFrame, in base units, clamped to the frame (0 to the
+/// base size - 1) and rounded: the same point wherever the window's size.
+/// @returns the mouse position in the frame
+/// @example `LMouse := GetFrameMousePosition();`
+/// @see BeginFrame
+/// @since 0.3
+exported routine GetFrameMousePosition(): ::Vector2;
+begin
+  return RaylibExtDoFrameMouse();
+end;
+
+/// The Camera2D BeginFrame draws through (its offset is the letterbox's top
+/// left, its zoom the window units per base unit): for GetScreenToWorld2D /
+/// GetWorldToScreen2D on other points.
+/// @returns the frame's camera as BeginFrame last set it
+/// @example `LWorld := GetScreenToWorld2D(LTouch, GetFrameCamera());`
+/// @see BeginFrame
+/// @since 0.3
+exported routine GetFrameCamera(): Camera2D;
+begin
+  return RaylibExtDoFrameCamera();
+end;
+
+/// Sets the colour the frame is filled with at BeginFrame (WHITE by default).
+/// @param AColor the colour
+/// @example `SetFrameColor(RAYWHITE);`
+/// @see SetFrameBarColor
+/// @since 0.3
+exported routine SetFrameColor(const AColor: Color);
+begin
+  RaylibExtDoFrameSetColor(AColor);
+end;
+
+/// The colour the frame is filled with at BeginFrame.
+/// @returns the colour
+/// @example `LColor := GetFrameColor();`
+/// @see SetFrameColor
+/// @since 0.3
+exported routine GetFrameColor(): Color;
+begin
+  return RaylibExtDoFrameColor();
+end;
+
+/// Sets the colour of the bars around the frame (BLACK by default).
+/// @param AColor the colour
+/// @example `SetFrameBarColor(DARKGRAY);`
+/// @see SetFrameColor
+/// @since 0.3
+exported routine SetFrameBarColor(const AColor: Color);
+begin
+  RaylibExtDoFrameSetBarColor(AColor);
+end;
+
+/// The colour of the bars around the frame.
+/// @returns the colour
+/// @example `LColor := GetFrameBarColor();`
+/// @see SetFrameBarColor
+/// @since 0.3
+exported routine GetFrameBarColor(): Color;
+begin
+  return RaylibExtDoFrameBarColor();
+end;
+
+/// Toggles fullscreen: a borderless window over the whole monitor it is on
+/// (the context kept); toggled back, the window returns to its place and
+/// size. The frame keeps its aspect either way. Does nothing with no frame
+/// window.
+/// @example `if IsKeyPressed(KEY_F11) then ToggleFrameFullscreen(); end;`
+/// @see InitFrameWindow
+/// @since 0.3
+exported routine ToggleFrameFullscreen();
+begin
+  RaylibExtDoFrameToggleFullscreen();
+end;
+
+/// The letterbox rule itself, for any size (no window needed): the
+/// rectangle, in window units, that fits the base size's aspect into the
+/// window, centred, bars outside it. A size of 0 or less: the whole window.
+/// @param AWindowWidth the window's width
+/// @param AWindowHeight the window's height
+/// @param ABaseWidth the frame's base width
+/// @param ABaseHeight the frame's base height
+/// @returns the frame's rectangle in the window
+/// @example `LBox := GetLetterboxRect(1920, 1080, 800, 600);`
+/// @see GetScaledFrameSize
+/// @since 0.3
+exported routine GetLetterboxRect(const AWindowWidth: int32; const AWindowHeight: int32; const ABaseWidth: int32; const ABaseHeight: int32): Rectangle;
+begin
+  return RaylibExtDoLetterbox(AWindowWidth, AWindowHeight, ABaseWidth, ABaseHeight);
+end;
+
+/// The DPI rule itself (no window needed): the window size InitFrameWindow
+/// opens for a base size at a DPI, each side base x DPI / 96, rounded.
+/// @param ABaseWidth the frame's base width
+/// @param ABaseHeight the frame's base height
+/// @param ADpi the monitor's DPI
+/// @returns the window size (x = width, y = height)
+/// @example `LSize := GetScaledFrameSize(800, 450, 144);`
+/// @see GetLetterboxRect
+/// @since 0.3
+exported routine GetScaledFrameSize(const ABaseWidth: int32; const ABaseHeight: int32; const ADpi: int32): ::Vector2;
+begin
+  return RaylibExtDoScaledSize(ABaseWidth, ABaseHeight, ADpi);
+end;
+
+/// The mouse rule itself (no window needed): a window point in base units
+/// through a letterbox (GetLetterboxRect's) of a base-size frame, clamped to
+/// the frame (0 to the base size - 1) and rounded.
+/// @param APoint the point in window units
+/// @param ALetterbox the frame's rectangle in the window
+/// @param ABaseWidth the frame's base width
+/// @param ABaseHeight the frame's base height
+/// @returns the point in the frame; (0, 0) for an empty letterbox or base
+/// @example `LAt := GetFramePoint(GetMousePosition(), LBox, 800, 600);`
+/// @see GetFrameMousePosition
+/// @since 0.3
+exported routine GetFramePoint(const APoint: ::Vector2; const ALetterbox: Rectangle; const ABaseWidth: int32; const ABaseHeight: int32): ::Vector2;
+begin
+  return RaylibExtDoFramePoint(APoint, ALetterbox, ABaseWidth, ABaseHeight);
 end;
 
 end.

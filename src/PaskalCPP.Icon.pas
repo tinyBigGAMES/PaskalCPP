@@ -72,6 +72,7 @@ uses
   Winapi.ActiveX,
   Winapi.Wincodec,
   System.IOUtils,
+  StdApp.Utils,
   StdApp.Resources;
 
 const
@@ -210,15 +211,9 @@ begin
   Result := DecodeLargest(AIconPath, LWidth, LHeight, LPixels, AFailure);
   if not Result then
     Exit;
-  try
-    TFile.WriteAllBytes(AEntryPath, EntryBytes(LWidth, LHeight, LPixels));
-  except
-    on E: Exception do
-    begin
-      AFailure := E.Message;
-      Result := False;
-    end;
-  end;
+  // The entry is compiled into the program: written only when its bytes
+  // changed, so zig's cache (time stamps) keeps that TU's object
+  Result := TUtils.WriteBytesIfChanged(AEntryPath, EntryBytes(LWidth, LHeight, LPixels), AFailure);
 end;
 
 end.

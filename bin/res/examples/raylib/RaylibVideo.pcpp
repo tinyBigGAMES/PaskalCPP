@@ -18,8 +18,11 @@
   LoadVideoZip reads res/assets/videos/intro.mpg from repo\bin\assets.zip
   while it plays (the SFML examples pack the zip when it is not there,
   examples\sfml\ZipPlayer); UpdateVideo decodes once a frame, DrawVideoPro
-  draws it fitted to the window. Space pauses / resumes, L turns looping on
-  and off, Up / Down change the volume, Escape or the close button ends it.
+  draws it fitted to the frame. Space pauses / resumes, L turns looping on
+  and off, Up / Down change the volume, F11 toggles fullscreen, Escape or
+  the close button ends it. The window is raylib_ext's frame window: drawn
+  in 960 x 540 units, sized for the monitor's DPI, the picture scaled and
+  letterboxed on resize.
   The window shows the program's icon (@exeicon), as raylib_ext gives it.
 ==============================================================================*/
 
@@ -30,6 +33,7 @@ module exe RaylibVideo;
 import
   raylib,
   raylib_ext,
+  Math,
   SysUtils;
 
 const
@@ -98,17 +102,24 @@ var
   LScale: float32;
   LWidth: float32;
   LHeight: float32;
-  LOrigin: Vector2;
+  // raylib's (Math has a Vector2 of its own)
+  LOrigin: ::Vector2;
 begin
   if not FileExists(CArchive) then
     println("assets.zip is not there: run examples\\sfml\\ZipPlayer once, it packs res\\assets into it");
     return;
   end;
 
-  SetConfigFlags(FLAG_VSYNC_HINT | FLAG_WINDOW_HIGHDPI | FLAG_WINDOW_RESIZABLE);
-  InitWindow(CScreenWidth, CScreenHeight, "PaskalCPP + raylib: video from a zip");
+  SetConfigFlags(FLAG_VSYNC_HINT);
+  // The frame window: drawn in 960 x 540 units, sized for the monitor's DPI,
+  // scaled and letterboxed on resize
+  if not InitFrameWindow(CScreenWidth, CScreenHeight, "PaskalCPP + raylib: video from a zip") then
+    println("the window did not open");
+    return;
+  end;
   InitAudioDevice();
   SetTargetFPS(60);
+  SetFrameColor(Rgb(16, 16, 20));
 
   LVideo := LoadVideoZip(CArchive, CEntry, CPassword);
   if not IsVideoValid(LVideo) then
@@ -135,6 +146,9 @@ begin
     if IsKeyPressed(KEY_L) then
       SetVideoLooping(LVideo, not IsVideoLooping(LVideo));
     end;
+    if IsKeyPressed(KEY_F11) then
+      ToggleFrameFullscreen();
+    end;
     if IsKeyPressed(KEY_UP) then
       LVolume := LVolume + 0.1f;
       if LVolume > 1.0f then
@@ -152,23 +166,25 @@ begin
 
     UpdateVideo(LVideo);
 
-    // The video fitted to the window, its sides kept
-    LScale := float32(GetScreenWidth()) / float32(LVideo.width);
-    if (float32(LVideo.height) * LScale) > float32(GetScreenHeight() - 60) then
-      LScale := float32(GetScreenHeight() - 60) / float32(LVideo.height);
+    // The video fitted to the frame (base units), its sides kept, 60 units
+    // left below it for the status lines
+    LScale := float32(CScreenWidth) / float32(LVideo.width);
+    if (float32(LVideo.height) * LScale) > float32(CScreenHeight - 60) then
+      LScale := float32(CScreenHeight - 60) / float32(LVideo.height);
     end;
     LWidth := float32(LVideo.width) * LScale;
     LHeight := float32(LVideo.height) * LScale;
 
     BeginDrawing();
-    ClearBackground(Rgb(16, 16, 20));
+    BeginFrame();
     DrawVideoPro(LVideo, Rect(0.0f, 0.0f, float32(LVideo.width), float32(LVideo.height)),
-      Rect((float32(GetScreenWidth()) - LWidth) / 2.0f, 0.0f, LWidth, LHeight), LOrigin, 0.0f, WHITE);
+      Rect((float32(CScreenWidth) - LWidth) / 2.0f, 0.0f, LWidth, LHeight), LOrigin, 0.0f, WHITE);
     DrawText(TextFormat("%s   %.1f / %.1f s   volume %d%%   looping %s", StatusText(GLastStatus).c_str(),
-      GetVideoTime(LVideo), GetVideoDuration(LVideo), int32(LVolume * 100.0f + 0.5f),
-      OnOff(IsVideoLooping(LVideo)).c_str()), 16, GetScreenHeight() - 50, 20, Rgb(230, 230, 230));
-    DrawText("Space pause / resume   L looping   Up / Down volume   Escape quit", 16,
-      GetScreenHeight() - 24, 16, Rgb(160, 200, 160));
+      GetVideoTime(LVideo), GetVideoDuration(LVideo), int32(Round(LVolume * 100.0f)),
+      OnOff(IsVideoLooping(LVideo)).c_str()), 16, CScreenHeight - 50, 20, Rgb(230, 230, 230));
+    DrawText("Space pause / resume   L looping   Up / Down volume   F11 fullscreen   Escape quit", 16,
+      CScreenHeight - 24, 16, Rgb(160, 200, 160));
+    EndFrame();
     EndDrawing();
   end;
 

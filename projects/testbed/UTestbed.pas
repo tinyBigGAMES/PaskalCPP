@@ -32,7 +32,8 @@ uses
   PaskalCPP.TestSuite,
   UTestCase.LSP,
   UTestCase.Debug,
-  UTestCase.Compiler;
+  UTestCase.Compiler,
+  UTestCase.Lex;
 
 procedure RunTestbed();
 var
@@ -45,6 +46,10 @@ begin
       // under the root, or the stem prefix before '_')
       LSuite.AddSourceRoot('$P:res/tests');
 
+      // Examples gate: every .pcpp under res\examples builds clean on both
+      // targets (area examples, id examples.<folder>.<stem>)
+      LSuite.AddExampleRoot('$P:res/examples');
+
       // Code-test fixtures: <fixture root>\<area>\fixtures\<file>
       LSuite.SetFixtureRoot('$P:res/tests');
 
@@ -52,6 +57,7 @@ begin
       LSuite.RegisterCase(TPCLspTests);
       LSuite.RegisterCase(TPCDebugTests);
       LSuite.RegisterCase(TPCCompilerTests);
+      LSuite.RegisterCase(TPCLexTests);
 
       ExitCode := LSuite.RunCommandLine();
     finally

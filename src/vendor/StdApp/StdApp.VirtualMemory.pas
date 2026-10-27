@@ -15,22 +15,23 @@
 
   StdApp.VirtualMemory - Virtual memory management with mapped I/O
 
-  Provides page-file-backed and file-backed virtual memory regions via
+  Provides anonymous and file-backed virtual memory regions via
   Windows CreateFileMapping/MapViewOfFile. Anonymous allocations use
   sparse temp files as backing store, eliminating commit charge limits
   -- the OS handles paging transparently with no upfront cost.
 
   Key types:
   - TVirtualMemory<T>: Core class -- Allocate (sparse temp file backed),
-    Open (file-backed), Close, Grow, Flush, AsStream, CreateView<T>,
-    shared memory via OpenShared/CreateShared
+    Open (file-backed), Close, Grow, FlushToDisk, CreateStream, CreateView,
+    shared memory: Allocate with a mapping name creates it (refused when
+    the name is taken), OpenShared attaches to it from another process
   - TVirtualMemoryView<T>: Generic typed view with indexed access,
     stream-style Read/Write, and position tracking
   - TVirtualMemoryStream: TStream adapter over a mapped region
   - TVirtualMemoryMode: Allocate, ReadOnly, ReadWrite, CopyOnWrite,
     AllocateExecute (anonymous read-write-execute region for JIT code)
 
-  Dependencies: StdApp.Base, StdApp.Utils
+  Dependencies: StdApp.Base, StdApp.Utils, StdApp.Resources
 ===============================================================================}
 
 unit StdApp.VirtualMemory;
@@ -81,11 +82,11 @@ type
 
   { TVirtualMemoryMode }
   TVirtualMemoryMode = (
-    Allocate,    // Anonymous page-file-backed, read-write
+    Allocate,    // Anonymous (sparse temp file backed), read-write
     ReadOnly,    // File-backed, read-only (PAGE_READONLY)
     ReadWrite,   // File-backed, read-write (PAGE_READWRITE), changes persist
     CopyOnWrite,     // File-backed, private writes (PAGE_WRITECOPY), file untouched
-    AllocateExecute  // Anonymous page-file-backed, read-write-execute (JIT code)
+    AllocateExecute  // Anonymous (sparse temp file backed), read-write-execute (JIT code)
   );
 
   { TVirtualMemoryStream }
@@ -736,8 +737,12 @@ begin
     FMappingName := TPath.GetGUIDFileName();
 
   try
-    // Create sparse temp file as backing store (no commit charge)
-    FTempFilePath := TPath.Combine(TPath.GetTempPath(), FMappingName + '.vmtmp');
+    // Create sparse temp file as backing store (no commit charge). It is
+    // always named by a GUID, never by the mapping name: a mapping name may
+    // hold a namespace prefix (Local\, Global\) that is no file name, and a
+    // second process asking for a taken name must reach the name check
+    // below instead of failing on the first process's open temp file
+    FTempFilePath := TPath.Combine(TPath.GetTempPath(), TPath.GetGUIDFileName() + '.vmtmp');
     FFileHandle := CreateFile(PChar(FTempFilePath),
       LFileAccess, 0, nil, CREATE_ALWAYS,
       FILE_ATTRIBUTE_NORMAL or FILE_FLAG_DELETE_ON_CLOSE, 0);
@@ -767,7 +772,7 @@ begin
     end;
 
     // If the caller supplied a custom name, reject if the mapping
-    // already existed — the producer should own the name exclusively
+    // already existed: the producer should own the name exclusively
     if (AMappingName <> '') and (GetLastError() = ERROR_ALREADY_EXISTS) then
     begin
       CloseHandle(FMappingHandle);
@@ -1351,7 +1356,7 @@ begin
   LNewTotalBytes := ANewSize * UInt64(SizeOf(T));
   if LNewTotalBytes <= FSize then
   begin
-    // Already big enough — no-op success
+    // Already big enough - no-op success
     Result := True;
     Exit;
   end;
@@ -1502,7 +1507,7 @@ begin
 
     if LBucket.State = TVirtualBucketState.Empty then
     begin
-      // Not found — return first deleted slot if available, otherwise this empty slot
+      // Not found - return first deleted slot if available, otherwise this empty slot
       if LFirstDeleted >= 0 then
         AIndex := LFirstDeleted
       else

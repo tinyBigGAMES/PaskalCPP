@@ -1,0 +1,255 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_rlimgui_ext.pcpp - std compliance: rlimgui_ext's ImGui in the frame
+  window
+
+  A hidden frame window of 320 x 180 base units with rlImGuiSetup's dark
+  style. BeginFrameImGui: ImGui's display is the base size, its
+  framebuffer scale the frame's zoom (window units per base unit, no
+  FLAG_WINDOW_HIGHDPI), and rlImGui's default font is back at 13 base
+  units (rlImGuiSetup made it ceil(13 x the monitor's scale)).
+
+  The window then widened to twice the frame's aspect (bars left and
+  right). An ImGui window placed past both edges of the frame: after
+  EndFrameImGui every clip rectangle of the draw data is inside the
+  letterbox (window units) and its origin is 0, and the screen read back
+  shows the left bar still the bar colour and the centre drawn by ImGui
+  (not the frame colour). A red fill far past the frame after
+  EndFrameImGui: the bar is still the bar colour, the centre red (the
+  frame's clip is on again).
+
+  Negative: with no frame window (a plain raylib window), BeginFrameImGui
+  is rlImGuiBegin: ImGui's display is the window's size.
+
+  The mouse in base units needs a focused window, which a hidden test
+  window never is; the examples (rlimgui Editor and Simple) show it.
+
+  Each row prints ok or FAIL with its name; the last is `done <failures>`.
+  raylib's own log is off (SetTraceLogLevel(LOG_NONE)).
+*******************************************************************************/
+
+module exe std_rlimgui_ext;
+
+/*
+  @@test
+    kind run
+    expect
+    | ok frame window opens
+    | ok display is the base size
+    | ok framebuffer scale is the zoom
+    | ok default font at 13 base units
+    | ok window widened
+    | ok clips inside the letterbox
+    | ok draw data origin 0
+    | ok imgui leaves the bar
+    | ok imgui draws the frame
+    | ok clip on again after imgui
+    | ok fill after imgui in the frame
+    | ok no frame window rlimgui display
+    | done 0
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  raylib,
+  raylib_ext,
+  rlimgui,
+  rlimgui_ext;
+
+const
+  CBaseWidth: int32 = 320;
+  CBaseHeight: int32 = 180;
+
+var
+  GFails: int32;
+
+routine Check(const AName: string; const AOk: bool);
+begin
+  if AOk then
+    println("ok {}", AName);
+  else
+    println("FAIL {}", AName);
+    GFails := GFails + 1;
+  end;
+end;
+
+// Float results compared to a thousandth
+routine Near(const AGot: float32; const AWant: float32): bool;
+begin
+  return (AGot - AWant < 0.001) and (AWant - AGot < 0.001);
+end;
+
+routine SameColor(const AA: Color; const AB: Color): bool;
+begin
+  return (AA.r = AB.r) and (AA.g = AB.g) and (AA.b = AB.b);
+end;
+
+// One ImGui frame with nothing in it, inside a frame
+routine EmptyImGuiFrame();
+begin
+  BeginDrawing();
+  BeginFrame();
+  BeginFrameImGui();
+  EndFrameImGui();
+  EndFrame();
+  EndDrawing();
+end;
+
+// True when every clip rectangle of AData lies inside ABox (window units)
+routine ClipsInside(const AData: ptr to ImDrawData; const ABox: Rectangle): bool;
+var
+  LList: int32;
+  LCommand: int32;
+  LClip: ImVec4;
+  LRight: float32;
+  LBottom: float32;
+begin
+  LRight := ABox.x + ABox.width + 0.001;
+  LBottom := ABox.y + ABox.height + 0.001;
+  for LList := 0 to AData^.CmdLists.Size - 1 do
+    for LCommand := 0 to AData^.CmdLists[LList]^.CmdBuffer.Size - 1 do
+      LClip := AData^.CmdLists[LList]^.CmdBuffer[LCommand].ClipRect;
+      if (LClip.x < ABox.x - 0.001) or (LClip.y < ABox.y - 0.001) or (LClip.z > LRight) or
+        (LClip.w > LBottom) then
+        return false;
+      end;
+    end;
+  end;
+  return true;
+end;
+
+// The display, the density and the font, from the first ImGui frame
+routine TestDisplay();
+var
+  LIO: ptr to ImGuiIO;
+begin
+  BeginDrawing();
+  BeginFrame();
+  BeginFrameImGui();
+  LIO := address of ImGui::GetIO();
+  Check("display is the base size", Near(LIO^.DisplaySize.x, float32(CBaseWidth)) and
+    Near(LIO^.DisplaySize.y, float32(CBaseHeight)));
+  Check("framebuffer scale is the zoom", Near(LIO^.DisplayFramebufferScale.x, GetFrameCamera().zoom));
+  Check("default font at 13 base units", Near(ImGui::GetStyle().FontSizeBase, 13.0));
+  EndFrameImGui();
+  EndFrame();
+  EndDrawing();
+end;
+
+// An ImGui window past both edges of the frame, in a window with bars: its
+// clips mapped into the letterbox, the bar untouched, the frame drawn
+routine TestClip();
+var
+  LWant: int32;
+  LTry: int32;
+  LBox: Rectangle;
+  LShot: Image;
+  LBar: Color;
+  LCentre: Color;
+  LBarX: int32;
+begin
+  LWant := GetScreenWidth() * 2;
+  SetWindowSize(LWant, GetScreenHeight());
+  // The window system's resize is seen once events are polled
+  LTry := 0;
+  while (GetScreenWidth() <> LWant) and (LTry < 120) do
+    EmptyImGuiFrame();
+    LTry := LTry + 1;
+  end;
+  Check("window widened", GetScreenWidth() = LWant);
+  LBox := GetLetterboxRect(GetScreenWidth(), GetScreenHeight(), CBaseWidth, CBaseHeight);
+  // Inside the left bar: a quarter of its width in
+  LBarX := int32(LBox.x) div 4;
+
+  BeginDrawing();
+  BeginFrame();
+  BeginFrameImGui();
+  ImGui::SetNextWindowPos(ImVec2(-100.0, 10.0));
+  ImGui::SetNextWindowSize(ImVec2(float32(CBaseWidth) + 200.0, float32(CBaseHeight) - 20.0));
+  ImGui::Begin("past the edges", nil, ImGuiWindowFlags_NoDecoration);
+  ImGui::TextUnformatted("drawn in the frame only");
+  ImGui::End();
+  EndFrameImGui();
+  EndFrame();
+  Check("clips inside the letterbox", ClipsInside(ImGui::GetDrawData(), LBox));
+  Check("draw data origin 0", Near(ImGui::GetDrawData()^.DisplayPos.x, 0.0) and
+    Near(ImGui::GetDrawData()^.DisplayPos.y, 0.0));
+  LShot := LoadImageFromScreen();
+  LBar := GetImageColor(LShot, LBarX, LShot.height div 2);
+  LCentre := GetImageColor(LShot, LShot.width div 2, LShot.height div 2);
+  UnloadImage(LShot);
+  EndDrawing();
+  Check("imgui leaves the bar", SameColor(LBar, GetFrameBarColor()));
+  Check("imgui draws the frame", not SameColor(LCentre, GetFrameColor()));
+
+  // A fill after EndFrameImGui: clipped to the frame again
+  BeginDrawing();
+  BeginFrame();
+  BeginFrameImGui();
+  EndFrameImGui();
+  DrawRectangle(-1000, -1000, 5000, 5000, RED);
+  EndFrame();
+  LShot := LoadImageFromScreen();
+  LBar := GetImageColor(LShot, LBarX, LShot.height div 2);
+  LCentre := GetImageColor(LShot, LShot.width div 2, LShot.height div 2);
+  UnloadImage(LShot);
+  EndDrawing();
+  Check("clip on again after imgui", SameColor(LBar, GetFrameBarColor()));
+  Check("fill after imgui in the frame", SameColor(LCentre, RED));
+end;
+
+// No frame window: BeginFrameImGui is rlImGuiBegin, ImGui's display the
+// window's own size
+routine TestNoFrame();
+var
+  LIO: ptr to ImGuiIO;
+  LOk: bool;
+begin
+  SetConfigFlags(FLAG_WINDOW_HIDDEN);
+  InitWindow(200, 100, "std_rlimgui_ext");
+  if not IsWindowReady() then
+    Check("no frame window rlimgui display", false);
+    return;
+  end;
+  rlImGuiSetup(true);
+  BeginDrawing();
+  BeginFrameImGui();
+  LIO := address of ImGui::GetIO();
+  LOk := (GetFrameWidth() = 0) and Near(LIO^.DisplaySize.x, float32(GetScreenWidth())) and
+    Near(LIO^.DisplaySize.y, float32(GetScreenHeight()));
+  EndFrameImGui();
+  EndDrawing();
+  Check("no frame window rlimgui display", LOk);
+  rlImGuiShutdown();
+  CloseWindow();
+end;
+
+begin
+  GFails := 0;
+  SetTraceLogLevel(LOG_NONE);
+  SetConfigFlags(FLAG_WINDOW_HIDDEN);
+  Check("frame window opens", InitFrameWindow(CBaseWidth, CBaseHeight, "std_rlimgui_ext"));
+  if IsWindowReady() then
+    rlImGuiSetup(true);
+    TestDisplay();
+    TestClip();
+    rlImGuiShutdown();
+    CloseWindow();
+  end;
+  TestNoFrame();
+  println("done {}", GFails);
+end.

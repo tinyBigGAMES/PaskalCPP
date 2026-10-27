@@ -1,0 +1,247 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  rlimgui_ext.pcpp - the rlimgui_ext unit: `import rlimgui_ext;` runs Dear
+  ImGui inside raylib_ext's frame window, at the frame's virtual resolution.
+  BeginFrameImGui / EndFrameImGui take the place of rlImGuiBegin /
+  rlImGuiEnd between BeginFrame and EndFrame: ImGui's display is the frame's
+  base size, its mouse is the mouse in base units (no mouse while it is in
+  the bars or the window has no focus), and what it draws is scaled and
+  letterboxed with the frame on resize, maximize and fullscreen, its clip
+  rectangles kept inside the frame. Its fonts are rasterized at the frame's
+  real pixel density, so text stays sharp as the frame grows.
+
+  Built on rlImGui's own backend calls (imgui_impl_raylib.h): its frame
+  start (delta time, mouse cursor shape), its input events and its
+  renderer, with ImGui's display size and clip rectangles set for the
+  frame around them. rlImGuiSetup enlarges its default font by the
+  monitor's scale when FLAG_WINDOW_HIGHDPI is not set; in the frame the
+  window scales instead, so the first BeginFrameImGui sets ImGui's base
+  font size back (style.FontSizeBase), unless the program set one itself.
+  With no frame window open the pair is rlImGuiBegin / rlImGuiEnd.
+==============================================================================*/
+
+module unit rlimgui_ext;
+
+import
+  raylib,
+  raylib_ext,
+  rlimgui,
+  Math;
+
+// rlImGui's backend calls: its frame start, its events and its renderer
+#include "imgui_impl_raylib.h"
+
+// The frame's letterbox in window units: where the frame's camera puts its
+// base area (BeginFrame sets it each frame)
+routine RlImGuiExtDoLetterbox(): Rectangle;
+var
+  LCamera: Camera2D;
+  LResult: Rectangle;
+begin
+  LCamera := GetFrameCamera();
+  LResult.x := LCamera.offset.x;
+  LResult.y := LCamera.offset.y;
+  LResult.width := float32(GetFrameWidth()) * LCamera.zoom;
+  LResult.height := float32(GetFrameHeight()) * LCamera.zoom;
+  return LResult;
+end;
+
+// raylib's window units to framebuffer pixels: 1, or the monitor's scale
+// when raylib scales the window itself (FLAG_WINDOW_HIGHDPI)
+routine RlImGuiExtDoWindowScale(): ::Vector2;
+var
+  LResult: ::Vector2;
+begin
+  if IsWindowState(FLAG_WINDOW_HIGHDPI) then
+    return GetWindowScaleDPI();
+  end;
+  LResult.x := 1.0f;
+  LResult.y := 1.0f;
+  return LResult;
+end;
+
+// rlImGuiSetup made its default font monitor scale x 13 pixels (without
+// FLAG_WINDOW_HIGHDPI); in the frame the window does that scaling, so the
+// base size goes back to the font's size in base units. Only while
+// style.FontSizeBase is 0 (unset): ImGui's first NewFrame sets it, so this
+// runs once per ImGui context, and a size the program set is left as it is.
+routine RlImGuiExtDoFont();
+var
+  LScale: float32;
+  LSize: float32;
+begin
+  if IsWindowState(FLAG_WINDOW_HIGHDPI) or (ImGui::GetStyle().FontSizeBase > 0.0f) or
+    (ImGui::GetIO().Fonts^.Fonts.Size = 0) then
+    return;
+  end;
+  LScale := GetWindowScaleDPI().y;
+  if LScale < 1.0f then
+    return;
+  end;
+  // rlImGui made it ceil(size x scale): for a scale of 1 or more, the floor
+  // of its quotient is the size again (13 at 125%: ceil 16.25 = 17, 13.6)
+  LSize := ImGui::GetIO().Fonts^.Fonts[0]^.LegacySize;
+  ImGui::GetStyle().FontSizeBase := float32(Floor(LSize / LScale));
+end;
+
+// The mouse for ImGui, in base units, then rlImGui's own events (keys,
+// text, buttons, wheel, focus). rlImGui adds no position of its own while
+// io.WantSetMousePos is set, so the flag is held around its call; when
+// ImGui itself asked to move the mouse (keyboard navigation) rlImGui's
+// events run as they are.
+routine RlImGuiExtDoEvents();
+var
+  LIO: ptr to ImGuiIO;
+  LBox: Rectangle;
+  LZoom: float32;
+  LMouse: ::Vector2;
+begin
+  LIO := address of ImGui::GetIO();
+  if LIO^.WantSetMousePos or not IsWindowFocused() then
+    ImGui_ImplRaylib_ProcessEvents();
+    return;
+  end;
+
+  LBox := RlImGuiExtDoLetterbox();
+  LZoom := GetFrameCamera().zoom;
+  LMouse := GetMousePosition();
+  if (LZoom <= 0.0f) or not CheckCollisionPointRec(LMouse, LBox) then
+    // In the bars: ImGui's "no mouse"
+    LIO^.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+  else
+    LIO^.AddMousePosEvent((LMouse.x - LBox.x) / LZoom, (LMouse.y - LBox.y) / LZoom);
+  end;
+
+  LIO^.WantSetMousePos := true;
+  ImGui_ImplRaylib_ProcessEvents();
+  LIO^.WantSetMousePos := false;
+end;
+
+// Every draw command's clip rectangle from base units (less the draw data's
+// origin) to window units, kept inside the letterbox; the origin is then 0
+routine RlImGuiExtDoMapClips(const AData: ptr to ImDrawData; const ABox: Rectangle; const AZoom: float32);
+var
+  LList: int32;
+  LCommand: int32;
+  LDrawList: ptr to ImDrawList;
+  LClip: ptr to ImVec4;
+  LRight: float32;
+  LBottom: float32;
+begin
+  LRight := ABox.x + ABox.width;
+  LBottom := ABox.y + ABox.height;
+  for LList := 0 to AData^.CmdLists.Size - 1 do
+    LDrawList := AData^.CmdLists[LList];
+    for LCommand := 0 to LDrawList^.CmdBuffer.Size - 1 do
+      LClip := address of LDrawList^.CmdBuffer[LCommand].ClipRect;
+      // ClipRect is (x1, y1, x2, y2)
+      LClip^.x := Clamp(ABox.x + (LClip^.x - AData^.DisplayPos.x) * AZoom, ABox.x, LRight);
+      LClip^.y := Clamp(ABox.y + (LClip^.y - AData^.DisplayPos.y) * AZoom, ABox.y, LBottom);
+      LClip^.z := Clamp(ABox.x + (LClip^.z - AData^.DisplayPos.x) * AZoom, ABox.x, LRight);
+      LClip^.w := Clamp(ABox.y + (LClip^.w - AData^.DisplayPos.y) * AZoom, ABox.y, LBottom);
+    end;
+  end;
+  AData^.DisplayPos := ImVec2(0.0f, 0.0f);
+end;
+
+/// Starts a Dear ImGui frame inside the frame window, in place of
+/// rlImGuiBegin: call it between BeginFrame and EndFrame (not inside
+/// BeginFrameMode2D), after rlImGuiSetup. ImGui's display is the frame's
+/// base size (GetFrameWidth x GetFrameHeight), its mouse is the mouse in
+/// base units (none while it is in the bars or the window has no focus),
+/// and its fonts are rasterized at the frame's real pixel density. The
+/// first call sets the default font's base size back from rlImGuiSetup's
+/// monitor scaling (the frame scales the window instead), unless the
+/// program set style.FontSizeBase itself. With no frame window open it is
+/// rlImGuiBegin.
+/// @example `BeginFrame(); BeginFrameImGui(); ImGui::ShowDemoWindow(); EndFrameImGui(); EndFrame();`
+/// @see EndFrameImGui
+/// @since 0.3
+exported routine BeginFrameImGui();
+var
+  LIO: ptr to ImGuiIO;
+  LDensity: float32;
+begin
+  if GetFrameWidth() <= 0 then
+    rlImGuiBegin();
+    return;
+  end;
+
+  // rlImGui's frame start: delta time, mouse cursor shape, its window size
+  ImGui_ImplRaylib_NewFrame();
+  // ImGui works in base units; a base unit is the frame's zoom in window
+  // units, each one or more framebuffer pixels
+  LIO := address of ImGui::GetIO();
+  LIO^.DisplaySize := ImVec2(float32(GetFrameWidth()), float32(GetFrameHeight()));
+  LDensity := GetFrameCamera().zoom * RlImGuiExtDoWindowScale().x;
+  if LDensity <= 0.0f then
+    LDensity := 1.0f;
+  end;
+  LIO^.DisplayFramebufferScale := ImVec2(LDensity, LDensity);
+  RlImGuiExtDoFont();
+  RlImGuiExtDoEvents();
+  ImGui::NewFrame();
+end;
+
+/// Ends the Dear ImGui frame BeginFrameImGui started and draws it in the
+/// frame, in place of rlImGuiEnd: scaled and letterboxed with the frame, its
+/// clip rectangles kept inside it. Drawing after it is in base units again,
+/// clipped to the frame, until EndFrame. With no frame window open it is
+/// rlImGuiEnd.
+/// @example `EndFrameImGui(); EndFrame(); EndDrawing();`
+/// @see BeginFrameImGui
+/// @since 0.3
+exported routine EndFrameImGui();
+var
+  LIO: ptr to ImGuiIO;
+  LData: ptr to ImDrawData;
+  LBox: Rectangle;
+  LSize: ImVec2;
+  LDensity: ImVec2;
+  LScale: ::Vector2;
+begin
+  if GetFrameWidth() <= 0 then
+    rlImGuiEnd();
+    return;
+  end;
+
+  ImGui::Render();
+  LData := ImGui::GetDrawData();
+  LBox := RlImGuiExtDoLetterbox();
+  RlImGuiExtDoMapClips(LData, LBox, GetFrameCamera().zoom);
+
+  // rlImGui's renderer flips and scales the (now window unit) clip
+  // rectangles by io.DisplaySize and io.DisplayFramebufferScale: the
+  // window's for its draw, ImGui's own back after it. The vertices stay in
+  // base units, drawn through the frame's camera.
+  LIO := address of ImGui::GetIO();
+  LSize := LIO^.DisplaySize;
+  LDensity := LIO^.DisplayFramebufferScale;
+  LScale := RlImGuiExtDoWindowScale();
+  LIO^.DisplaySize := ImVec2(float32(GetScreenWidth()), float32(GetScreenHeight()));
+  LIO^.DisplayFramebufferScale := ImVec2(LScale.x, LScale.y);
+  ImGui_ImplRaylib_RenderDrawData(LData);
+  LIO^.DisplaySize := LSize;
+  LIO^.DisplayFramebufferScale := LDensity;
+
+  // rlImGui's renderer turns scissoring off: the frame's clip on again
+  RestoreFrameClip();
+end;
+
+end.

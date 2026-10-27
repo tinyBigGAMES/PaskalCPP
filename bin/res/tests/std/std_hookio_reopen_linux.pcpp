@@ -1,0 +1,249 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_hookio_reopen_linux.pcpp - Std library compliance: HookIO's freopen,
+  stream lock calls and glibc's lock-free inline forms
+  (res\libs\std\HookIO.pcpp), Linux
+
+  freopen on a HookIO handle reopens it in place: the same FILE* comes back
+  and reads the other registered IO; a reopen in "w" mode empties its IO
+  and the bytes written land there. The failures leave the stream closed,
+  as C's freopen does: a virtual path nothing answers fails with ENOENT and
+  HookIO no longer knows the stream (FileIO nil). A real path keeps the
+  address too: the handle then holds the disk file (a folder source's
+  entry) by fopen's rules: w creates it, a appends, x refuses a file that
+  exists, r a missing one (ENOENT), as does a missing folder; a bare name
+  is the current folder's. A real FILE
+  reopened on a real path is the C runtime's. No path: glibc reopens the
+  file the stream was opened by, in the new mode, from its start.
+  flockfile / funlockfile are nothing on a handle and ftrylockfile always
+  succeeds (each call locks it itself). getc_unlocked, feof_unlocked and
+  ferror_unlocked read a handle to its end and see the end and no error.
+  pcpp builds every level with glibc's extern inlines off (__NO_INLINE__),
+  so these calls reach the hooked functions; glibc's inline forms, which
+  read the FILE's fields (an empty area sends every read to __uflow), are
+  what a library built outside pcpp runs: std_lua_io proves them through
+  liblua. The Windows twin is std_hookio_reopen.pcpp.
+*******************************************************************************/
+
+module exe std_hookio_reopen_linux;
+
+/*
+  @@test
+    kind run
+    targets x86_64-linux-gnu
+    expect
+    | reopen same address true
+    | reopen reads second true
+    | reopen write mode third true
+    | reopen missing nil true enoent true forgotten true
+    | reopen real path same address true errno 0 handle true
+    | reopen real path wrote true
+    | reopen real append true
+    | reopen real exclusive nil true eexist true
+    | reopen real missing nil true enoent true created false
+    | reopen real no folder nil true enoent true
+    | reopen real bare name true
+    | real file reopen true
+    | no path same address true reads first true
+    | lock trylock 0 reads true
+    | unlocked reads true eof true error false
+    | pclose 0 forgotten true
+    | [Heap] Allocs: 14, Frees: 14, Leaked: 0
+  @@end
+*/
+
+import
+  CustomIO,
+  HookIO,
+  SysUtils;
+
+// Writes AText into the IO APath names, through the hooked fopen / fputs
+routine Fill(const APath: string; const AText: string);
+var
+  LFile: ptr to FILE;
+begin
+  LFile := fopen(APath.c_str(), "w");
+  fputs(AText.c_str(), LFile);
+  fclose(LFile);
+end;
+
+// True when AFile's next bytes are AText, read one fgetc at a time
+routine Reads(const AFile: ptr to FILE; const AText: string): bool;
+var
+  LI: int32;
+begin
+  for LI := 0 to int32(len(AText)) - 1 do
+    if fgetc(AFile) <> int32(AText[LI]) then
+      return false;
+    end;
+  end;
+  return true;
+end;
+
+// Reads as Reads does, through getc_unlocked
+routine UnlockedReads(const AFile: ptr to FILE; const AText: string): bool;
+var
+  LI: int32;
+begin
+  for LI := 0 to int32(len(AText)) - 1 do
+    if getc_unlocked(AFile) <> int32(AText[LI]) then
+      return false;
+    end;
+  end;
+  return true;
+end;
+
+// True when APath, opened afresh, holds exactly AText
+routine Holds(const APath: string; const AText: string): bool;
+var
+  LFile: ptr to FILE;
+  LResult: bool;
+begin
+  LFile := fopen(APath.c_str(), "r");
+  if LFile = nil then
+    return false;
+  end;
+  LResult := Reads(LFile, AText) and (fgetc(LFile) = EOF);
+  fclose(LFile);
+  return LResult;
+end;
+
+var
+  LFirst: IO;
+  LSecond: IO;
+  LFirstPrefix: string;
+  LSecondPrefix: string;
+  LFirstPath: string;
+  LSecondPath: string;
+  LRealPath: string;
+  LFile: ptr to FILE;
+  LAgain: ptr to FILE;
+
+begin
+  LFirst := CreateMemoryIO();
+  LSecond := CreateMemoryIO();
+  LFirstPrefix := RegisterIO(LFirst);
+  LSecondPrefix := RegisterIO(LSecond);
+  LFirstPath := LFirstPrefix + "/first.txt";
+  LSecondPath := LSecondPrefix + "/second.txt";
+  Fill(LFirstPath, "first");
+  Fill(LSecondPath, "second");
+  LRealPath := ResolvePath("$P:std_hookio_reopen.txt");
+
+  // In place: the same address, now reading the other IO from its start
+  LFile := fopen(LFirstPath.c_str(), "r");
+  fgetc(LFile);
+  LAgain := freopen(LSecondPath.c_str(), "r", LFile);
+  println("reopen same address {}", LAgain = LFile);
+  println("reopen reads second {}", Reads(LAgain, "second") and (fgetc(LAgain) = EOF));
+
+  // A new mode: "w" empties the IO, the write lands there
+  LAgain := freopen(LSecondPath.c_str(), "w", LAgain);
+  fputs("third", LAgain);
+  fclose(LAgain);
+  println("reopen write mode third {}", Holds(LSecondPath, "third"));
+
+  // Nothing answers the path: ENOENT, the stream closed and forgotten
+  LFile := fopen(LFirstPath.c_str(), "r");
+  errno := 0;
+  LAgain := freopen("io://999999/missing.txt", "r", LFile);
+  println("reopen missing nil {} enoent {} forgotten {}", LAgain = nil, errno = ENOENT,
+    FileIO(LFile) = nil);
+
+  // A real path: the same address, now holding the disk file; w creates it
+  // and errno is left as the caller had it
+  LFile := fopen(LFirstPath.c_str(), "r");
+  errno := 0;
+  LAgain := freopen(LRealPath.c_str(), "w", LFile);
+  println("reopen real path same address {} errno {} handle {}", LAgain = LFile, errno,
+    FileIO(LAgain) <> nil);
+  fputs("disk", LAgain);
+  fclose(LAgain);
+  println("reopen real path wrote {}", Holds(LRealPath, "disk"));
+
+  // a appends to what the file holds
+  LFile := fopen(LFirstPath.c_str(), "r");
+  LAgain := freopen(LRealPath.c_str(), "a", LFile);
+  fputs("+more", LAgain);
+  fclose(LAgain);
+  println("reopen real append {}", Holds(LRealPath, "disk+more"));
+
+  // x refuses a file that exists; r refuses one that does not
+  LFile := fopen(LFirstPath.c_str(), "r");
+  errno := 0;
+  LAgain := freopen(LRealPath.c_str(), "wx", LFile);
+  println("reopen real exclusive nil {} eexist {}", LAgain = nil, errno = EEXIST);
+  remove(LRealPath.c_str());
+  LFile := fopen(LFirstPath.c_str(), "r");
+  errno := 0;
+  LAgain := freopen(LRealPath.c_str(), "r", LFile);
+  println("reopen real missing nil {} enoent {} created {}", LAgain = nil, errno = ENOENT,
+    FileExists(LRealPath));
+
+  // A folder that does not exist: ENOENT
+  LFile := fopen(LFirstPath.c_str(), "r");
+  errno := 0;
+  LAgain := freopen(ResolvePath("$P:std_hookio_reopen_none/x.txt").c_str(), "w", LFile);
+  println("reopen real no folder nil {} enoent {}", LAgain = nil, errno = ENOENT);
+
+  // A bare name is the current folder's (a test runs in its own folder)
+  LFile := fopen(LFirstPath.c_str(), "r");
+  LAgain := freopen("std_hookio_reopen_bare.txt", "w", LFile);
+  fputs("here", LAgain);
+  fclose(LAgain);
+  println("reopen real bare name {}", Holds(ResolvePath("$P:std_hookio_reopen_bare.txt"), "here"));
+  remove("std_hookio_reopen_bare.txt");
+
+  // A real FILE on a real path: the C runtime's freopen
+  LFile := fopen(LRealPath.c_str(), "w");
+  LAgain := freopen(LRealPath.c_str(), "r", LFile);
+  println("real file reopen {}", LAgain <> nil);
+  fclose(LAgain);
+  remove(LRealPath.c_str());
+
+  // No path: glibc reopens the file the stream was opened by, from its start
+  LFile := fopen(LFirstPath.c_str(), "r");
+  fgetc(LFile);
+  LAgain := freopen(nil, "r", LFile);
+  println("no path same address {} reads first {}", LAgain = LFile, Reads(LAgain, "first"));
+  fclose(LAgain);
+
+  // The stream lock calls: nothing on a handle, trying always succeeds
+  LFile := fopen(LFirstPath.c_str(), "r");
+  flockfile(LFile);
+  println("lock trylock {} reads {}", ftrylockfile(LFile), Reads(LFile, "first"));
+  funlockfile(LFile);
+  funlockfile(LFile);
+  fclose(LFile);
+
+  // The lock-free forms: read to the end, the end seen, no error
+  LFile := fopen(LFirstPath.c_str(), "r");
+  flockfile(LFile);
+  println("unlocked reads {} eof {} error {}", UnlockedReads(LFile, "first") and
+    (getc_unlocked(LFile) = EOF), feof_unlocked(LFile) <> 0, ferror_unlocked(LFile) <> 0);
+  funlockfile(LFile);
+  fclose(LFile);
+
+  // A handle is never a pipe: pclose closes it as glibc closes any stream
+  // popen did not open (as fclose)
+  LFile := fopen(LFirstPath.c_str(), "r");
+  println("pclose {} forgotten {}", pclose(LFile), FileIO(LFile) = nil);
+
+  UnregisterIO(LFirstPrefix);
+  UnregisterIO(LSecondPrefix);
+  IOClose(LFirst);
+  IOClose(LSecond);
+end.

@@ -120,7 +120,7 @@ type
     // (HINT / WARN / ERROR / FATAL). Nil-safe, empty-safe.
     procedure PrintErrors(const AErrors: TErrors);
 
-    // PrintErrors followed by AErrors.Clear — use this at the end of
+    // PrintErrors followed by AErrors.Clear - use this at the end of
     // each object's lifetime in a test so subsequent checks aren't
     // polluted by stale entries from a prior operation.
     procedure FlushErrors(const AErrors: TErrors);

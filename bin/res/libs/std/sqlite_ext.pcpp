@@ -1,0 +1,156 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  sqlite_ext.pcpp - the sqlite_ext unit: `import sqlite_ext;` opens a
+  SQLite database held in any CustomIO IO, or in an entry of a zip archive,
+  read-only.
+
+  SQLite opens files through its own VFS (the OS's open / read calls, not
+  C's stdio), so the HookIO hooks never reach it: an io:// path given to
+  sqlite3_open_v2 is a file that does not exist. These forms read the
+  database's bytes from the IO into memory instead (sqlite3_malloc64) and
+  hand them to sqlite3_deserialize on a fresh in-memory connection, with
+  SQLITE_DESERIALIZE_READONLY and SQLITE_DESERIALIZE_FREEONCLOSE: every
+  query works as on the file, a write fails with SQLITE_READONLY, and the
+  memory is freed with the connection (sqlite3_close). The IO is read from
+  its start and stays the caller's; it may be closed as soon as the call
+  returns. A file on disk needs no form of its own: sqlite3_open_v2 with
+  SQLITE_OPEN_READONLY is that.
+
+  As sqlite3_open's contract: the connection is given back in ADb whether
+  the open worked or not (nil only when SQLite had no memory for it), so
+  sqlite3_errmsg(ADb) says why, and the caller closes it either way. Bytes
+  that are not a database open; the first statement then fails with
+  SQLITE_NOTADB.
+==============================================================================*/
+
+module unit sqlite_ext;
+
+import
+  sqlite,
+  CustomIO;
+
+// AIO's whole content in a new sqlite3_malloc64 buffer (ABytes long), or
+// nil when the IO is nil, its size is not known or a read falls short
+routine SqliteExtDoReadAll(const AIO: IO; var ABytes: int64): ptr;
+var
+  LData: ptr to uint8;
+  LDone: int64;
+  LGot: int64;
+begin
+  ABytes := 0;
+  if AIO = nil then
+    return nil;
+  end;
+  ABytes := IOSize(AIO);
+  if (ABytes < 0) or (IOSeek(AIO, 0, SeekOrigin.FromStart) <> 0) then
+    return nil;
+  end;
+  // sqlite3_malloc64(0) gives nil: an empty IO still needs a buffer
+  LData := ptr to uint8(sqlite3_malloc64(uint64(ABytes) + 1));
+  if LData = nil then
+    return nil;
+  end;
+  LDone := 0;
+  while LDone < ABytes do
+    LGot := IORead(AIO, address of LData[LDone], ABytes - LDone);
+    if LGot <= 0 then
+      sqlite3_free(LData);
+      return nil;
+    end;
+    LDone := LDone + LGot;
+  end;
+  return LData;
+end;
+
+/// Opens the SQLite database an IO holds, read-only, in memory: its bytes
+/// are read in and deserialized onto a new connection (writes fail with
+/// SQLITE_READONLY). The IO is read from its start and stays the caller's.
+/// Close the connection with sqlite3_close whatever the result.
+/// @param AIO the database's bytes (CreateZipFileIO's, CreateFileIO's, any IO)
+/// @param ADb the connection; nil only when SQLite had no memory for one
+/// @returns SQLITE_OK; SQLITE_IOERR when the IO is nil or cannot be read
+///   whole (the connection is open, empty, and sqlite3_errmsg has no text
+///   for this: the code is the answer); another code when SQLite refuses
+///   (sqlite3_errmsg(ADb) says why)
+/// @example `LResult := OpenDatabaseIO(CreateFileIO("$P:levels.db", FileMode.Read), LDb);`
+/// @see OpenDatabaseZip
+/// @since 0.3
+exported routine OpenDatabaseIO(const AIO: IO; var ADb: ptr to sqlite3): int32;
+var
+  LResult: int32;
+  LData: ptr;
+  LBytes: int64;
+begin
+  ADb := nil;
+  LResult := sqlite3_open_v2(":memory:", address of ADb,
+    SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil);
+  if LResult <> SQLITE_OK then
+    return LResult;
+  end;
+  LData := SqliteExtDoReadAll(AIO, LBytes);
+  if LData = nil then
+    return SQLITE_IOERR;
+  end;
+  // FREEONCLOSE: SQLite owns LData from here, and frees it itself when the
+  // call fails (sqlite3.h, sqlite3_deserialize)
+  return sqlite3_deserialize(ADb, "main", ptr to uint8(LData), LBytes, LBytes,
+    SQLITE_DESERIALIZE_FREEONCLOSE | SQLITE_DESERIALIZE_READONLY);
+end;
+
+/// Opens the SQLite database in an entry of a zip archive, read-only, in
+/// memory (CreateZipFileIO opens the entry, OpenDatabaseIO reads it, the
+/// entry's IO is closed after). Close the connection with sqlite3_close
+/// whatever the result.
+/// @param AArchive the zip file (`$P:` resolved, as CreateZipFileIO does)
+/// @param AEntry the entry's path in the archive, `/` separated
+/// @param APassword the archive's password ("" for none)
+/// @param ADb the connection; nil only when SQLite had no memory for one
+/// @returns SQLITE_OK; SQLITE_IOERR when the archive or entry cannot be
+///   opened (a wrong password included) or read; another code when SQLite
+///   refuses
+/// @example `LResult := OpenDatabaseZip("$P:../../assets.zip", "res/assets/data/sample.db", "PaskalCPP", LDb);`
+/// @see OpenDatabaseIO
+/// @since 0.3
+exported routine OpenDatabaseZip(const AArchive: string; const AEntry: string;
+  const APassword: string; var ADb: ptr to sqlite3): int32;
+var
+  LIO: IO;
+  LResult: int32;
+begin
+  LIO := CreateZipFileIO(AArchive, AEntry, APassword);
+  LResult := OpenDatabaseIO(LIO, ADb);
+  if LIO <> nil then
+    IOClose(LIO);
+  end;
+  return LResult;
+end;
+
+/// OpenDatabaseZip for an archive with no password.
+/// @param AArchive the zip file
+/// @param AEntry the entry's path in the archive
+/// @param ADb the connection
+/// @returns as OpenDatabaseZip
+/// @since 0.3
+exported routine OpenDatabaseZip(const AArchive: string; const AEntry: string;
+  var ADb: ptr to sqlite3): int32;
+begin
+  return OpenDatabaseZip(AArchive, AEntry, "", ADb);
+end;
+
+end.

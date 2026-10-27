@@ -1,0 +1,1330 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  RavenGameUI.pcpp - a game's whole user interface made with Raven over a
+  live raylib scene (import raven_raylib): "Crystal Vale", a small 3D walk
+  through a valley. raylib draws the world, plays the music and the sounds;
+  Raven draws every screen of the game, designed in XML and loaded from
+  bin\assets.zip with the theme, the fonts and the item icons:
+    res/assets/ui/game_ui.xml       the screens (one Switcher)
+    res/assets/ui/game_widgets.xml  the game's own tags (StatBar, ItemSlot,
+                                    MenuButton, SettingRow, KeyRow)
+    res/assets/ui/game_theme.xml    the "Crystal" theme and its classes
+  The screens: a main menu over the circling camera, settings in four tabs
+  (the switches, sliders and choices change the game: fullscreen, the frame
+  rate, the field of view, the camera, the volumes, the difficulty), the
+  HUD (health and mana bars, gold, the crystals, a 5-slot hotbar, a prompt,
+  a toast), an inventory grid with tooltips, a conversation with Markdown
+  text and choices, and a pause menu. Every button fires a named action
+  (OnClicked in the XML) bound here with Raction_bind; the program finds the
+  widgets by name and fills them from the game's state.
+    W A S D walk, Shift run (mana), 1-5 the hotbar, Q use, E talk to Mira,
+    I inventory, Esc pause or close, F11 fullscreen.
+  The window is raylib_ext's frame window (800 x 450 units, sized for the
+  monitor's DPI, scaled and letterboxed on resize); the 3D world is drawn
+  through the frame's letterbox with BeginFrameMode3D, at the base size's
+  aspect, under Raven's UI.
+==============================================================================*/
+
+module exe RavenGameUI;
+
+@exeicon "$P:res/assets/icons/paskalcpp.ico";
+
+import
+  raylib,
+  raylib_ext,
+  raven,
+  raven_raylib,
+  CustomIO,
+  HookIO,
+  Math;
+
+const
+  CScreenWidth: int32 = 800;
+  CScreenHeight: int32 = 450;
+  CArchive: string = "$P:../../assets.zip";
+  CPassword: string = "PaskalCPP";
+  // The Switcher's screens, in game_ui.xml's order
+  CScreenMenu: int32 = 0;
+  CScreenSettings: int32 = 1;
+  CScreenPlay: int32 = 2;
+  CScreenPause: int32 = 3;
+  // Inventory slots; the first CHotbarCount are the hotbar
+  CSlotCount: int32 = 18;
+  CHotbarCount: int32 = 5;
+  CCrystalCount: int32 = 12;
+  CPoolCount: int32 = 3;
+  CTreeCount: int32 = 28;
+  // The valley: a square CWorldHalf on each side of the middle
+  CWorldHalf: float32 = 17.0f;
+  CWalkSpeed: float32 = 4.5f;
+  CRunSpeed: float32 = 8.5f;
+  CRunCost: float32 = 22.0f;
+  CManaRegen: float32 = 5.0f;
+  CTalkDistance: float32 = 2.6f;
+  CPickDistance: float32 = 1.1f;
+  CToastSeconds: float32 = 2.2f;
+  CCalmSeconds: float32 = 10.0f;
+  CMushroomPrice: int32 = 10;
+  CManaPotPrice: int32 = 15;
+  // Kenney Tiny Town's sheet: 12 x 11 tiles of 16 pixels
+  CTileColumns: int32 = 12;
+  CTileRows: int32 = 11;
+  CCoinTile: int32 = 93;
+
+type
+  // What a slot holds
+  TItem = choices(iNone, iMushroom, iManaPot, iHoney, iBomb, iKey, iBow, iArrows, iLog, iHatchet, iPickaxe);
+
+  TSlot = record
+    Item: TItem;
+    Count: int32;
+  end;
+
+  // The widgets of one ItemSlot tag (game_widgets.xml)
+  TSlotWidgets = record
+    Frame: Rid;
+    Button: Rid;
+    Icon: Rid;
+    Count: Rid;
+  end;
+
+  TCrystal = record
+    Position: Vector3;
+    Taken: bool;
+  end;
+
+  TPool = record
+    Position: Vector3;
+    Radius: float32;
+  end;
+
+  TTree = record
+    Position: Vector3;
+    Height: float32;
+  end;
+
+var
+  // Raven: the window, its screens, the item icons and the widgets driven
+  GUi: Rid;
+  GScreens: Rid;
+  GIcons: Rid;
+  GContinue: Rid;
+  GHealthBar: Rid;
+  GHealthText: Rid;
+  GManaBar: Rid;
+  GManaText: Rid;
+  GGoldLabel: Rid;
+  GBagGold: Rid;
+  GCrystalLabel: Rid;
+  GFpsLabel: Rid;
+  GToast: Rid;
+  GToastText: Rid;
+  GPrompt: Rid;
+  GPromptText: Rid;
+  GSelectedLabel: Rid;
+  GInventory: Rid;
+  GDialogue: Rid;
+  GDialogueWho: Rid;
+  GDialogueText: Rid;
+  GBuyMushroom: Rid;
+  GBuyManaPot: Rid;
+  GDialogueClose: Rid;
+  GFullscreenBox: Rid;
+  GFpsBox: Rid;
+  GFovSlider: Rid;
+  GFovValue: Rid;
+  GDistanceSlider: Rid;
+  GDistanceValue: Rid;
+  GMasterSlider: Rid;
+  GMasterValue: Rid;
+  GMusicSlider: Rid;
+  GMusicValue: Rid;
+  GEffectsSlider: Rid;
+  GEffectsValue: Rid;
+  GMuteBox: Rid;
+  GDifficultyBox: Rid;
+  GHintsBox: Rid;
+  GRegenBox: Rid;
+  GHotWidgets: array[0..CHotbarCount - 1] of TSlotWidgets;
+  GInvWidgets: array[0..CSlotCount - 1] of TSlotWidgets;
+  // set while widgets are filled from code: their callbacks change nothing
+  GUpdating: bool;
+
+  // The screens
+  GScreen: int32;
+  GSettingsFrom: int32;
+  GStarted: bool;
+  GQuit: bool;
+  GInventoryOpen: bool;
+  GDialogueOpen: bool;
+  GFainted: bool;
+  GToastTime: float32;
+
+  // The game
+  GHealth: float32;
+  GMana: float32;
+  GGold: int32;
+  GCrystalsTaken: int32;
+  GPlayer: Vector3;
+  GInPool: bool;
+  GCalmTime: float32;
+  GSlots: array[0..CSlotCount - 1] of TSlot;
+  GSelected: int32;
+  GSlotsDirty: bool;
+  GMerchant: Vector3;
+  GCrystals: array[0..CCrystalCount - 1] of TCrystal;
+  GPools: array[0..CPoolCount - 1] of TPool;
+  GTrees: array[0..CTreeCount - 1] of TTree;
+
+  // Settings
+  GShowFps: bool;
+  GHints: bool;
+  GDifficulty: int32;
+  GFov: float32;
+  GDistance: float32;
+
+  // raylib: the camera, the music and sounds
+  GCamera: Camera3D;
+  GOrbit: float32;
+  GMusicIO: IO;
+  GMusic: Music;
+  GPickupSound: Sound;
+  GHurtSound: Sound;
+  GBoomSound: Sound;
+  GBuySound: Sound;
+
+// A raylib Vector3 from its three parts
+routine V3(const AX: float32; const AY: float32; const AZ: float32): Vector3;
+var
+  LResult: Vector3;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  LResult.z := AZ;
+  return LResult;
+end;
+
+// A raylib Vector2 from its two parts (::Vector2: Math has one of its own)
+routine V2(const AX: float32; const AY: float32): ::Vector2;
+var
+  LResult: ::Vector2;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  return LResult;
+end;
+
+// A raylib color from its red, green and blue parts (0 .. 255)
+routine Rgb(const AR: int32; const AG: int32; const AB: int32): Color;
+var
+  LResult: Color;
+begin
+  LResult.r := AR;
+  LResult.g := AG;
+  LResult.b := AB;
+  LResult.a := 255;
+  return LResult;
+end;
+
+// The distance between two points on the ground (their heights left out)
+routine GroundDistance(const AA: Vector3; const AB: Vector3): float32;
+var
+  LDx: float32;
+  LDz: float32;
+begin
+  LDx := AA.x - AB.x;
+  LDz := AA.z - AB.z;
+  return Sqrt(LDx * LDx + LDz * LDz);
+end;
+
+// A widget of the UI by its XML name
+routine Find(const AName: string): Rid;
+begin
+  return Rwidget_find(GUi, AName.c_str());
+end;
+
+// A number as text
+routine NumberText(const AValue: int32): string;
+begin
+  return string(TextFormat("%d", AValue));
+end;
+
+// ---- items ----
+
+// The item's tile in Kenney Tiny Town's sheet; -1 for no item
+routine ItemTile(const AItem: TItem): int32;
+begin
+  match AItem of
+    TItem.iMushroom: return 29;
+    TItem.iManaPot: return 131;
+    TItem.iHoney: return 94;
+    TItem.iBomb: return 105;
+    TItem.iKey: return 117;
+    TItem.iBow: return 118;
+    TItem.iArrows: return 119;
+    TItem.iLog: return 106;
+    TItem.iHatchet: return 127;
+    TItem.iPickaxe: return 129;
+    TItem.iNone: return -1;
+  end;
+  return -1;
+end;
+
+routine ItemName(const AItem: TItem): string;
+begin
+  match AItem of
+    TItem.iMushroom: return "Healing mushroom";
+    TItem.iManaPot: return "Mana pot";
+    TItem.iHoney: return "Honey";
+    TItem.iBomb: return "Bomb";
+    TItem.iKey: return "Old key";
+    TItem.iBow: return "Short bow";
+    TItem.iArrows: return "Arrows";
+    TItem.iLog: return "Log";
+    TItem.iHatchet: return "Hatchet";
+    TItem.iPickaxe: return "Pickaxe";
+    TItem.iNone: return "";
+  end;
+  return "";
+end;
+
+routine ItemTip(const AItem: TItem): string;
+begin
+  match AItem of
+    TItem.iMushroom: return "Q: heals 30";
+    TItem.iManaPot: return "Q: restores 40 mana";
+    TItem.iHoney: return "Q: heals 12";
+    TItem.iBomb: return "Q: calms the red pools for 10 seconds";
+    TItem.iKey: return "It opens something, somewhere";
+    TItem.iBow: return "A hunter's bow";
+    TItem.iArrows: return "For the bow";
+    TItem.iLog: return "Firewood";
+    TItem.iHatchet: return "Cuts wood";
+    TItem.iPickaxe: return "Breaks rock";
+    TItem.iNone: return "";
+  end;
+  return "";
+end;
+
+// What crystal AIndex leaves behind, beside its gold
+routine CrystalGift(const AIndex: int32): TItem;
+begin
+  match AIndex mod 4 of
+    0: return TItem.iMushroom;
+    1: return TItem.iManaPot;
+    2: return TItem.iHoney;
+  end;
+  return TItem.iBomb;
+end;
+
+// Puts AItem in the bag: on a stack of it, else in the first empty slot
+routine AddItem(const AItem: TItem; const ACount: int32): bool;
+var
+  LIndex: int32;
+begin
+  for LIndex := 0 to CSlotCount - 1 do
+    if GSlots[LIndex].Item = AItem then
+      GSlots[LIndex].Count += ACount;
+      GSlotsDirty := true;
+      return true;
+    end;
+  end;
+  for LIndex := 0 to CSlotCount - 1 do
+    if GSlots[LIndex].Item = TItem.iNone then
+      GSlots[LIndex].Item := AItem;
+      GSlots[LIndex].Count := ACount;
+      GSlotsDirty := true;
+      return true;
+    end;
+  end;
+  return false;
+end;
+
+// ---- the interface ----
+
+// An Image showing tile ATile of the icon sheet; none for -1
+routine SetTileImage(const AImage: Rid; const ATile: int32);
+var
+  LColumn: int32;
+  LRow: int32;
+begin
+  if ATile < 0 then
+    Rimage_set_texture(AImage, R_INVALID_ID);
+    return;
+  end;
+  LColumn := ATile mod CTileColumns;
+  LRow := ATile div CTileColumns;
+  Rimage_set_texture(AImage, GIcons);
+  Rimage_set_region(AImage, float32(LColumn) / float32(CTileColumns), float32(LRow) / float32(CTileRows),
+    float32(LColumn + 1) / float32(CTileColumns), float32(LRow + 1) / float32(CTileRows));
+end;
+
+// The parts of the ItemSlot named ACell
+routine SlotWidgets(const ACell: string): TSlotWidgets;
+var
+  LResult: TSlotWidgets;
+begin
+  LResult.Frame := Find(ACell);
+  LResult.Button := Find(ACell + ".button");
+  LResult.Icon := Find(ACell + ".icon");
+  LResult.Count := Find(ACell + ".count");
+  return LResult;
+end;
+
+// One slot of the interface showing ASlot: its icon, its count, its tooltip
+routine ShowSlot(const AWidgets: TSlotWidgets; const ASlot: TSlot; const ASelected: bool);
+var
+  LTip: string;
+begin
+  SetTileImage(AWidgets.Icon, ItemTile(ASlot.Item));
+  if ASlot.Count > 1 then
+    Rlabel_set_text(AWidgets.Count, TextFormat("%d", ASlot.Count));
+  else
+    Rlabel_set_text(AWidgets.Count, "");
+  end;
+  LTip := "";
+  if ASlot.Item <> TItem.iNone then
+    LTip := ItemName(ASlot.Item) + " - " + ItemTip(ASlot.Item);
+  end;
+  Rwidget_set_tooltip(AWidgets.Button, LTip.c_str());
+  // The theme's class "selected" lights the slot up
+  if ASelected then
+    Rwidget_add_class(AWidgets.Frame, "selected");
+  else
+    Rwidget_remove_class(AWidgets.Frame, "selected");
+  end;
+end;
+
+// Every slot of the hotbar and the inventory, from the bag
+routine RefreshSlots();
+var
+  LIndex: int32;
+  LName: string;
+begin
+  for LIndex := 0 to CSlotCount - 1 do
+    ShowSlot(GInvWidgets[LIndex], GSlots[LIndex], LIndex = GSelected);
+  end;
+  for LIndex := 0 to CHotbarCount - 1 do
+    ShowSlot(GHotWidgets[LIndex], GSlots[LIndex], LIndex = GSelected);
+  end;
+  LName := ItemName(GSlots[GSelected].Item);
+  Rlabel_set_text(GSelectedLabel, LName.c_str());
+  GSlotsDirty := false;
+end;
+
+// A line at the top of the screen for a moment
+routine ShowToast(const AText: string);
+begin
+  Rlabel_set_text(GToastText, AText.c_str());
+  Rwidget_set_visibility(GToast, R_VISIBLE);
+  Rwidget_play_transition(GToast, R_TRANSITION_FLY_DOWN, 0.0f);
+  GToastTime := CToastSeconds;
+end;
+
+routine ShowScreen(const AScreen: int32);
+begin
+  GScreen := AScreen;
+  Rswitcher_set_index(GScreens, AScreen);
+end;
+
+routine ShowInventory(const AOpen: bool);
+begin
+  GInventoryOpen := AOpen;
+  if AOpen then
+    Rwidget_set_visibility(GInventory, R_VISIBLE);
+  else
+    Rwidget_set_visibility(GInventory, R_COLLAPSED);
+  end;
+end;
+
+routine HideDialogue();
+begin
+  GDialogueOpen := false;
+  Rwidget_set_visibility(GDialogue, R_COLLAPSED);
+end;
+
+// The HUD from the game's state: bars, numbers, the prompt, the frame rate
+routine RefreshHud();
+var
+  LNear: bool;
+begin
+  Rprogress_bar_set_value(GHealthBar, GHealth / 100.0f);
+  Rlabel_set_text(GHealthText, TextFormat("%d / 100", int32(Round(GHealth))));
+  Rprogress_bar_set_value(GManaBar, GMana / 100.0f);
+  Rlabel_set_text(GManaText, TextFormat("%d / 100", int32(Round(GMana))));
+  Rlabel_set_text(GGoldLabel, TextFormat("%d", GGold));
+  Rlabel_set_text(GBagGold, TextFormat("%d gold", GGold));
+  Rlabel_set_text(GCrystalLabel, TextFormat("Crystals %d / %d", GCrystalsTaken, CCrystalCount));
+  if GShowFps then
+    Rlabel_set_text(GFpsLabel, TextFormat("%d FPS", GetFPS()));
+  end;
+
+  LNear := GroundDistance(GPlayer, GMerchant) < CTalkDistance;
+  if GHints and LNear and not GDialogueOpen and not GInventoryOpen then
+    Rlabel_set_text(GPromptText, "E   Talk to Mira");
+    Rwidget_set_visibility(GPrompt, R_VISIBLE);
+  else
+    Rwidget_set_visibility(GPrompt, R_HIDDEN);
+  end;
+end;
+
+// ---- conversations ----
+
+routine RefreshMerchantText();
+var
+  LText: string;
+begin
+  LText := "Welcome, traveller! The crystals of the vale hum with **power**, and the red pools *bite*. " +
+    "Bring me crystals and I will trade you what you need.\n\n" +
+    "I sell healing mushrooms and mana pots. You have **" + NumberText(GGold) + " gold**.";
+  Rlabel_set_text(GDialogueText, LText.c_str());
+end;
+
+routine OpenMerchant();
+begin
+  GFainted := false;
+  GDialogueOpen := true;
+  ShowInventory(false);
+  Rlabel_set_text(GDialogueWho, "Mira, the merchant");
+  RefreshMerchantText();
+  Rwidget_set_visibility(GBuyMushroom, R_VISIBLE);
+  Rwidget_set_visibility(GBuyManaPot, R_VISIBLE);
+  Rbutton_set_text(GDialogueClose, "Goodbye");
+  Rwidget_set_visibility(GDialogue, R_VISIBLE);
+end;
+
+// Health ran out: back to the middle, half the gold gone
+routine Faint();
+begin
+  GFainted := true;
+  GDialogueOpen := true;
+  ShowInventory(false);
+  GGold := GGold div 2;
+  PlaySound(GHurtSound);
+  Rlabel_set_text(GDialogueWho, "You fainted");
+  Rlabel_set_text(GDialogueText,
+    "The red pools were too much. Mira found you and carried you back to the middle of the vale.\n\nYou lost **half of your gold**.");
+  Rwidget_set_visibility(GBuyMushroom, R_COLLAPSED);
+  Rwidget_set_visibility(GBuyManaPot, R_COLLAPSED);
+  Rbutton_set_text(GDialogueClose, "Get up");
+  Rwidget_set_visibility(GDialogue, R_VISIBLE);
+end;
+
+routine CloseDialogue();
+begin
+  if GFainted then
+    GFainted := false;
+    GHealth := 100.0f;
+    GPlayer := V3(0.0f, 0.0f, 6.0f);
+  end;
+  HideDialogue();
+end;
+
+routine Buy(const AItem: TItem; const APrice: int32);
+begin
+  if GGold < APrice then
+    ShowToast("Not enough gold");
+    return;
+  end;
+  if not AddItem(AItem, 1) then
+    ShowToast("Your bag is full");
+    return;
+  end;
+  GGold -= APrice;
+  PlaySound(GBuySound);
+  ShowToast("Bought: " + ItemName(AItem));
+  RefreshMerchantText();
+end;
+
+// ---- settings ----
+
+// The fullscreen switch as the window is (F11 toggles it too)
+routine RefreshFullscreenSwitch();
+begin
+  GUpdating := true;
+  if IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE) then
+    Rcheckbox_set_checked(GFullscreenBox, R_TRUE);
+  else
+    Rcheckbox_set_checked(GFullscreenBox, R_FALSE);
+  end;
+  GUpdating := false;
+end;
+
+routine SwitchFullscreen();
+begin
+  ToggleFrameFullscreen();
+  RefreshFullscreenSwitch();
+end;
+
+// The Video tab into the game: the frame rate, the field of view, the camera
+routine ApplyVideo();
+begin
+  GFov := Rslider_get_value(GFovSlider);
+  GDistance := Rslider_get_value(GDistanceSlider);
+  Rlabel_set_text(GFovValue, TextFormat("%d", int32(Round(GFov))));
+  Rlabel_set_text(GDistanceValue, TextFormat("%.1f", float64(GDistance)));
+  GShowFps := Rcheckbox_is_checked(GFpsBox) <> 0;
+  if GShowFps then
+    Rwidget_set_visibility(GFpsLabel, R_VISIBLE);
+  else
+    Rwidget_set_visibility(GFpsLabel, R_COLLAPSED);
+  end;
+end;
+
+// A volume slider's value (0 .. 100) shown beside it, as 0 .. 1
+routine SliderVolume(const ASlider: Rid; const AValueLabel: Rid): float32;
+var
+  LValue: float32;
+begin
+  LValue := Rslider_get_value(ASlider);
+  Rlabel_set_text(AValueLabel, TextFormat("%d %%", int32(Round(LValue))));
+  return LValue / 100.0f;
+end;
+
+// The Audio tab into raylib's volumes
+routine ApplyAudio();
+var
+  LMaster: float32;
+  LMusic: float32;
+  LEffects: float32;
+begin
+  LMaster := SliderVolume(GMasterSlider, GMasterValue);
+  LMusic := SliderVolume(GMusicSlider, GMusicValue);
+  LEffects := SliderVolume(GEffectsSlider, GEffectsValue);
+  if Rcheckbox_is_checked(GMuteBox) <> 0 then
+    LMaster := 0.0f;
+  end;
+  SetMasterVolume(LMaster);
+  SetMusicVolume(GMusic, LMusic);
+  SetSoundVolume(GPickupSound, LEffects);
+  SetSoundVolume(GHurtSound, LEffects);
+  SetSoundVolume(GBoomSound, LEffects);
+  SetSoundVolume(GBuySound, LEffects);
+end;
+
+routine ApplyGameplay();
+begin
+  GDifficulty := Rcombo_box_get_selected(GDifficultyBox);
+  GHints := Rcheckbox_is_checked(GHintsBox) <> 0;
+end;
+
+// ---- the game ----
+
+routine NewGame();
+var
+  LIndex: int32;
+begin
+  GHealth := 100.0f;
+  GMana := 100.0f;
+  GGold := 0;
+  GCrystalsTaken := 0;
+  GCalmTime := 0.0f;
+  GInPool := false;
+  GPlayer := V3(0.0f, 0.0f, 6.0f);
+  for LIndex := 0 to CCrystalCount - 1 do
+    GCrystals[LIndex].Taken := false;
+  end;
+  for LIndex := 0 to CSlotCount - 1 do
+    GSlots[LIndex] := TSlot(Item: TItem.iNone, Count: 0);
+  end;
+  // What a traveller starts with: the hotbar's first row, then the bag
+  GSlots[0] := TSlot(Item: TItem.iMushroom, Count: 2);
+  GSlots[1] := TSlot(Item: TItem.iManaPot, Count: 1);
+  GSlots[2] := TSlot(Item: TItem.iBomb, Count: 1);
+  GSlots[5] := TSlot(Item: TItem.iBow, Count: 1);
+  GSlots[6] := TSlot(Item: TItem.iArrows, Count: 12);
+  GSlots[7] := TSlot(Item: TItem.iKey, Count: 1);
+  GSlots[8] := TSlot(Item: TItem.iHatchet, Count: 1);
+  GSlots[9] := TSlot(Item: TItem.iPickaxe, Count: 1);
+  GSlots[10] := TSlot(Item: TItem.iLog, Count: 4);
+  GSelected := 0;
+  GFainted := false;
+  ShowInventory(false);
+  HideDialogue();
+  GSlotsDirty := true;
+  ShowToast("Find the 12 crystals of the vale");
+end;
+
+routine SelectSlot(const AIndex: int32);
+begin
+  GSelected := AIndex;
+  GSlotsDirty := true;
+end;
+
+// The hotbar's selected item, used (Q)
+routine UseSelected();
+var
+  LItem: TItem;
+  LUsed: bool;
+begin
+  LItem := GSlots[GSelected].Item;
+  if LItem = TItem.iNone then
+    return;
+  end;
+  LUsed := true;
+  match LItem of
+    TItem.iMushroom:
+      GHealth := Min(100.0f, GHealth + 30.0f);
+    TItem.iManaPot:
+      GMana := Min(100.0f, GMana + 40.0f);
+    TItem.iHoney:
+      GHealth := Min(100.0f, GHealth + 12.0f);
+    TItem.iBomb:
+      GCalmTime := CCalmSeconds;
+      PlaySound(GBoomSound);
+  else
+    LUsed := false;
+  end;
+  if not LUsed then
+    ShowToast(ItemName(LItem) + " cannot be used here");
+    return;
+  end;
+  ShowToast("Used: " + ItemName(LItem));
+  GSlots[GSelected].Count -= 1;
+  if GSlots[GSelected].Count <= 0 then
+    GSlots[GSelected] := TSlot(Item: TItem.iNone, Count: 0);
+  end;
+  GSlotsDirty := true;
+end;
+
+// How much a red pool hurts each second, by the difficulty
+routine PoolDamage(): float32;
+begin
+  match GDifficulty of
+    0: return 8.0f;
+    1: return 16.0f;
+  end;
+  return 30.0f;
+end;
+
+// The crystals near the player picked up; all of them grow back once found
+routine UpdateCrystals();
+var
+  LIndex: int32;
+  LGift: TItem;
+begin
+  for LIndex := 0 to CCrystalCount - 1 do
+    if not GCrystals[LIndex].Taken and (GroundDistance(GPlayer, GCrystals[LIndex].Position) < CPickDistance) then
+      GCrystals[LIndex].Taken := true;
+      GCrystalsTaken += 1;
+      GGold += 5;
+      GMana := Min(100.0f, GMana + 10.0f);
+      PlaySound(GPickupSound);
+      LGift := CrystalGift(LIndex);
+      if AddItem(LGift, 1) then
+        ShowToast("Crystal: +5 gold and " + ItemName(LGift));
+      else
+        ShowToast("Crystal: +5 gold (your bag is full)");
+      end;
+    end;
+  end;
+  if GCrystalsTaken = CCrystalCount then
+    GCrystalsTaken := 0;
+    for LIndex := 0 to CCrystalCount - 1 do
+      GCrystals[LIndex].Taken := false;
+    end;
+    ShowToast("Every crystal found: they grow back!");
+  end;
+end;
+
+// The red pools: they hurt while the player stands in one, unless calmed
+routine UpdatePools(const ADelta: float32);
+var
+  LIndex: int32;
+  LInside: bool;
+begin
+  if GCalmTime > 0.0f then
+    GCalmTime -= ADelta;
+    GInPool := false;
+    return;
+  end;
+  LInside := false;
+  for LIndex := 0 to CPoolCount - 1 do
+    if GroundDistance(GPlayer, GPools[LIndex].Position) < GPools[LIndex].Radius then
+      LInside := true;
+    end;
+  end;
+  if LInside and not GInPool then
+    PlaySound(GHurtSound);
+  end;
+  GInPool := LInside;
+  if LInside then
+    GHealth -= PoolDamage() * ADelta;
+  end;
+  if GHealth <= 0.0f then
+    GHealth := 0.0f;
+    GInPool := false;
+    Faint();
+  end;
+end;
+
+// One frame of play: the hotbar, the keys, walking, running, the world
+routine UpdatePlay(const ADelta: float32);
+var
+  LDx: float32;
+  LDz: float32;
+  LLength: float32;
+  LSpeed: float32;
+  LRunning: bool;
+begin
+  // The hotbar keys also pick the target of a swap in the inventory
+  if IsKeyPressed(KEY_ONE) then
+    SelectSlot(0);
+  end;
+  if IsKeyPressed(KEY_TWO) then
+    SelectSlot(1);
+  end;
+  if IsKeyPressed(KEY_THREE) then
+    SelectSlot(2);
+  end;
+  if IsKeyPressed(KEY_FOUR) then
+    SelectSlot(3);
+  end;
+  if IsKeyPressed(KEY_FIVE) then
+    SelectSlot(4);
+  end;
+  // A window open holds the world still
+  if GDialogueOpen or GInventoryOpen then
+    return;
+  end;
+  if IsKeyPressed(KEY_Q) then
+    UseSelected();
+  end;
+  if IsKeyPressed(KEY_E) and (GroundDistance(GPlayer, GMerchant) < CTalkDistance) then
+    OpenMerchant();
+    return;
+  end;
+
+  LDx := 0.0f;
+  LDz := 0.0f;
+  if IsKeyDown(KEY_W) then
+    LDz -= 1.0f;
+  end;
+  if IsKeyDown(KEY_S) then
+    LDz += 1.0f;
+  end;
+  if IsKeyDown(KEY_A) then
+    LDx -= 1.0f;
+  end;
+  if IsKeyDown(KEY_D) then
+    LDx += 1.0f;
+  end;
+  LLength := Sqrt(LDx * LDx + LDz * LDz);
+  LRunning := false;
+  if LLength > 0.0f then
+    LSpeed := CWalkSpeed;
+    if (IsKeyDown(KEY_LEFT_SHIFT) or IsKeyDown(KEY_RIGHT_SHIFT)) and (GMana > 0.0f) then
+      LSpeed := CRunSpeed;
+      LRunning := true;
+      GMana := Max(0.0f, GMana - CRunCost * ADelta);
+    end;
+    GPlayer.x := Clamp(GPlayer.x + LDx / LLength * LSpeed * ADelta, -CWorldHalf, CWorldHalf);
+    GPlayer.z := Clamp(GPlayer.z + LDz / LLength * LSpeed * ADelta, -CWorldHalf, CWorldHalf);
+  end;
+  // The Gameplay tab's checkbox, read where it matters
+  if not LRunning and (Rcheckbox_is_checked(GRegenBox) <> 0) then
+    GMana := Min(100.0f, GMana + CManaRegen * ADelta);
+  end;
+  UpdateCrystals();
+  UpdatePools(ADelta);
+end;
+
+routine UpdateToast(const ADelta: float32);
+begin
+  if GToastTime <= 0.0f then
+    return;
+  end;
+  GToastTime -= ADelta;
+  if GToastTime <= 0.0f then
+    Rwidget_set_visibility(GToast, R_HIDDEN);
+  end;
+end;
+
+// The camera circles the vale behind the menu, follows the player in play
+routine UpdateCamera(const ADelta: float32);
+begin
+  GCamera.fovy := GFov;
+  GCamera.up := V3(0.0f, 1.0f, 0.0f);
+  GCamera.projection := CAMERA_PERSPECTIVE;
+  if (GScreen = CScreenMenu) or ((GScreen = CScreenSettings) and (GSettingsFrom = CScreenMenu)) then
+    GOrbit += ADelta * 0.12f;
+    GCamera.position := V3(Sin(GOrbit) * 19.0f, 9.0f, Cos(GOrbit) * 19.0f);
+    GCamera.target := V3(0.0f, 0.5f, 0.0f);
+    return;
+  end;
+  GCamera.target := V3(GPlayer.x, 1.0f, GPlayer.z);
+  GCamera.position := V3(GPlayer.x, GDistance * 0.78f, GPlayer.z + GDistance);
+end;
+
+// ---- actions (named in game_ui.xml) ----
+
+routine clink OnMenuPlay(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  NewGame();
+  GStarted := true;
+  Rwidget_set_enabled(GContinue, R_TRUE);
+  ShowScreen(CScreenPlay);
+end;
+
+routine clink OnMenuContinue(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  if GStarted then
+    ShowScreen(CScreenPlay);
+  end;
+end;
+
+routine clink OnMenuSettings(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  GSettingsFrom := CScreenMenu;
+  ShowScreen(CScreenSettings);
+end;
+
+routine clink OnSettingsBack(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  ShowScreen(GSettingsFrom);
+end;
+
+routine clink OnPauseResume(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  ShowScreen(CScreenPlay);
+end;
+
+routine clink OnPauseSettings(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  GSettingsFrom := CScreenPause;
+  ShowScreen(CScreenSettings);
+end;
+
+routine clink OnPauseMenu(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  ShowScreen(CScreenMenu);
+end;
+
+routine clink OnQuit(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  GQuit := true;
+end;
+
+// Esc: closes the window that is open, else pauses or goes back
+routine clink OnEscape(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  if GScreen = CScreenSettings then
+    ShowScreen(GSettingsFrom);
+    return;
+  end;
+  if GScreen = CScreenPause then
+    ShowScreen(CScreenPlay);
+    return;
+  end;
+  if GScreen <> CScreenPlay then
+    return;
+  end;
+  if GDialogueOpen then
+    CloseDialogue();
+    return;
+  end;
+  if GInventoryOpen then
+    ShowInventory(false);
+    return;
+  end;
+  ShowScreen(CScreenPause);
+end;
+
+routine clink OnInventory(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  if (GScreen = CScreenPlay) and not GDialogueOpen then
+    ShowInventory(not GInventoryOpen);
+  end;
+end;
+
+// A hotbar slot clicked: it becomes the selected one
+routine clink OnHotbarClick(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+var
+  LIndex: int32;
+begin
+  for LIndex := 0 to CHotbarCount - 1 do
+    if GHotWidgets[LIndex].Button = ASender then
+      SelectSlot(LIndex);
+    end;
+  end;
+end;
+
+// An inventory slot clicked: its item swaps with the selected hotbar slot's
+routine clink OnInventoryClick(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+var
+  LIndex: int32;
+  LSwap: TSlot;
+begin
+  for LIndex := 0 to CSlotCount - 1 do
+    if (GInvWidgets[LIndex].Button = ASender) and (LIndex <> GSelected) then
+      LSwap := GSlots[LIndex];
+      GSlots[LIndex] := GSlots[GSelected];
+      GSlots[GSelected] := LSwap;
+      GSlotsDirty := true;
+    end;
+  end;
+end;
+
+routine clink OnBuyMushroom(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  Buy(TItem.iMushroom, CMushroomPrice);
+end;
+
+routine clink OnBuyManaPot(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  Buy(TItem.iManaPot, CManaPotPrice);
+end;
+
+routine clink OnDialogueClose(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  CloseDialogue();
+end;
+
+routine clink OnVideoFullscreen(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+var
+  LWanted: bool;
+begin
+  if GUpdating then
+    return;
+  end;
+  LWanted := Rcheckbox_is_checked(ASender) <> 0;
+  if LWanted <> IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE) then
+    ToggleFrameFullscreen();
+  end;
+end;
+
+routine clink OnVideoChanged(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  ApplyVideo();
+end;
+
+routine clink OnAudioChanged(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  ApplyAudio();
+end;
+
+routine clink OnGameplayChanged(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  ApplyGameplay();
+end;
+
+routine clink OnError(ACode: RError; ASeverity: RSeverity; ADetail: ptr to const char);
+begin
+  println("[Raven] {} ({}): {}", Rerror_to_string(ACode), Rseverity_to_string(ASeverity), ADetail);
+end;
+
+// Every action game_ui.xml names, bound before the window is made
+routine BindActions();
+begin
+  Raction_bind("menu.play", OnMenuPlay, nil);
+  Raction_bind("menu.continue", OnMenuContinue, nil);
+  Raction_bind("menu.settings", OnMenuSettings, nil);
+  Raction_bind("settings.back", OnSettingsBack, nil);
+  Raction_bind("pause.resume", OnPauseResume, nil);
+  Raction_bind("pause.settings", OnPauseSettings, nil);
+  Raction_bind("pause.menu", OnPauseMenu, nil);
+  Raction_bind("app.quit", OnQuit, nil);
+  Raction_bind("game.escape", OnEscape, nil);
+  Raction_bind("game.inventory", OnInventory, nil);
+  Raction_bind("hot.click", OnHotbarClick, nil);
+  Raction_bind("inv.click", OnInventoryClick, nil);
+  Raction_bind("dialogue.buy_mushroom", OnBuyMushroom, nil);
+  Raction_bind("dialogue.buy_mana", OnBuyManaPot, nil);
+  Raction_bind("dialogue.close", OnDialogueClose, nil);
+  Raction_bind("video.fullscreen", OnVideoFullscreen, nil);
+  Raction_bind("video.fps", OnVideoChanged, nil);
+  Raction_bind("video.fov", OnVideoChanged, nil);
+  Raction_bind("video.distance", OnVideoChanged, nil);
+  Raction_bind("audio.changed", OnAudioChanged, nil);
+  Raction_bind("game.difficulty", OnGameplayChanged, nil);
+  Raction_bind("game.hints", OnGameplayChanged, nil);
+end;
+
+// The widgets the program drives, by their XML names
+routine FindWidgets();
+var
+  LIndex: int32;
+begin
+  GScreens := Find("screens");
+  GContinue := Find("menu.continue");
+  GHealthBar := Find("hud.health");
+  GHealthText := Find("hud.health.text");
+  GManaBar := Find("hud.mana");
+  GManaText := Find("hud.mana.text");
+  GGoldLabel := Find("hud.gold");
+  GBagGold := Find("inventory.gold");
+  GCrystalLabel := Find("hud.crystals");
+  GFpsLabel := Find("hud.fps");
+  GToast := Find("hud.toast");
+  GToastText := Find("hud.toast.text");
+  GPrompt := Find("hud.prompt");
+  GPromptText := Find("hud.prompt.text");
+  GSelectedLabel := Find("hud.selected");
+  GInventory := Find("inventory");
+  GDialogue := Find("dialogue");
+  GDialogueWho := Find("dialogue.who");
+  GDialogueText := Find("dialogue.text");
+  GBuyMushroom := Find("dialogue.buy1");
+  GBuyManaPot := Find("dialogue.buy2");
+  GDialogueClose := Find("dialogue.close");
+  GFullscreenBox := Find("video.fullscreen");
+  GFpsBox := Find("video.fps");
+  GFovSlider := Find("video.fov");
+  GFovValue := Find("video.fov.value");
+  GDistanceSlider := Find("video.distance");
+  GDistanceValue := Find("video.distance.value");
+  GMasterSlider := Find("audio.master");
+  GMasterValue := Find("audio.master.value");
+  GMusicSlider := Find("audio.music");
+  GMusicValue := Find("audio.music.value");
+  GEffectsSlider := Find("audio.effects");
+  GEffectsValue := Find("audio.effects.value");
+  GMuteBox := Find("audio.mute");
+  GDifficultyBox := Find("game.difficulty");
+  GHintsBox := Find("game.hints");
+  GRegenBox := Find("game.regen");
+  for LIndex := 0 to CHotbarCount - 1 do
+    GHotWidgets[LIndex] := SlotWidgets("hot." + NumberText(LIndex));
+  end;
+  for LIndex := 0 to CSlotCount - 1 do
+    GInvWidgets[LIndex] := SlotWidgets("inv." + NumberText(LIndex));
+  end;
+  SetTileImage(Find("hud.coin"), CCoinTile);
+end;
+
+// ---- the world ----
+
+// The same vale every game: crystals on a spiral, three pools, a ring of trees
+routine SetupWorld();
+var
+  LIndex: int32;
+  LAngle: float32;
+  LRadius: float32;
+begin
+  GMerchant := V3(-3.0f, 0.0f, -2.5f);
+  for LIndex := 0 to CCrystalCount - 1 do
+    LAngle := float32(LIndex) * 2.4f;
+    LRadius := 4.5f + float32(LIndex) * 0.95f;
+    GCrystals[LIndex].Position := V3(Cos(LAngle) * LRadius, 0.0f, Sin(LAngle) * LRadius);
+    GCrystals[LIndex].Taken := false;
+  end;
+  GPools[0] := TPool(Position: V3(6.0f, 0.0f, 4.0f), Radius: 2.2f);
+  GPools[1] := TPool(Position: V3(-8.0f, 0.0f, 6.5f), Radius: 2.8f);
+  GPools[2] := TPool(Position: V3(4.0f, 0.0f, -9.0f), Radius: 2.5f);
+  for LIndex := 0 to CTreeCount - 1 do
+    LAngle := float32(LIndex) * (6.2831853f / float32(CTreeCount));
+    LRadius := CWorldHalf + 1.6f + 1.2f * Sin(float32(LIndex) * 1.7f);
+    GTrees[LIndex].Position := V3(Cos(LAngle) * LRadius, 0.0f, Sin(LAngle) * LRadius);
+    GTrees[LIndex].Height := 2.2f + 0.8f * Cos(float32(LIndex) * 2.3f);
+  end;
+end;
+
+routine DrawShadow(const AX: float32; const AZ: float32; const ARadius: float32);
+begin
+  DrawCylinder(V3(AX, 0.02f, AZ), ARadius, ARadius, 0.01f, 16, Fade(BLACK, 0.28f));
+end;
+
+// The vale, inside BeginFrame: the sky over the frame (in base units, so the
+// bars stay), then the world through the letterbox at the base aspect
+routine DrawWorld();
+var
+  LIndex: int32;
+  LTime: float32;
+  LY: float32;
+  LPos: Vector3;
+  LPoolColor: Color;
+begin
+  LTime := float32(GetTime());
+  DrawRectangle(0, 0, CScreenWidth, CScreenHeight, Rgb(122, 172, 222));
+  BeginFrameMode3D(GCamera);
+
+  DrawPlane(V3(0.0f, 0.0f, 0.0f), V2(CWorldHalf * 2.0f + 14.0f, CWorldHalf * 2.0f + 14.0f), Rgb(78, 140, 74));
+  DrawPlane(V3(0.0f, 0.005f, 0.0f), V2(CWorldHalf * 2.0f, CWorldHalf * 2.0f), Rgb(104, 172, 92));
+
+  // The pools glow blue while a bomb keeps them calm
+  if GCalmTime > 0.0f then
+    LPoolColor := Fade(SKYBLUE, 0.55f);
+  else
+    LPoolColor := Fade(Rgb(225, 45, 70), 0.65f);
+  end;
+  for LIndex := 0 to CPoolCount - 1 do
+    LPos := GPools[LIndex].Position;
+    DrawCylinder(V3(LPos.x, 0.01f, LPos.z), GPools[LIndex].Radius, GPools[LIndex].Radius, 0.04f, 32, LPoolColor);
+  end;
+
+  for LIndex := 0 to CTreeCount - 1 do
+    LPos := GTrees[LIndex].Position;
+    DrawCylinder(LPos, 0.16f, 0.22f, 0.9f, 8, Rgb(112, 74, 42));
+    DrawCylinder(V3(LPos.x, 0.9f, LPos.z), 0.0f, 0.95f, GTrees[LIndex].Height, 10, Rgb(42, 112, 62));
+  end;
+
+  // A crystal: two cones point to point, bobbing
+  for LIndex := 0 to CCrystalCount - 1 do
+    if not GCrystals[LIndex].Taken then
+      LPos := GCrystals[LIndex].Position;
+      LY := 0.7f + 0.18f * Sin(LTime * 2.2f + float32(LIndex));
+      DrawShadow(LPos.x, LPos.z, 0.3f);
+      DrawCylinder(V3(LPos.x, LY - 0.42f, LPos.z), 0.3f, 0.0f, 0.42f, 6, Rgb(110, 214, 255));
+      DrawCylinder(V3(LPos.x, LY, LPos.z), 0.0f, 0.3f, 0.5f, 6, Rgb(170, 236, 255));
+    end;
+  end;
+
+  // Mira, the merchant, and the player
+  DrawShadow(GMerchant.x, GMerchant.z, 0.45f);
+  DrawCapsule(V3(GMerchant.x, 0.45f, GMerchant.z), V3(GMerchant.x, 1.2f, GMerchant.z), 0.38f, 8, 12, Rgb(236, 142, 62));
+  DrawCylinder(V3(GMerchant.x, 1.5f, GMerchant.z), 0.0f, 0.52f, 0.5f, 12, Rgb(142, 62, 164));
+  DrawShadow(GPlayer.x, GPlayer.z, 0.42f);
+  DrawCapsule(V3(GPlayer.x, 0.45f, GPlayer.z), V3(GPlayer.x, 1.1f, GPlayer.z), 0.36f, 8, 12, Rgb(72, 122, 236));
+
+  EndFrameMode3D();
+end;
+
+// ---- assets ----
+
+// A sound effect from a zip entry (decoded into memory); its IO closed after
+routine ZipSound(const AEntry: string): Sound;
+var
+  LIO: IO;
+  LSound: Sound;
+begin
+  LIO := CreateZipFileIO(CArchive, AEntry, CPassword);
+  LSound := LoadSoundIO(LIO, ".ogg");
+  IOClose(LIO);
+  return LSound;
+end;
+
+routine LoadAudio();
+begin
+  GPickupSound := ZipSound("res/assets/audio/sfx/samp0.ogg");
+  GHurtSound := ZipSound("res/assets/audio/sfx/explo_enemy.ogg");
+  GBoomSound := ZipSound("res/assets/audio/sfx/explo_rock.ogg");
+  GBuySound := ZipSound("res/assets/audio/sfx/digthis.ogg");
+  // The music's IO is read while it plays: open until the music is unloaded
+  GMusicIO := CreateZipFileIO(CArchive, "res/assets/audio/music/song01.ogg", CPassword);
+  GMusic := LoadMusicStreamIO(GMusicIO, ".ogg");
+  PlayMusicStream(GMusic);
+end;
+
+routine UnloadAudio();
+begin
+  UnloadSound(GPickupSound);
+  UnloadSound(GHurtSound);
+  UnloadSound(GBoomSound);
+  UnloadSound(GBuySound);
+  UnloadMusicStreamIO(GMusic);
+  IOClose(GMusicIO);
+end;
+
+// ---- the loop ----
+
+routine Run();
+var
+  LDelta: float32;
+begin
+  while not WindowShouldClose() and not GQuit do
+    if IsKeyPressed(KEY_F11) then
+      SwitchFullscreen();
+    end;
+    UpdateMusicStream(GMusic);
+    LDelta := GetFrameTime();
+    if GScreen = CScreenPlay then
+      UpdatePlay(LDelta);
+    end;
+    UpdateToast(LDelta);
+    UpdateCamera(LDelta);
+    RefreshHud();
+    if GSlotsDirty then
+      RefreshSlots();
+    end;
+    // Raven's frame: its input, its layout, the actions it fires
+    if not UpdateRaven(GUi) then
+      leave;
+    end;
+
+    BeginDrawing();
+    BeginFrame();
+    DrawWorld();
+    // The menus dim the world behind them
+    if GScreen <> CScreenPlay then
+      DrawRectangle(0, 0, CScreenWidth, CScreenHeight, Fade(BLACK, 0.35f));
+    end;
+    DrawRaven(GUi);
+    EndFrame();
+    EndDrawing();
+  end;
+end;
+
+var
+  LZip: IOSource;
+  LPrefix: string;
+  LTheme: ptr to const char;
+
+begin
+  SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
+  if not InitFrameWindow(CScreenWidth, CScreenHeight, "PaskalCPP - Raven game UI") then
+    println("the window did not open");
+    return;
+  end;
+  SetTargetFPS(60);
+  // Esc is the game's (pause), not raylib's way out
+  SetExitKey(KEY_NULL);
+  SetFrameColor(Rgb(11, 16, 32));
+  InitAudioDevice();
+  Rerror_set_callback(OnError);
+  if not InitRaven("RavenGameUI") then
+    println("Raven did not start");
+    CloseAudioDevice();
+    CloseWindow();
+    return;
+  end;
+
+  // The shared assets archive, as io://<n>/<entry> for every C runtime open:
+  // Raven reads the theme, the XML (and the files it names) and the icons
+  // through it with its own calls
+  LZip := CreateZipIOSource(CArchive, CPassword);
+  LPrefix := RegisterIOSource(LZip);
+  LTheme := Rtheme_load((LPrefix + "/res/assets/ui/game_theme.xml").c_str());
+  if LTheme <> nil then
+    Rtheme_use(LTheme);
+  end;
+  BindActions();
+  GUi := Rwindow_create_from_xml_file((LPrefix + "/res/assets/ui/game_ui.xml").c_str());
+
+  if GUi = R_INVALID_ID then
+    println("the UI did not load");
+  else
+    // Pixel art: the icon sheet sampled nearest
+    GIcons := Rtexture_create_from_file((LPrefix + "/res/assets/tilesets/tinytown/tinytown.png").c_str());
+    Rtexture_set_filter(GIcons, R_FILTER_NEAREST);
+    FindWidgets();
+    LoadAudio();
+    SetupWorld();
+    NewGame();
+    ApplyVideo();
+    ApplyAudio();
+    ApplyGameplay();
+    RefreshFullscreenSwitch();
+    ShowScreen(CScreenMenu);
+    Run();
+    UnloadAudio();
+  end;
+
+  CloseRaven();
+  UnregisterIO(LPrefix);
+  IOSourceClose(LZip);
+  CloseAudioDevice();
+  CloseWindow();
+end.

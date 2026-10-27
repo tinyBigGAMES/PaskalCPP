@@ -2515,7 +2515,7 @@ begin
   else if LBaseType = 'va_list' then LBaseType := 'Pointer'
   else if LBaseType = '__va_list_tag' then LBaseType := 'Pointer'
 
-  // Compound type prefixes — strip prefix, keep original name
+  // Compound type prefixes - strip prefix, keep original name
   else if LBaseType.StartsWith('struct ') then LBaseType := Copy(LBaseType, 8, Length(LBaseType))
   else if LBaseType.StartsWith('union ') then LBaseType := Copy(LBaseType, 7, Length(LBaseType))
   else if LBaseType.StartsWith('enum ') then LBaseType := Copy(LBaseType, 6, Length(LBaseType));
@@ -3095,7 +3095,7 @@ begin
   for LName in FForwardDecls do
   begin
     LSanitized := SanitizeIdentifier(LName);
-    // Types with full struct bodies only need P/PP here — the full record
+    // Types with full struct bodies only need P/PP here - the full record
     // is emitted later by GenerateAllTypes. Truly opaque types (no body)
     // need the placeholder record end so they can be used by value.
     if not HasStructDefinition(LName) then
@@ -3229,7 +3229,7 @@ begin
   try
     for LI := 0 to FForwardDecls.Count - 1 do
     begin
-      // Only mark truly opaque forward decls as known — those with struct
+      // Only mark truly opaque forward decls as known - those with struct
       // bodies were not emitted as record end, so the multi-pass must
       // wait for their full definition before using them by value
       if not HasStructDefinition(FForwardDecls[LI]) then
@@ -3797,7 +3797,7 @@ begin
       end
       else
       begin
-        // Fallback — no struct found, emit positional
+        // Fallback - no struct found, emit positional
         EmitFmt('%s: %s = (%s);', [
           SanitizeIdentifier(LDefine.DefineName),
           SanitizeIdentifier(LDefine.TypedConstType),

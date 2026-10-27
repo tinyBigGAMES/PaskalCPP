@@ -1,0 +1,36 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  rlgl.pcpp - the rlgl unit: `import rlgl;` uses rlgl, raylib's OpenGL
+  abstraction layer (rlDrawRenderBatchActive, rlEnableShader,
+  rlLoadTexture, rlSetBlendMode, ...), from PaskalCPP. rlgl is compiled into
+  raylib's own library, so this unit imports raylib for its include path,
+  library paths and link libraries and adds only rlgl's header.
+==============================================================================*/
+
+module unit rlgl;
+
+import
+  raylib;
+
+// The header goes to this unit's header, so every importer sees rlgl's API
+cpp header;
+
+#include "rlgl.h"
+
+end.

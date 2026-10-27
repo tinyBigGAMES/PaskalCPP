@@ -1,0 +1,75 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  JsonConfigZip.pcpp - yyjson example (import yyjson): a config read
+  straight from bin\assets.zip. The entry res/assets/data/config.json
+  (password PaskalCPP) is opened as a CustomIO IO and registered with
+  HookIO; yyjson's own yyjson_read_file then reads its io:// path through
+  the hooks, with no file unpacked to disk and no yyjson-side change. The
+  document is walked: nested objects, a real, a bool, an array of strings.
+==============================================================================*/
+
+module exe JsonConfigZip;
+
+import
+  yyjson,
+  CustomIO,
+  HookIO;
+
+var
+  LZip: IO;
+  LPrefix: string;
+  LDoc: ptr to yyjson_doc;
+  LErr: yyjson_read_err;
+  LRoot: ptr to yyjson_val;
+  LWindow: ptr to yyjson_val;
+  LAudio: ptr to yyjson_val;
+  LPlayers: ptr to yyjson_val;
+  LIndex: size_t;
+
+begin
+  LZip := CreateZipFileIO("$P:../../assets.zip", "res/assets/data/config.json", "PaskalCPP");
+  if LZip = nil then
+    println("cannot open config.json in assets.zip");
+    return;
+  end;
+  LPrefix := RegisterIO(LZip);
+
+  // yyjson_read_file reads the zip entry through its io:// path
+  LDoc := yyjson_read_file((LPrefix + "/config.json").c_str(), YYJSON_READ_NOFLAG, nil,
+    address of LErr);
+  if LDoc = nil then
+    println("config.json: {} (code {}, byte {})", LErr.msg, LErr.code, LErr.pos);
+  else
+    LRoot := yyjson_doc_get_root(LDoc);
+    LWindow := yyjson_obj_get(LRoot, "window");
+    LAudio := yyjson_obj_get(LRoot, "audio");
+    println("{}", yyjson_get_str(yyjson_obj_get(LRoot, "title")));
+    println("window {} x {}, fullscreen {}", yyjson_get_sint(yyjson_obj_get(LWindow, "width")),
+      yyjson_get_sint(yyjson_obj_get(LWindow, "height")),
+      yyjson_get_bool(yyjson_obj_get(LWindow, "fullscreen")));
+    println("audio volume {}, muted {}", yyjson_get_real(yyjson_obj_get(LAudio, "volume")),
+      yyjson_get_bool(yyjson_obj_get(LAudio, "muted")));
+    LPlayers := yyjson_obj_get(LRoot, "players");
+    LIndex := 0;
+    while LIndex < yyjson_arr_size(LPlayers) do
+      println("player {}: {}", LIndex + 1, yyjson_get_str(yyjson_arr_get(LPlayers, LIndex)));
+      LIndex := LIndex + 1;
+    end;
+    yyjson_doc_free(LDoc);
+  end;
+  UnregisterIO(LPrefix);
+  IOClose(LZip);
+end.

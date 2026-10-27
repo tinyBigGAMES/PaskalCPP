@@ -1,0 +1,343 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_tmxlite_ext.pcpp - Std library compliance: the tmxlite_ext unit
+  (res\libs\std\tmxlite_ext.pcpp)
+
+  The fixtures of std_tmxlite are loaded and drawn into a clear render
+  texture in a hidden window, and the pixels read back. Tile 1 of the
+  fixture tileset has four quadrants of their own colour (red, green / blue,
+  white), so each cell prints its quadrants' colours (R G B W, Y yellow, C
+  cyan, . clear) and every flip combination shows where Tiled puts them.
+  The expected rows are printed by scripts\vendor\gen_tmx_fixtures.py from
+  Tiled's own rules (flip order, the renderers' placement and map sizes),
+  not from tmxlite_ext: the orthogonal map's eight flip cases, its zlib
+  layer inside a group, its hidden layer left out, its image layer over one
+  quadrant; the gzip and zstd layers of std_tmxlite_comp.tmx; one point per
+  cell of an isometric, a staggered and a hexagonal map; an infinite map's
+  chunk drawn at an offset.
+
+  Then: DrawTiledLayer draws a hidden layer on demand; GetTiledLayerIndex
+  finds layers by name; LoadTiledMapIO over a folder source draws what the
+  file form draws and puts back the thread's own path source; the example's
+  overworld map from bin\assets.zip (LoadTiledMapZip) draws the same pixels
+  as from its files. The refusals: a map the source does not have (tmxlite
+  says so on stderr), a wrong zip password, a nil source; each leaves the
+  map empty.
+*******************************************************************************/
+
+module exe std_tmxlite_ext;
+
+/*
+  @@test
+    kind run
+    expect
+    | load true images 2 tiles 2 valid true
+    | ortho row 0 RGBW GRWB BWRG RBGW WGBR
+    | ortho row 1 BRWG GWRB YYYY CBGR ....
+    | index csv 0 group 1 badge 4 nowhere -1
+    | hidden layer drawn YYYY YYYY
+    | comp row 0 GRWB BWRG
+    | comp row 1 RBGW YYYY
+    | iso Y Y .
+    | stag Y Y .
+    | hex Y Y .
+    | inf Y .
+    | size ortho 40x16 iso 32x16 stag 40x12 hex 26x20
+    | io load true same pixels true thread source kept true
+    | ERROR: Failed to read file std_tmxlite_nowhere.tmx
+    | io missing false valid false
+    | nil source false
+    | zip load true file load true layers 3 same pixels true
+    | ERROR: Failed to read file res/assets/maps/overworld.tmx
+    | zip wrong password false valid false
+    | [Heap] Allocs: 28, Frees: 28, Leaked: 0
+  @@end
+*/
+
+import
+  tmxlite,
+  tmxlite_ext,
+  raylib,
+  CustomIO,
+  HookIO,
+  SysUtils;
+
+const
+  CFixtures: string = "$P:../../res/tests/std/fixtures/";
+  CArchive: string = "$P:../../assets.zip";
+  CWorldEntry: string = "res/assets/maps/overworld.tmx";
+  CWorldFile: string = "$P:../../res/assets/maps/overworld.tmx";
+
+// A pixel as one letter: R G B W Y C for the fixture colours, . clear
+routine Letter(const AImage: Image; const AX: int32; const AY: int32): string;
+var
+  LColor: Color;
+begin
+  LColor := GetImageColor(AImage, AX, AY);
+  if LColor.a = 0 then
+    return ".";
+  end;
+  if (LColor.r = 255) and (LColor.g = 0) and (LColor.b = 0) then
+    return "R";
+  end;
+  if (LColor.r = 0) and (LColor.g = 255) and (LColor.b = 0) then
+    return "G";
+  end;
+  if (LColor.r = 0) and (LColor.g = 0) and (LColor.b = 255) then
+    return "B";
+  end;
+  if (LColor.r = 255) and (LColor.g = 255) and (LColor.b = 255) then
+    return "W";
+  end;
+  if (LColor.r = 255) and (LColor.g = 255) and (LColor.b = 0) then
+    return "Y";
+  end;
+  if (LColor.r = 0) and (LColor.g = 255) and (LColor.b = 255) then
+    return "C";
+  end;
+  return "?";
+end;
+
+// AMap drawn at (AX, AY) on a clear AWidth x AHeight render texture (one
+// layer of it when ALayer >= 0), read back top row first
+routine Render(const AMap: TiledMap; const ALayer: int32; const AWidth: int32;
+  const AHeight: int32; const AX: float32; const AY: float32): Image;
+var
+  LTarget: RenderTexture2D;
+  LImage: Image;
+begin
+  LTarget := LoadRenderTexture(AWidth, AHeight);
+  BeginTextureMode(LTarget);
+  ClearBackground(BLANK);
+  if ALayer < 0 then
+    DrawTiledMap(AMap, AX, AY, WHITE);
+  else
+    DrawTiledLayer(AMap, ALayer, AX, AY, WHITE);
+  end;
+  EndTextureMode();
+  LImage := LoadImageFromTexture(LTarget.texture);
+  // A render texture's rows come back bottom first
+  ImageFlipVertical(address of LImage);
+  UnloadRenderTexture(LTarget);
+  return LImage;
+end;
+
+// The quadrant letters of the 8x8 cells of one row: " TLTRBLBR" per cell
+routine CellRow(const AImage: Image; const ARow: int32; const ACells: int32): string;
+var
+  LCol: int32;
+  LText: string;
+begin
+  LText := "";
+  for LCol := 0 to ACells - 1 do
+    LText := LText + " " + Letter(AImage, LCol * 8 + 2, ARow * 8 + 2) +
+      Letter(AImage, LCol * 8 + 6, ARow * 8 + 2) + Letter(AImage, LCol * 8 + 2, ARow * 8 + 6) +
+      Letter(AImage, LCol * 8 + 6, ARow * 8 + 6);
+  end;
+  return LText;
+end;
+
+// True when two images hold the same pixels
+routine SamePixels(const AFirst: Image; const ASecond: Image): bool;
+var
+  LX: int32;
+  LY: int32;
+  LA: Color;
+  LB: Color;
+begin
+  if (AFirst.width <> ASecond.width) or (AFirst.height <> ASecond.height) then
+    return false;
+  end;
+  for LY := 0 to AFirst.height - 1 do
+    for LX := 0 to AFirst.width - 1 do
+      LA := GetImageColor(AFirst, LX, LY);
+      LB := GetImageColor(ASecond, LX, LY);
+      if (LA.r <> LB.r) or (LA.g <> LB.g) or (LA.b <> LB.b) or (LA.a <> LB.a) then
+        return false;
+      end;
+    end;
+  end;
+  return true;
+end;
+
+// A fixture map loaded and drawn at (AX, 0) on an AWidth x AHeight target;
+// a magenta image (every letter ?) when it does not load
+routine RenderFile(const AFile: string; const AWidth: int32; const AHeight: int32;
+  const AX: float32): Image;
+var
+  LMap: TiledMap;
+  LImage: Image;
+begin
+  if not LoadTiledMap(CFixtures + AFile, LMap) then
+    return GenImageColor(AWidth, AHeight, MAGENTA);
+  end;
+  LImage := Render(LMap, -1, AWidth, AHeight, AX, 0.0f);
+  UnloadTiledMap(LMap);
+  return LImage;
+end;
+
+// The orthogonal fixture: what it loaded, its pixels, layer lookup and the
+// hidden layer drawn on demand
+routine TestOrtho();
+var
+  LMap: TiledMap;
+  LLoaded: bool;
+  LImage: Image;
+begin
+  LLoaded := LoadTiledMap(CFixtures + "std_tmxlite.tmx", LMap);
+  println("load {} images {} tiles {} valid {}", LLoaded, len(LMap.Images), len(LMap.Tiles),
+    IsTiledMapValid(LMap));
+  LImage := Render(LMap, -1, 40, 16, 0.0f, 0.0f);
+  println("ortho row 0{}", CellRow(LImage, 0, 5));
+  println("ortho row 1{}", CellRow(LImage, 1, 5));
+  UnloadImage(LImage);
+  println("index csv {} group {} badge {} nowhere {}", GetTiledLayerIndex(LMap, "csv"),
+    GetTiledLayerIndex(LMap, "group"), GetTiledLayerIndex(LMap, "badge"),
+    GetTiledLayerIndex(LMap, "nowhere"));
+  LImage := Render(LMap, GetTiledLayerIndex(LMap, "hidden"), 40, 16, 0.0f, 0.0f);
+  println("hidden layer drawn{}", CellRow(LImage, 0, 2));
+  UnloadImage(LImage);
+  UnloadTiledMap(LMap);
+end;
+
+// The map whose layers are gzip and zstd compressed: its 2x2 cells drawn
+routine TestCompressed();
+var
+  LImage: Image;
+begin
+  LImage := RenderFile("std_tmxlite_comp.tmx", 16, 16, 0.0f);
+  println("comp row 0{}", CellRow(LImage, 0, 2));
+  println("comp row 1{}", CellRow(LImage, 1, 2));
+  UnloadImage(LImage);
+end;
+
+// One point per cell of the isometric, staggered and hexagonal maps, the
+// infinite map's chunk, and every map's size
+routine TestOrientations();
+var
+  LImage: Image;
+  LMap: TiledMap;
+  LSizes: string;
+begin
+  LImage := RenderFile("std_tmxlite_iso.tmx", 32, 16, 0.0f);
+  println("iso {} {} {}", Letter(LImage, 20, 8), Letter(LImage, 4, 8), Letter(LImage, 12, 4));
+  UnloadImage(LImage);
+  LImage := RenderFile("std_tmxlite_stag.tmx", 40, 12, 0.0f);
+  println("stag {} {} {}", Letter(LImage, 20, 4), Letter(LImage, 12, 8), Letter(LImage, 4, 4));
+  UnloadImage(LImage);
+  LImage := RenderFile("std_tmxlite_hex.tmx", 26, 20, 0.0f);
+  println("hex {} {} {}", Letter(LImage, 14, 4), Letter(LImage, 4, 8), Letter(LImage, 4, 2));
+  UnloadImage(LImage);
+  // The chunk starts two tiles left of the map's (0, 0)
+  LImage := RenderFile("std_tmxlite_inf.tmx", 16, 8, 16.0f);
+  println("inf {} {}", Letter(LImage, 4, 4), Letter(LImage, 12, 4));
+  UnloadImage(LImage);
+
+  LSizes := "size";
+  LoadTiledMap(CFixtures + "std_tmxlite.tmx", LMap);
+  LSizes := LSizes + " ortho " + std::to_string(int32(GetTiledMapSize(LMap).x)) + "x" +
+    std::to_string(int32(GetTiledMapSize(LMap).y));
+  LoadTiledMap(CFixtures + "std_tmxlite_iso.tmx", LMap);
+  LSizes := LSizes + " iso " + std::to_string(int32(GetTiledMapSize(LMap).x)) + "x" +
+    std::to_string(int32(GetTiledMapSize(LMap).y));
+  LoadTiledMap(CFixtures + "std_tmxlite_stag.tmx", LMap);
+  LSizes := LSizes + " stag " + std::to_string(int32(GetTiledMapSize(LMap).x)) + "x" +
+    std::to_string(int32(GetTiledMapSize(LMap).y));
+  LoadTiledMap(CFixtures + "std_tmxlite_hex.tmx", LMap);
+  LSizes := LSizes + " hex " + std::to_string(int32(GetTiledMapSize(LMap).x)) + "x" +
+    std::to_string(int32(GetTiledMapSize(LMap).y));
+  UnloadTiledMap(LMap);
+  println("{}", LSizes);
+end;
+
+// The IO form over a folder source: the same pixels as the file form, the
+// thread's own path source put back; then the refusals
+routine TestIO();
+var
+  LFolder: IOSource;
+  LKept: IOSource;
+  LFile: TiledMap;
+  LFromIO: TiledMap;
+  LLoaded: bool;
+  LFileImage: Image;
+  LIOImage: Image;
+begin
+  LFolder := CreateFolderIOSource(ResolvePath(CFixtures));
+  // A thread source of the caller's own, which the load must put back
+  LKept := CreateFolderIOSource(ExeDir());
+  SetIOThreadPathSource(LKept);
+  LLoaded := LoadTiledMapIO(LFolder, "std_tmxlite.tmx", LFromIO);
+  LoadTiledMap(CFixtures + "std_tmxlite.tmx", LFile);
+  LFileImage := Render(LFile, -1, 40, 16, 0.0f, 0.0f);
+  LIOImage := Render(LFromIO, -1, 40, 16, 0.0f, 0.0f);
+  println("io load {} same pixels {} thread source kept {}", LLoaded,
+    SamePixels(LFileImage, LIOImage), GetIOThreadPathSource() = LKept);
+  SetIOThreadPathSource(nil);
+  UnloadImage(LFileImage);
+  UnloadImage(LIOImage);
+  UnloadTiledMap(LFile);
+
+  LLoaded := LoadTiledMapIO(LFolder, "std_tmxlite_nowhere.tmx", LFromIO);
+  println("io missing {} valid {}", LLoaded, IsTiledMapValid(LFromIO));
+  println("nil source {}", LoadTiledMapIO(nil, "std_tmxlite.tmx", LFromIO));
+  UnloadTiledMap(LFromIO);
+  IOSourceClose(LFolder);
+  IOSourceClose(LKept);
+end;
+
+// The example's map from bin\assets.zip and from its files: the same pixels
+routine TestZip();
+var
+  LZip: TiledMap;
+  LFile: TiledMap;
+  LZipLoaded: bool;
+  LFileLoaded: bool;
+  LZipImage: Image;
+  LFileImage: Image;
+  LWidth: int32;
+  LHeight: int32;
+begin
+  LZipLoaded := LoadTiledMapZip(CArchive, CWorldEntry, "PaskalCPP", LZip);
+  LFileLoaded := LoadTiledMap(CWorldFile, LFile);
+  LWidth := int32(GetTiledMapSize(LFile).x);
+  LHeight := int32(GetTiledMapSize(LFile).y);
+  LZipImage := Render(LZip, -1, LWidth, LHeight, 0.0f, 0.0f);
+  LFileImage := Render(LFile, -1, LWidth, LHeight, 0.0f, 0.0f);
+  println("zip load {} file load {} layers {} same pixels {}", LZipLoaded, LFileLoaded,
+    LZip.Map.getLayers().size(), SamePixels(LZipImage, LFileImage));
+  UnloadImage(LZipImage);
+  UnloadImage(LFileImage);
+  UnloadTiledMap(LFile);
+  LZipLoaded := LoadTiledMapZip(CArchive, CWorldEntry, "wrong", LZip);
+  println("zip wrong password {} valid {}", LZipLoaded, IsTiledMapValid(LZip));
+  UnloadTiledMap(LZip);
+end;
+
+begin
+  SetTraceLogLevel(LOG_NONE);
+  SetConfigFlags(FLAG_WINDOW_HIDDEN);
+  InitWindow(64, 64, "std_tmxlite_ext");
+  if not IsWindowReady() then
+    println("no window");
+    return;
+  end;
+  TestOrtho();
+  TestCompressed();
+  TestOrientations();
+  TestIO();
+  TestZip();
+  CloseWindow();
+end.

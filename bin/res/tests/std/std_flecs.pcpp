@@ -1,0 +1,185 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_flecs.pcpp - Std library compliance: the flecs vendor unit
+  (res\libs\std\flecs.pcpp)
+
+  flecs' C++ API called straight from PaskalCPP, PaskalCPP records as the
+  components and PaskalCPP routines as the callbacks. A world holds three
+  named entities: Ship and Rock have a Position and a Velocity, Flag only a
+  Position. A Move system adds the velocity to the position once per
+  progress; after two ticks Ship and Rock have moved twice, Flag not at all.
+  Queries count what matches, a lookup by name finds the entity again, and a
+  destructed entity drops out of the system's matches (the next tick moves
+  Ship alone). An each over a query visits every match with the entity
+  first. The negative: Health is registered but no entity has it, so its
+  query matches nothing and its callback is never called.
+*******************************************************************************/
+
+module exe std_flecs;
+
+/*
+  @@test
+    kind run
+    expect
+    | world created true
+    | components registered true true true
+    | entities 3 moving 2
+    | progress true true
+    | move calls 4
+    | Ship 2 4
+    | Rock 8 10
+    | Flag 5 5
+    | Flag has velocity false try_get nil true
+    | lookup Ship true
+    | visited Flag 5 5
+    | visited Ship 2 4
+    | visited Rock 8 10
+    | health matches 0 callbacks 0
+    | Rock alive false moving 1
+    | move calls 5
+    | Ship 3 6
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  flecs;
+
+type
+  // Where an entity is
+  Position = record
+    x: float32;
+    y: float32;
+  end;
+
+  // How far an entity moves per tick
+  Velocity = record
+    x: float32;
+    y: float32;
+  end;
+
+  // A component no entity in the test is given
+  Health = record
+    Points: int32;
+  end;
+
+var
+  // How many times Move ran, over every tick
+  GMoveCalls: int32;
+  // How many times OnHealth ran
+  GHealthCalls: int32;
+
+// The Move system: one call per entity that has both components
+routine Move(var AP: Position; const AV: Velocity);
+begin
+  AP.x := AP.x + AV.x;
+  AP.y := AP.y + AV.y;
+  GMoveCalls := GMoveCalls + 1;
+end;
+
+// The each callback of the Position query: the entity comes first
+routine Visit(const AE: flecs::entity; const AP: Position);
+begin
+  println("visited {} {} {}", AE.name().c_str(), AP.x, AP.y);
+end;
+
+// The each callback of the Health query: never called, nothing has Health
+routine OnHealth(var AH: Health);
+begin
+  GHealthCalls := GHealthCalls + 1;
+end;
+
+// A Position of AX, AY
+routine MakePosition(const AX: float32; const AY: float32): Position;
+var
+  LResult: Position;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  return LResult;
+end;
+
+// A Velocity of AX, AY
+routine MakeVelocity(const AX: float32; const AY: float32): Velocity;
+var
+  LResult: Velocity;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  return LResult;
+end;
+
+// Prints the Position of AE under its name
+routine ShowPosition(const AE: flecs::entity);
+begin
+  println("{} {} {}", AE.name().c_str(), AE.get<Position>().x, AE.get<Position>().y);
+end;
+
+// Builds the world, runs the system, queries it, then the negative
+routine Run();
+var
+  LWorld: flecs::world;
+  LShip: flecs::entity;
+  LRock: flecs::entity;
+  LFlag: flecs::entity;
+  LFirst: bool;
+  LSecond: bool;
+begin
+  println("world created {}", LWorld.c_ptr() <> nil);
+  println("components registered {} {} {}", LWorld.component<Position>().id() <> 0,
+    LWorld.component<Velocity>().id() <> 0, LWorld.component<Health>().id() <> 0);
+
+  LShip := LWorld.entity("Ship");
+  LShip.set(MakePosition(0, 0));
+  LShip.set(MakeVelocity(1, 2));
+  LRock := LWorld.entity("Rock");
+  LRock.set(MakePosition(10, 10));
+  LRock.set(MakeVelocity(-1, 0));
+  LFlag := LWorld.entity("Flag");
+  LFlag.set(MakePosition(5, 5));
+  println("entities {} moving {}", LWorld.query<Position>().count(),
+    LWorld.query<Position, Velocity>().count());
+
+  LWorld.system<Position, Velocity>("Move").each(Move);
+  LFirst := LWorld.progress(1);
+  LSecond := LWorld.progress(1);
+  println("progress {} {}", LFirst, LSecond);
+  println("move calls {}", GMoveCalls);
+  ShowPosition(LShip);
+  ShowPosition(LRock);
+  ShowPosition(LFlag);
+  println("Flag has velocity {} try_get nil {}", LFlag.has<Velocity>(),
+    LFlag.try_get<Velocity>() = nil);
+  println("lookup Ship {}", LWorld.lookup("Ship").id() = LShip.id());
+  LWorld.query<Position>().each(Visit);
+
+  // The negative: a registered component no entity has matches nothing
+  LWorld.query<Health>().each(OnHealth);
+  println("health matches {} callbacks {}", LWorld.query<Health>().count(), GHealthCalls);
+
+  LRock.destruct();
+  println("Rock alive {} moving {}", LRock.is_alive(),
+    LWorld.query<Position, Velocity>().count());
+  LWorld.progress(1);
+  println("move calls {}", GMoveCalls);
+  ShowPosition(LShip);
+end;
+
+begin
+  GMoveCalls := 0;
+  GHealthCalls := 0;
+  Run();
+end.

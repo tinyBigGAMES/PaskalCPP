@@ -1,0 +1,629 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  ldtk_ext.pcpp - the ldtk_ext unit: `import ldtk_ext;` loads an LDtk
+  project with the textures its levels draw from and draws its levels with
+  raylib, in a few lines: LoadLdtkProject(path, LProject),
+  DrawLdtkLevel(LProject, "Level_0", x, y, WHITE) once a frame,
+  UnloadLdtkProject(LProject).
+
+  An LdtkProject holds the project as LDtkLoader read it (its Project
+  field: every world, level, layer, entity, field and tileset, through
+  LDtkLoader's own API) and one texture per tileset image, each image
+  loaded once. The project can come from a file (LoadLdtkProject), from any
+  IOSource (LoadLdtkProjectIO: a zip archive, a folder) or from a zip
+  archive by path (LoadLdtkProjectZip): its level files (a project that
+  saves its levels separately) and tileset images are read from the same
+  place, relative to the project, as LDtk wrote them. A load that fails
+  leaves the project empty and says why in its ErrorMessage: LDtkLoader's
+  own text for a file it could not read or parse, or the tileset image that
+  could not be read.
+
+  DrawLdtkLevel draws a level's visible tile layers, auto layers and int
+  grid layers' auto tiles as LDtk shows them: bottom layer first (a level
+  lists its top layer first), each tile at its cell plus its layer's total
+  offset, at its tileset's tile size, mirrored by its flip bits, faded by
+  its own alpha and its layer's opacity. Entity layers are not drawn: their
+  entities are the program's (the player, pickups, triggers), read through
+  the level's layers (FindLdtkLayer, then allEntities / getEntitiesByName
+  and their fields). A level is drawn with its top-left corner where the
+  program puts it; Level::position is its place in the world for laying a
+  world out. The level's background colour (Level::bg_color) and image are
+  the program's to draw.
+
+  Textures need a window (InitWindow first). Images are decoded by raylib
+  (PNG, BMP, TGA, JPG, QOI, ...) through raylib_ext's LoadImageIO, so a
+  program's SetRaylibIOSource never changes where a project's images come
+  from. The IO and zip forms read the project's own files through the
+  HookIO hooks, with the source as the calling thread's own path source
+  (SetIOThreadPathSource) for the load: other threads, and the program's
+  own path source, are left as they were.
+==============================================================================*/
+
+module unit ldtk_ext;
+
+import
+  ldtkloader,
+  raylib,
+  raylib_ext,
+  CustomIO,
+  HookIO,
+  Math,
+  SysUtils;
+
+// LdtkProject holds its project in a std::optional (LDtkLoader's Project is
+// never assigned, only made and destroyed)
+cpp header;
+
+#include <optional>
+
+exported type
+  /// One image a project draws from, loaded once however many tilesets
+  /// name it.
+  /// @since 0.3
+  /// @see LdtkProject
+  LdtkImage = record
+    /// The image's path as the project names it, joined to the project's
+    /// folder (a disk path, or the entry's path in the source)
+    Path: string;
+    /// The texture, unloaded by UnloadLdtkProject
+    TextureHandle: Texture2D;
+  end;
+
+  /// Which image one of the project's tilesets draws from.
+  /// @since 0.3
+  /// @see LdtkProject
+  LdtkTileset = record
+    /// The tileset's uid (ldtk::Tileset::uid)
+    Uid: int32;
+    /// Its image in LdtkProject.Images
+    ImageIndex: int32;
+  end;
+
+  /// An LDtk project, loaded with what its levels draw from:
+  /// LoadLdtkProject, LoadLdtkProjectIO or LoadLdtkProjectZip fill it,
+  /// DrawLdtkLevel and DrawLdtkLayer draw its levels, UnloadLdtkProject
+  /// frees its textures. It is used in place (a var or const parameter),
+  /// never copied: LDtkLoader's project cannot be.
+  /// @example `LoadLdtkProject("$P:../../res/assets/maps/overworld.ldtk", LWorld); DrawLdtkLevel(LWorld, "Town", 0.0f, 0.0f, WHITE);`
+  /// @since 0.3
+  /// @see LoadLdtkProject
+  LdtkProject = record
+    /// The project as LDtkLoader read it (Project.value()): worlds, levels,
+    /// layers, entities, fields, tilesets; empty when nothing is loaded
+    Project: std::optional<ldtk::Project>;
+    /// Every image the project draws from
+    Images: array of LdtkImage;
+    /// Every tileset that has an image, with that image
+    Tilesets: array of LdtkTileset;
+    /// Why the last load failed; "" after a load that succeeded
+    ErrorMessage: string;
+  end;
+
+type
+  LdtkExtDoLevel = ptr to const ldtk::Level;
+  LdtkExtDoLayer = ptr to const ldtk::Layer;
+
+// Every texture of AProject unloaded and its tables emptied
+routine LdtkExtDoFreeImages(var AProject: LdtkProject);
+var
+  LIndex: int32;
+begin
+  for LIndex := 0 to int32(len(AProject.Images)) - 1 do
+    UnloadTexture(AProject.Images[LIndex].TextureHandle);
+  end;
+  setlength(AProject.Images, 0);
+  setlength(AProject.Tilesets, 0);
+end;
+
+// AProject emptied: no textures, no project, no error
+routine LdtkExtDoClear(var AProject: LdtkProject);
+begin
+  LdtkExtDoFreeImages(AProject);
+  AProject.Project.reset();
+  AProject.ErrorMessage := "";
+end;
+
+// AProject emptied, with AMessage as the reason
+routine LdtkExtDoFail(var AProject: LdtkProject; const AMessage: string);
+begin
+  LdtkExtDoClear(AProject);
+  AProject.ErrorMessage := AMessage;
+end;
+
+// The image file APath as an IO: ASource's entry, or with no source the
+// file on disk; nil when it cannot be opened
+routine LdtkExtDoOpen(const ASource: IOSource; const APath: string): IO;
+begin
+  if ASource = nil then
+    return CreateFileIO(APath, FileMode.Read);
+  end;
+  return IOSourceOpen(ASource, APath);
+end;
+
+// The index of APath's image in AProject.Images; -1 when it is not loaded
+routine LdtkExtDoFindImage(const AProject: LdtkProject; const APath: string): int32;
+var
+  LIndex: int32;
+begin
+  for LIndex := 0 to int32(len(AProject.Images)) - 1 do
+    if AProject.Images[LIndex].Path = APath then
+      return LIndex;
+    end;
+  end;
+  return -1;
+end;
+
+// The index of APath's image in AProject.Images, read and made a texture the
+// first time it is named; -1 when it cannot be read or decoded, or no
+// texture can be made (no window)
+routine LdtkExtDoImage(var AProject: LdtkProject; const ASource: IOSource;
+  const APath: string): int32;
+var
+  LIndex: int32;
+  LFile: IO;
+  LImage: Image;
+  LTexture: Texture2D;
+begin
+  LIndex := LdtkExtDoFindImage(AProject, APath);
+  if LIndex >= 0 then
+    return LIndex;
+  end;
+  LFile := LdtkExtDoOpen(ASource, APath);
+  if LFile = nil then
+    return -1;
+  end;
+  LImage := LoadImageIO(LFile, GetFileExtension(APath.c_str()));
+  IOClose(LFile);
+  if LImage.data = nil then
+    return -1;
+  end;
+  LTexture := LoadTextureFromImage(LImage);
+  UnloadImage(LImage);
+  if LTexture.id = 0 then
+    return -1;
+  end;
+  LIndex := int32(len(AProject.Images));
+  setlength(AProject.Images, LIndex + 1);
+  AProject.Images[LIndex].Path := APath;
+  AProject.Images[LIndex].TextureHandle := LTexture;
+  return LIndex;
+end;
+
+// Every tileset of the loaded project that names an image entered in
+// AProject.Tilesets, its image loaded; false, the reason in ErrorMessage,
+// when an image cannot be read. A tileset with no image (LDtk's own icons)
+// is left out: a layer drawing from it draws nothing.
+routine LdtkExtDoTilesets(var AProject: LdtkProject; const ASource: IOSource): bool;
+var
+  LIndex: int32;
+  LCount: int32;
+  LImage: int32;
+  LFolder: string;
+  LPath: string;
+  LSet: ptr to const ldtk::Tileset;
+begin
+  // A tileset's path is relative to the project's folder
+  LFolder := AProject.Project.value().getFilePath().directory();
+  for LIndex := 0 to int32(AProject.Project.value().allTilesets().size()) - 1 do
+    LSet := address of AProject.Project.value().allTilesets()[LIndex];
+    if LSet^.path <> "" then
+      LPath := LFolder + LSet^.path;
+      LImage := LdtkExtDoImage(AProject, ASource, LPath);
+      if LImage < 0 then
+        AProject.ErrorMessage := "ldtk_ext: cannot read the image of tileset \"" + LSet^.name +
+          "\": " + LPath;
+        return false;
+      end;
+      LCount := int32(len(AProject.Tilesets));
+      setlength(AProject.Tilesets, LCount + 1);
+      AProject.Tilesets[LCount].Uid := LSet^.uid;
+      AProject.Tilesets[LCount].ImageIndex := LImage;
+    end;
+  end;
+  return true;
+end;
+
+// AProject loaded from APath (with no source a disk path, else the
+// project's path in ASource, read through this thread's path source): the
+// project and every image its tilesets draw from; false, AProject empty
+// and the reason in ErrorMessage, when any cannot be read
+routine LdtkExtDoLoad(const ASource: IOSource; const APath: string;
+  var AProject: LdtkProject): bool;
+var
+  LLoaded: bool;
+  LMessage: string;
+begin
+  LdtkExtDoClear(AProject);
+  AProject.Project.emplace();
+  LLoaded := false;
+  LMessage := "";
+  // LDtkLoader throws on a file it cannot open or parse
+  guard
+    AProject.Project.value().loadFromFile(APath);
+    LLoaded := true;
+  except
+    LMessage := excmsg();
+  end;
+  if not LLoaded then
+    LdtkExtDoFail(AProject, LMessage);
+    return false;
+  end;
+  if not LdtkExtDoTilesets(AProject, ASource) then
+    // Copied first: LdtkExtDoFail clears the field it would otherwise read
+    LMessage := AProject.ErrorMessage;
+    LdtkExtDoFail(AProject, LMessage);
+    return false;
+  end;
+  return true;
+end;
+
+// The level of that name in any of the project's worlds; nil when there is
+// none, or no project is loaded
+routine LdtkExtDoFindLevel(const AProject: LdtkProject; const ALevelName: string): LdtkExtDoLevel;
+var
+  LWorld: int32;
+  LIndex: int32;
+  LLevel: LdtkExtDoLevel;
+begin
+  if not AProject.Project.has_value() then
+    return nil;
+  end;
+  for LWorld := 0 to int32(AProject.Project.value().allWorlds().size()) - 1 do
+    for LIndex := 0 to int32(AProject.Project.value().allWorlds()[LWorld].allLevels().size()) - 1 do
+      LLevel := address of AProject.Project.value().allWorlds()[LWorld].allLevels()[LIndex];
+      if LLevel^.name = ALevelName then
+        return LLevel;
+      end;
+    end;
+  end;
+  return nil;
+end;
+
+// The layer of that name in ALevel; nil when there is none
+routine LdtkExtDoFindLayer(const ALevel: LdtkExtDoLevel; const ALayerName: string): LdtkExtDoLayer;
+var
+  LIndex: int32;
+  LLayer: LdtkExtDoLayer;
+begin
+  if ALevel = nil then
+    return nil;
+  end;
+  for LIndex := 0 to int32(ALevel^.allLayers().size()) - 1 do
+    LLayer := address of ALevel^.allLayers()[LIndex];
+    if LLayer^.getName() = ALayerName then
+      return LLayer;
+    end;
+  end;
+  return nil;
+end;
+
+// ATint with its alpha times AFade (0 to 1)
+routine LdtkExtDoFade(const ATint: Color; const AFade: float32): Color;
+var
+  LResult: Color;
+begin
+  LResult := ATint;
+  LResult.a := uint8(Round(float64(float32(ATint.a) * AFade)));
+  return LResult;
+end;
+
+// The image ALayer's tiles draw from in AProject.Images; -1 when it has no
+// tileset, or its tileset has no image
+routine LdtkExtDoImageOf(const AProject: LdtkProject; const ALayer: LdtkExtDoLayer): int32;
+var
+  LIndex: int32;
+  LUid: int32;
+begin
+  if not ALayer^.hasTileset() then
+    return -1;
+  end;
+  LUid := ALayer^.getTileset().uid;
+  for LIndex := 0 to int32(len(AProject.Tilesets)) - 1 do
+    if AProject.Tilesets[LIndex].Uid = LUid then
+      return AProject.Tilesets[LIndex].ImageIndex;
+    end;
+  end;
+  return -1;
+end;
+
+// Every tile of ALayer, the level's top-left corner at (AX, AY): each at
+// its cell plus the layer's total offset (Tile::getPosition), at its
+// tileset's tile size, mirrored by its flips, faded by its alpha and the
+// layer's opacity
+routine LdtkExtDoDrawLayer(const AProject: LdtkProject; const ALayer: LdtkExtDoLayer;
+  const AX: float32; const AY: float32; const ATint: Color);
+var
+  LImage: int32;
+  LIndex: int32;
+  LTile: ptr to const ldtk::Tile;
+  LRect: ldtk::IntRect;
+  LPos: ldtk::IntPoint;
+  LSource: Rectangle;
+  LDest: Rectangle;
+  LOrigin: ::Vector2;
+  LLayerTint: Color;
+begin
+  LImage := LdtkExtDoImageOf(AProject, ALayer);
+  if LImage < 0 then
+    return;
+  end;
+  LLayerTint := LdtkExtDoFade(ATint, ALayer^.getOpacity());
+  LOrigin.x := 0.0f;
+  LOrigin.y := 0.0f;
+  for LIndex := 0 to int32(ALayer^.allTiles().size()) - 1 do
+    LTile := address of ALayer^.allTiles()[LIndex];
+    LRect := LTile^.getTextureRect();
+    LPos := LTile^.getPosition();
+    // raylib mirrors the image for a negative source width / height
+    LSource.x := float32(LRect.x);
+    LSource.y := float32(LRect.y);
+    LSource.width := float32(LRect.width);
+    LSource.height := float32(LRect.height);
+    if LTile^.flipX then
+      LSource.width := -LSource.width;
+    end;
+    if LTile^.flipY then
+      LSource.height := -LSource.height;
+    end;
+    LDest.x := AX + float32(LPos.x);
+    LDest.y := AY + float32(LPos.y);
+    LDest.width := float32(LRect.width);
+    LDest.height := float32(LRect.height);
+    DrawTexturePro(AProject.Images[LImage].TextureHandle, LSource, LDest, LOrigin, 0.0f,
+      LdtkExtDoFade(LLayerTint, LTile^.alpha));
+  end;
+end;
+
+/// Loads an LDtk project file with everything its levels draw from: the
+/// level files of a project that saves its levels separately (LDtkLoader),
+/// and every tileset image as a texture. Whatever AProject held is unloaded
+/// first. Needs a window (the textures).
+/// @param APath the .ldtk file (`$P:` and the other SysUtils.ResolvePath
+///   forms are resolved first); the files it names are read relative to it
+/// @param AProject filled with the project
+/// @returns true when the project and every file it names were read; false,
+///   AProject empty and the reason in AProject.ErrorMessage, when one could
+///   not be read, parsed or decoded, or no texture could be made
+/// @example `if not LoadLdtkProject("$P:../../res/assets/maps/overworld.ldtk", LWorld) then println("{}", LWorld.ErrorMessage); end;`
+/// @see LoadLdtkProjectZip
+/// @see UnloadLdtkProject
+/// @since 0.3
+exported routine LoadLdtkProject(const APath: string; var AProject: LdtkProject): bool;
+begin
+  return LdtkExtDoLoad(nil, ResolvePath(APath), AProject);
+end;
+
+/// Loads an LDtk project from an IOSource, as LoadLdtkProject loads one
+/// from a file: the project, its level files and its tileset images are
+/// the source's entries, found relative to the project as LDtk wrote them
+/// ("../tilesets/x.png" beside "maps/world.ldtk" is "tilesets/x.png").
+/// LDtkLoader reads them through the HookIO hooks with ASource as this
+/// thread's path source for the call (SetIOThreadPathSource); the one the
+/// thread had is put back after, and other threads never see it. The source
+/// stays the caller's. Needs a window.
+/// @param ASource the files (CreateZipIOSource's, CreateFolderIOSource's,
+///   any source)
+/// @param APath the project's path in the source, `/` separated
+/// @param AProject filled with the project
+/// @returns true when the project and every file it names were read; false,
+///   AProject empty and the reason in AProject.ErrorMessage, when ASource
+///   is nil or one could not be read, parsed or decoded
+/// @example `LoadLdtkProjectIO(CreateZipIOSource("$P:assets.zip"), "maps/world.ldtk", LWorld);`
+/// @see LoadLdtkProject
+/// @since 0.3
+exported routine LoadLdtkProjectIO(const ASource: IOSource; const APath: string;
+  var AProject: LdtkProject): bool;
+var
+  LBefore: IOSource;
+  LResult: bool;
+begin
+  if ASource = nil then
+    LdtkExtDoFail(AProject, "ldtk_ext: no source");
+    return false;
+  end;
+  LBefore := GetIOThreadPathSource();
+  if not SetIOThreadPathSource(ASource) then
+    LdtkExtDoFail(AProject, "ldtk_ext: the source cannot be made this thread's path source");
+    return false;
+  end;
+  LResult := LdtkExtDoLoad(ASource, APath, AProject);
+  // The thread's own source back; with no memory to register it again the
+  // thread is left with none rather than with ASource
+  if not SetIOThreadPathSource(LBefore) then
+    SetIOThreadPathSource(nil);
+  end;
+  return LResult;
+end;
+
+/// Loads an LDtk project from an entry of a zip archive, with its level
+/// files and tileset images from the same archive (CreateZipIOSource opens
+/// it, LoadLdtkProjectIO loads the project, the archive is closed after:
+/// the textures are the project's own). Needs a window.
+/// @param AArchive the zip file (`$P:` resolved, as CreateZipIOSource does)
+/// @param AEntry the project's path in the archive, `/` separated
+/// @param APassword the archive's password ("" for none)
+/// @param AProject filled with the project
+/// @returns true when the project and every file it names were read; false,
+///   AProject empty and the reason in AProject.ErrorMessage, when the
+///   archive or an entry cannot be opened (a wrong password included), read,
+///   parsed or decoded
+/// @example `LoadLdtkProjectZip("$P:../../assets.zip", "res/assets/maps/overworld.ldtk", "PaskalCPP", LWorld);`
+/// @see LoadLdtkProjectIO
+/// @since 0.3
+exported routine LoadLdtkProjectZip(const AArchive: string; const AEntry: string;
+  const APassword: string; var AProject: LdtkProject): bool;
+var
+  LSource: IOSource;
+  LResult: bool;
+begin
+  LSource := CreateZipIOSource(AArchive, APassword);
+  if LSource = nil then
+    LdtkExtDoFail(AProject, "ldtk_ext: cannot open the archive " + AArchive);
+    return false;
+  end;
+  LResult := LoadLdtkProjectIO(LSource, AEntry, AProject);
+  IOSourceClose(LSource);
+  return LResult;
+end;
+
+/// LoadLdtkProjectZip for an archive with no password.
+/// @param AArchive the zip file
+/// @param AEntry the project's path in the archive
+/// @param AProject filled with the project
+/// @returns true when the project and every file it names were read
+/// @since 0.3
+exported routine LoadLdtkProjectZip(const AArchive: string; const AEntry: string;
+  var AProject: LdtkProject): bool;
+begin
+  return LoadLdtkProjectZip(AArchive, AEntry, "", AProject);
+end;
+
+/// Unloads a project's textures and empties it (a project that did not
+/// load, or was unloaded already, is fine). Needs the window that loaded it
+/// still open.
+/// @param AProject the project
+/// @example `UnloadLdtkProject(LWorld);`
+/// @see LoadLdtkProject
+/// @since 0.3
+exported routine UnloadLdtkProject(var AProject: LdtkProject);
+begin
+  LdtkExtDoClear(AProject);
+end;
+
+/// True when a project is loaded (a Load call succeeded and it was not
+/// unloaded since).
+/// @param AProject the project
+/// @returns false for an empty project
+/// @since 0.3
+exported routine IsLdtkProjectValid(const AProject: LdtkProject): bool;
+begin
+  return AProject.Project.has_value();
+end;
+
+/// A level of a project by its name, in any of its worlds: LDtkLoader's
+/// getLevel without the exception for a name that is not there.
+/// @param AProject the project
+/// @param ALevelName the level's identifier in LDtk (case-sensitive)
+/// @returns the level; nil when there is none, or the project is empty
+/// @example `LLevel := FindLdtkLevel(LWorld, "Town"); if LLevel <> nil then println("{}", LLevel^.size.x); end;`
+/// @see FindLdtkLayer
+/// @since 0.3
+exported routine FindLdtkLevel(const AProject: LdtkProject;
+  const ALevelName: string): ptr to const ldtk::Level;
+begin
+  return LdtkExtDoFindLevel(AProject, ALevelName);
+end;
+
+/// A layer of a level by its name: LDtkLoader's getLayer without the
+/// exception for a name that is not there.
+/// @param ALevel the level (FindLdtkLevel's); nil gives nil
+/// @param ALayerName the layer's identifier in LDtk (case-sensitive)
+/// @returns the layer; nil when there is none
+/// @example `LObjects := FindLdtkLayer(FindLdtkLevel(LWorld, "Town"), "Entities");`
+/// @see FindLdtkLevel
+/// @since 0.3
+exported routine FindLdtkLayer(const ALevel: ptr to const ldtk::Level;
+  const ALayerName: string): ptr to const ldtk::Layer;
+begin
+  return LdtkExtDoFindLayer(ALevel, ALayerName);
+end;
+
+/// Draws a level: every visible layer that has tiles, bottom layer first
+/// (see the unit header for how each tile is placed, mirrored and faded).
+/// Entity layers are not drawn. Call it between BeginDrawing and EndDrawing
+/// (or inside BeginMode2D for a camera, BeginTextureMode for a render
+/// texture).
+/// @param AProject the project
+/// @param ALevelName the level's identifier; a name the project does not
+///   have draws nothing
+/// @param APosX where the level's left edge goes, in pixels
+/// @param APosY where the level's top edge goes, in pixels
+/// @param ATint multiplied into every pixel (WHITE: as it is)
+/// @example `DrawLdtkLevel(LWorld, "Town", 0.0f, 0.0f, WHITE);`
+/// @see DrawLdtkLayer
+/// @since 0.3
+exported routine DrawLdtkLevel(const AProject: LdtkProject; const ALevelName: string;
+  const APosX: float32; const APosY: float32; const ATint: Color);
+var
+  LLevel: LdtkExtDoLevel;
+  LIndex: int32;
+  LLayer: LdtkExtDoLayer;
+begin
+  LLevel := LdtkExtDoFindLevel(AProject, ALevelName);
+  if LLevel = nil then
+    return;
+  end;
+  // A level lists its top layer first
+  for LIndex := int32(LLevel^.allLayers().size()) - 1 downto 0 do
+    LLayer := address of LLevel^.allLayers()[LIndex];
+    if LLayer^.isVisible() then
+      LdtkExtDoDrawLayer(AProject, LLayer, APosX, APosY, ATint);
+    end;
+  end;
+end;
+
+/// Draws one layer of a level as DrawLdtkLevel draws it, whether or not it
+/// is marked visible: a layer kept hidden in LDtk can still be drawn on
+/// demand, and the program can draw its own sprites between two layers.
+/// @param AProject the project
+/// @param ALevelName the level's identifier
+/// @param ALayerName the layer's identifier; a name the level does not have
+///   draws nothing
+/// @param APosX where the level's left edge goes, in pixels
+/// @param APosY where the level's top edge goes, in pixels
+/// @param ATint multiplied into every pixel
+/// @example `DrawLdtkLayer(LWorld, "Town", "Ground", 0.0f, 0.0f, WHITE);`
+/// @see DrawLdtkLevel
+/// @since 0.3
+exported routine DrawLdtkLayer(const AProject: LdtkProject; const ALevelName: string;
+  const ALayerName: string; const APosX: float32; const APosY: float32; const ATint: Color);
+var
+  LLayer: LdtkExtDoLayer;
+begin
+  LLayer := LdtkExtDoFindLayer(LdtkExtDoFindLevel(AProject, ALevelName), ALayerName);
+  if LLayer = nil then
+    return;
+  end;
+  LdtkExtDoDrawLayer(AProject, LLayer, APosX, APosY, ATint);
+end;
+
+/// A level's size in pixels (LDtk's level width and height).
+/// @param AProject the project
+/// @param ALevelName the level's identifier
+/// @returns the width (x) and height (y); 0 x 0 when the project has no
+///   level of that name
+/// @example `LTarget := LoadRenderTexture(int32(GetLdtkLevelSize(LWorld, "Town").x), int32(GetLdtkLevelSize(LWorld, "Town").y));`
+/// @see DrawLdtkLevel
+/// @since 0.3
+exported routine GetLdtkLevelSize(const AProject: LdtkProject; const ALevelName: string): ::Vector2;
+var
+  LLevel: LdtkExtDoLevel;
+  LResult: ::Vector2;
+begin
+  LResult.x := 0.0f;
+  LResult.y := 0.0f;
+  LLevel := LdtkExtDoFindLevel(AProject, ALevelName);
+  if LLevel <> nil then
+    LResult.x := float32(LLevel^.size.x);
+    LResult.y := float32(LLevel^.size.y);
+  end;
+  return LResult;
+end;
+
+end.

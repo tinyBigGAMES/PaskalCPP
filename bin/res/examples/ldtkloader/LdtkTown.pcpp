@@ -1,0 +1,291 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  LdtkTown.pcpp - LDtkLoader + raylib example: an LDtk level you can walk
+  around. res\assets\maps\overworld.ldtk is a small town on Kenney's Tiny
+  Town tiles (CC0, res\assets\tilesets\tinytown\License.txt); ldtk_ext loads
+  it with its tileset image (LoadLdtkProject) and draws its "Town" level
+  (DrawLdtkLevel), zoomed 2x by a raylib camera.
+
+  The rest is LDtkLoader's own API on the loaded project: the level's
+  "title" field and background colour, the "Entities" layer's entities (the
+  Player's start, the Coins and their "value" field) and the "Collision"
+  int grid layer, whose value 1 stops the player at trees, houses and
+  fences. The window is raylib_ext's frame window (960 x 544 units, sized
+  for the monitor's DPI, scaled and letterboxed on resize), filled with the
+  level's colour, the level's camera composed with it (BeginFrameMode2D).
+  Arrow keys or WASD walk; F11 toggles fullscreen; Escape or the close
+  button ends it.
+==============================================================================*/
+
+module exe LdtkTown;
+
+import
+  ldtkloader,
+  ldtk_ext,
+  raylib,
+  raylib_ext,
+  Math,
+  SysUtils;
+
+const
+  CLevel: string = "Town";
+  CZoom: float32 = 2.0f;
+  CSpeed: float32 = 80.0f;
+  CPlayerSize: float32 = 10.0f;
+
+type
+  // A coin from the level's entities
+  Coin = record
+    X: float32;
+    Y: float32;
+    Value: int32;
+    Taken: bool;
+  end;
+
+var
+  GWorld: LdtkProject;
+  GLevel: ptr to const ldtk::Level;
+  GCollision: ptr to const ldtk::Layer;
+  GCoins: array of Coin;
+  GPlayerX: float32;
+  GPlayerY: float32;
+  GScore: int32;
+  GTitle: string;
+  GBackground: Color;
+
+// A raylib Vector2 from its two parts
+routine Vec(const AX: float32; const AY: float32): ::Vector2;
+var
+  LResult: ::Vector2;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  return LResult;
+end;
+
+// A raylib Rectangle from its place and size
+routine Rect(const AX: float32; const AY: float32; const AWidth: float32; const AHeight: float32): Rectangle;
+var
+  LResult: Rectangle;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  LResult.width := AWidth;
+  LResult.height := AHeight;
+  return LResult;
+end;
+
+// True when the Collision cell under pixel (AX, AY) of the level holds 1, or
+// the point is off the level
+routine IsBlocked(const AX: float32; const AY: float32): bool;
+var
+  LCol: int32;
+  LRow: int32;
+begin
+  if GCollision = nil then
+    return false;
+  end;
+  LCol := int32(Floor(AX / float32(GCollision^.getCellSize())));
+  LRow := int32(Floor(AY / float32(GCollision^.getCellSize())));
+  if (LCol < 0) or (LRow < 0) or (LCol >= GCollision^.getGridSize().x) or
+    (LRow >= GCollision^.getGridSize().y) then
+    return true;
+  end;
+  return GCollision^.getIntGridVal(LCol, LRow).value = 1;
+end;
+
+// True when the player's box at (AX, AY) (its centre) touches a blocked cell
+routine PlayerBlocked(const AX: float32; const AY: float32): bool;
+var
+  LHalf: float32;
+begin
+  LHalf := CPlayerSize / 2.0f;
+  return IsBlocked(AX - LHalf, AY - LHalf) or IsBlocked(AX + LHalf, AY - LHalf) or
+    IsBlocked(AX - LHalf, AY + LHalf) or IsBlocked(AX + LHalf, AY + LHalf);
+end;
+
+// One entity of the "Entities" layer: the Player moves the player there, a
+// Coin is added with its "value" field
+routine ReadEntity(const AEntity: ldtk::Entity);
+var
+  LCount: int32;
+begin
+  // Entities are placed by their top-left corner (their pivot is 0, 0); the
+  // player and the coins by their centre
+  if AEntity.getName() = "Player" then
+    GPlayerX := float32(AEntity.getPosition().x) + float32(AEntity.getSize().x) / 2.0f;
+    GPlayerY := float32(AEntity.getPosition().y) + float32(AEntity.getSize().y) / 2.0f;
+    return;
+  end;
+  if AEntity.getName() <> "Coin" then
+    return;
+  end;
+  LCount := int32(len(GCoins));
+  setlength(GCoins, LCount + 1);
+  GCoins[LCount].X := float32(AEntity.getPosition().x) + float32(AEntity.getSize().x) / 2.0f;
+  GCoins[LCount].Y := float32(AEntity.getPosition().y) + float32(AEntity.getSize().y) / 2.0f;
+  GCoins[LCount].Value := AEntity.getField<int>("value").value_or(0);
+  GCoins[LCount].Taken := false;
+end;
+
+// The level's title and colour, the player's start, the coins and the
+// collision layer, from LDtkLoader's project
+routine ReadLevel(): bool;
+var
+  LEntities: ptr to const ldtk::Layer;
+  LIndex: int32;
+begin
+  GLevel := FindLdtkLevel(GWorld, CLevel);
+  if GLevel = nil then
+    return false;
+  end;
+  GTitle := GLevel^.getField<std::string>("title").value_or("LDtk level");
+  GBackground.r := GLevel^.bg_color.r;
+  GBackground.g := GLevel^.bg_color.g;
+  GBackground.b := GLevel^.bg_color.b;
+  GBackground.a := 255;
+  GCollision := FindLdtkLayer(GLevel, "Collision");
+  GPlayerX := 40.0f;
+  GPlayerY := 136.0f;
+  setlength(GCoins, 0);
+  LEntities := FindLdtkLayer(GLevel, "Entities");
+  if LEntities <> nil then
+    for LIndex := 0 to int32(LEntities^.allEntities().size()) - 1 do
+      ReadEntity(LEntities^.allEntities()[LIndex]);
+    end;
+  end;
+  return true;
+end;
+
+// The player moved by the keys for one frame, each axis on its own so it
+// slides along a wall; coins it touches are taken
+routine Update();
+var
+  LStep: float32;
+  LDX: float32;
+  LDY: float32;
+  LIndex: int32;
+begin
+  LStep := CSpeed * GetFrameTime();
+  LDX := 0.0f;
+  LDY := 0.0f;
+  if IsKeyDown(KEY_LEFT) or IsKeyDown(KEY_A) then
+    LDX := LDX - LStep;
+  end;
+  if IsKeyDown(KEY_RIGHT) or IsKeyDown(KEY_D) then
+    LDX := LDX + LStep;
+  end;
+  if IsKeyDown(KEY_UP) or IsKeyDown(KEY_W) then
+    LDY := LDY - LStep;
+  end;
+  if IsKeyDown(KEY_DOWN) or IsKeyDown(KEY_S) then
+    LDY := LDY + LStep;
+  end;
+  if not PlayerBlocked(GPlayerX + LDX, GPlayerY) then
+    GPlayerX := GPlayerX + LDX;
+  end;
+  if not PlayerBlocked(GPlayerX, GPlayerY + LDY) then
+    GPlayerY := GPlayerY + LDY;
+  end;
+  for LIndex := 0 to int32(len(GCoins)) - 1 do
+    if (not GCoins[LIndex].Taken) and (Abs(GCoins[LIndex].X - GPlayerX) < 8.0f) and
+      (Abs(GCoins[LIndex].Y - GPlayerY) < 8.0f) then
+      GCoins[LIndex].Taken := true;
+      GScore := GScore + GCoins[LIndex].Value;
+    end;
+  end;
+end;
+
+// The level, the coins left and the player, through the camera; the title
+// and score on top
+routine Draw(const ACamera: Camera2D);
+var
+  LIndex: int32;
+  LLeft: int32;
+begin
+  BeginDrawing();
+  // The frame is filled with the level's colour (SetFrameColor at the start)
+  BeginFrame();
+  // The program's camera composed with the frame's (BeginMode2D would
+  // replace the frame's scaling)
+  BeginFrameMode2D(ACamera);
+  DrawLdtkLevel(GWorld, CLevel, 0.0f, 0.0f, WHITE);
+  LLeft := 0;
+  for LIndex := 0 to int32(len(GCoins)) - 1 do
+    if not GCoins[LIndex].Taken then
+      DrawCircleV(Vec(GCoins[LIndex].X, GCoins[LIndex].Y), 4.0f, GOLD);
+      DrawCircleLinesV(Vec(GCoins[LIndex].X, GCoins[LIndex].Y), 4.0f, ORANGE);
+      LLeft := LLeft + 1;
+    end;
+  end;
+  DrawRectangleV(Vec(GPlayerX - CPlayerSize / 2.0f, GPlayerY - CPlayerSize / 2.0f),
+    Vec(CPlayerSize, CPlayerSize), SKYBLUE);
+  DrawRectangleLinesEx(Rect(GPlayerX - CPlayerSize / 2.0f, GPlayerY - CPlayerSize / 2.0f,
+    CPlayerSize, CPlayerSize), 1.0f, DARKBLUE);
+  EndFrameMode2D();
+  DrawRectangle(0, 0, GetFrameWidth(), 28, Fade(BLACK, 0.6f));
+  DrawText(TextFormat("%s   score %d   coins left %d   (arrows / WASD, F11 fullscreen)", GTitle.c_str(),
+    GScore, LLeft), 10, 6, 20, RAYWHITE);
+  EndFrame();
+  EndDrawing();
+end;
+
+var
+  LCamera: Camera2D;
+  LSize: ::Vector2;
+
+begin
+  SetConfigFlags(FLAG_VSYNC_HINT);
+  // The frame window: 960 x 544 units (the level's 480 x 272 pixels at
+  // CZoom), sized for the monitor's DPI, scaled and letterboxed on resize.
+  // The level's textures need the window, so the frame opens before it loads
+  if not InitFrameWindow(960, 544, "PaskalCPP + LDtk: Tiny Town") then
+    println("the window did not open");
+    return;
+  end;
+  SetTargetFPS(60);
+  if not LoadLdtkProject("$P:../../res/assets/maps/overworld.ldtk", GWorld) then
+    println("the project could not be loaded: {}", GWorld.ErrorMessage);
+    CloseWindow();
+    return;
+  end;
+  if not ReadLevel() then
+    println("the project has no level \"{}\"", CLevel);
+    UnloadLdtkProject(GWorld);
+    CloseWindow();
+    return;
+  end;
+  GScore := 0;
+  SetFrameColor(GBackground);
+  // The whole level fills the frame: CZoom, or less when the level is bigger
+  LSize := GetLdtkLevelSize(GWorld, CLevel);
+  LCamera.offset := Vec(0.0f, 0.0f);
+  LCamera.target := Vec(0.0f, 0.0f);
+  LCamera.rotation := 0.0f;
+  LCamera.zoom := CZoom;
+  if (LSize.x > 0.0f) and (LSize.y > 0.0f) then
+    LCamera.zoom := Min(CZoom, Min(float32(GetFrameWidth()) / LSize.x, float32(GetFrameHeight()) / LSize.y));
+  end;
+  while not WindowShouldClose() do
+    if IsKeyPressed(KEY_F11) then
+      ToggleFrameFullscreen();
+    end;
+    Update();
+    Draw(LCamera);
+  end;
+  UnloadLdtkProject(GWorld);
+  CloseWindow();
+end.

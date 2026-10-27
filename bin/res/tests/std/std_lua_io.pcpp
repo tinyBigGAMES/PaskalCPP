@@ -1,0 +1,169 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_lua_io.pcpp - Std library compliance: the lua vendor unit's file
+  loading through HookIO (res\libs\std\lua.pcpp, res\libs\std\HookIO.pcpp)
+
+  Lua's own file code reads and writes a registered IO by its io:// path,
+  with no lua_ext: Lua's io library writes a script into one memory IO and
+  a precompiled chunk (string.dump) into another; luaL_loadfile runs the
+  script (a text chunk: lua's loader reads it with getc, on Linux glibc's
+  inline getc_unlocked under flockfile) and the chunk (a binary one: the
+  loader reopens it "rb" with freopen, which HookIO does in place); io.lines
+  counts its lines, f:read('a') reads it whole and then meets the end, and
+  f:seek moves in it. A path nothing answers is LUA_ERRFILE with the C
+  runtime's text for ENOENT. The stack ends empty.
+*******************************************************************************/
+
+module exe std_lua_io;
+
+/*
+  @@test
+    kind run
+    expect
+    | script written true
+    | script ok true answer 42 name pcpp
+    | lines 3 last third = true
+    | read all 44 then end true
+    | seek 6 * 7
+    | chunk written true
+    | chunk ok true value 42
+    | zip ok true answer 42 greeting Hello from the zip
+    | missing 6 cannot open io://999999/missing.lua: No such file or directory
+    | stack 0
+    | [Heap] Allocs: 9, Frees: 9, Leaked: 0
+  @@end
+*/
+
+import
+  lua,
+  CustomIO,
+  HookIO;
+
+// Compiles and runs one chunk; the code of whichever step failed
+routine Run(const AL: ptr to lua_State; const ASource: string): int32;
+var
+  LResult: int32;
+begin
+  LResult := luaL_loadstring(AL, ASource.c_str());
+  if LResult = LUA_OK then
+    LResult := lua_pcall(AL, 0, 0, 0);
+  end;
+  return LResult;
+end;
+
+// Sets the Lua global AName to the text AValue
+routine SetGlobal(const AL: ptr to lua_State; const AName: string; const AValue: string);
+begin
+  lua_pushstring(AL, AValue.c_str());
+  lua_setglobal(AL, AName.c_str());
+end;
+
+var
+  LL: ptr to lua_State;
+  LScript: IO;
+  LChunk: IO;
+  LScriptPrefix: string;
+  LChunkPrefix: string;
+  LScriptPath: string;
+  LChunkPath: string;
+  LZip: IO;
+  LZipPrefix: string;
+  LResult: int32;
+
+begin
+  LScript := CreateMemoryIO();
+  LChunk := CreateMemoryIO();
+  LScriptPrefix := RegisterIO(LScript);
+  LChunkPrefix := RegisterIO(LChunk);
+  LScriptPath := LScriptPrefix + "/script.lua";
+  LChunkPath := LChunkPrefix + "/chunk.luac";
+
+  LL := luaL_newstate();
+  luaL_openlibs(LL);
+  SetGlobal(LL, "SCRIPT", LScriptPath);
+  SetGlobal(LL, "CHUNK", LChunkPath);
+
+  // Lua's io library writes the script (three lines, 44 bytes); \\n is
+  // Lua's escape, so the chunk stays one line
+  LResult := Run(LL, "local f = io.open(SCRIPT, 'w') " +
+    "f:write('answer = 6 * 7\\nname = [[pcpp]]\\nthird = true\\n') f:close()");
+  println("script written {}", LResult = LUA_OK);
+
+  // luaL_loadfile reads it back through the hooks and runs it
+  LResult := luaL_loadfile(LL, LScriptPath.c_str());
+  if LResult = LUA_OK then
+    LResult := lua_pcall(LL, 0, 0, 0);
+  end;
+  lua_getglobal(LL, "answer");
+  lua_getglobal(LL, "name");
+  println("script ok {} answer {} name {}", LResult = LUA_OK, lua_tointeger(LL, -2),
+    lua_tostring(LL, -1));
+  lua_pop(LL, 2);
+
+  // io.lines, f:read('a') to the end, f:seek
+  Run(LL, "count = 0 for line in io.lines(SCRIPT) do count = count + 1 last = line end");
+  lua_getglobal(LL, "count");
+  lua_getglobal(LL, "last");
+  println("lines {} last {}", lua_tointeger(LL, -2), lua_tostring(LL, -1));
+  lua_pop(LL, 2);
+  Run(LL, "local f = io.open(SCRIPT) whole = f:read('a') ended = f:read(1) == nil f:close()");
+  lua_getglobal(LL, "whole");
+  lua_getglobal(LL, "ended");
+  println("read all {} then end {}", lua_rawlen(LL, -2), lua_toboolean(LL, -1) <> 0);
+  lua_pop(LL, 2);
+  Run(LL, "local f = io.open(SCRIPT) f:seek('set', 9) piece = f:read(5) f:close()");
+  lua_getglobal(LL, "piece");
+  println("seek {}", lua_tostring(LL, -1));
+  lua_pop(LL, 1);
+
+  // A precompiled chunk: luaL_loadfile reopens it "rb" (freopen, in place)
+  LResult := Run(LL, "local f = io.open(CHUNK, 'wb') " +
+    "f:write(string.dump(load('return 6 * 7'))) f:close()");
+  println("chunk written {}", LResult = LUA_OK);
+  LResult := luaL_loadfile(LL, LChunkPath.c_str());
+  if LResult = LUA_OK then
+    LResult := lua_pcall(LL, 0, 1, 0);
+  end;
+  println("chunk ok {} value {}", LResult = LUA_OK, lua_tointeger(LL, -1));
+  lua_pop(LL, 1);
+
+  // A script shipped in bin\assets.zip, run straight from its entry
+  LZip := CreateZipFileIO("$P:../../assets.zip", "res/assets/scripts/hello.lua", "PaskalCPP");
+  LZipPrefix := RegisterIO(LZip);
+  LResult := luaL_loadfile(LL, (LZipPrefix + "/hello.lua").c_str());
+  if LResult = LUA_OK then
+    LResult := lua_pcall(LL, 0, 0, 0);
+  end;
+  lua_getglobal(LL, "answer");
+  lua_getglobal(LL, "greeting");
+  println("zip ok {} answer {} greeting {}", LResult = LUA_OK, lua_tointeger(LL, -2),
+    lua_tostring(LL, -1));
+  lua_pop(LL, 2);
+  UnregisterIO(LZipPrefix);
+  IOClose(LZip);
+
+  // A path nothing answers: LUA_ERRFILE, the open's ENOENT in the message
+  LResult := luaL_loadfile(LL, "io://999999/missing.lua");
+  println("missing {} {}", LResult, lua_tostring(LL, -1));
+  lua_pop(LL, 1);
+
+  println("stack {}", lua_gettop(LL));
+  lua_close(LL);
+  UnregisterIO(LScriptPrefix);
+  UnregisterIO(LChunkPrefix);
+  IOClose(LScript);
+  IOClose(LChunk);
+end.

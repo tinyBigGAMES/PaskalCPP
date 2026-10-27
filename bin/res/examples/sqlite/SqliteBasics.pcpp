@@ -1,0 +1,122 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  SqliteBasics.pcpp - SQLite example: keeps a small database file,
+  inventory.db, beside the program. Each run counts itself in the database
+  (an upsert), adds a batch of stock moves inside one transaction through a
+  prepared statement, then prints a grouped report. Run it a few times: the
+  counts and the stock grow, because the data lives in the file.
+==============================================================================*/
+
+module exe SqliteBasics;
+
+import
+  sqlite,
+  SysUtils;
+
+// Runs SQL that returns no rows; a failure ends the program with SQLite's
+// reason
+routine Exec(const ADb: ptr to sqlite3; const ASql: string);
+var
+  LResult: int32;
+begin
+  LResult := sqlite3_exec(ADb, ASql.c_str(), nil, nil, nil);
+  if LResult <> SQLITE_OK then
+    raisecode(LResult, sqlite3_errmsg(ADb));
+  end;
+end;
+
+// Compiles one statement; a failure ends the program with SQLite's reason
+routine Prepare(const ADb: ptr to sqlite3; const ASql: string): ptr to sqlite3_stmt;
+var
+  LStmt: ptr to sqlite3_stmt;
+  LResult: int32;
+begin
+  LStmt := nil;
+  LResult := sqlite3_prepare_v2(ADb, ASql.c_str(), -1, address of LStmt, nil);
+  if LResult <> SQLITE_OK then
+    raisecode(LResult, sqlite3_errmsg(ADb));
+  end;
+  return LStmt;
+end;
+
+// One stock move through the prepared INSERT: bind, run, reset for the next
+routine AddMove(const ADb: ptr to sqlite3; const AStmt: ptr to sqlite3_stmt;
+  const AItem: string; const AQuantity: int32);
+var
+  LResult: int32;
+begin
+  // SQLITE_TRANSIENT: SQLite copies the text, so AItem may go away
+  sqlite3_bind_text(AStmt, 1, AItem.c_str(), -1, SQLITE_TRANSIENT);
+  sqlite3_bind_int(AStmt, 2, AQuantity);
+  LResult := sqlite3_step(AStmt);
+  if LResult <> SQLITE_DONE then
+    raisecode(LResult, sqlite3_errmsg(ADb));
+  end;
+  sqlite3_reset(AStmt);
+end;
+
+var
+  LPath: string;
+  LDb: ptr to sqlite3;
+  LStmt: ptr to sqlite3_stmt;
+  LResult: int32;
+
+begin
+  println("SQLite {}", sqlite3_libversion());
+
+  // $P: = the executable's folder, wherever the program was started from;
+  // SQLite takes the file name in UTF-8 on every target
+  LPath := ResolvePath("$P:inventory.db");
+  LDb := nil;
+  LResult := sqlite3_open(LPath.c_str(), address of LDb);
+  if LResult <> SQLITE_OK then
+    raisecode(LResult, "cannot open " + LPath);
+  end;
+
+  Exec(LDb, "CREATE TABLE IF NOT EXISTS runs(id INTEGER PRIMARY KEY CHECK (id = 1), count INTEGER NOT NULL)");
+  Exec(LDb, "CREATE TABLE IF NOT EXISTS moves(item TEXT NOT NULL, quantity INTEGER NOT NULL)");
+
+  // An upsert: the first run inserts the row, every later one adds to it
+  Exec(LDb, "INSERT INTO runs(id, count) VALUES (1, 1) ON CONFLICT(id) DO UPDATE SET count = count + 1");
+
+  // One transaction for the batch: one write to the file instead of one per row
+  Exec(LDb, "BEGIN");
+  LStmt := Prepare(LDb, "INSERT INTO moves(item, quantity) VALUES (?, ?)");
+  AddMove(LDb, LStmt, "bolts", 50);
+  AddMove(LDb, LStmt, "nuts", 80);
+  AddMove(LDb, LStmt, "bolts", -20);
+  AddMove(LDb, LStmt, "washers", 120);
+  AddMove(LDb, LStmt, "nuts", -35);
+  sqlite3_finalize(LStmt);
+  Exec(LDb, "COMMIT");
+
+  LStmt := Prepare(LDb, "SELECT count FROM runs WHERE id = 1");
+  if sqlite3_step(LStmt) = SQLITE_ROW then
+    println("run {} of this database ({})", sqlite3_column_int(LStmt, 0), LPath);
+  end;
+  sqlite3_finalize(LStmt);
+
+  // The report: one row per item, columns read by index from 0
+  println("item       moves  in stock");
+  LStmt := Prepare(LDb, "SELECT item, count(*), sum(quantity) FROM moves GROUP BY item ORDER BY item");
+  while sqlite3_step(LStmt) = SQLITE_ROW do
+    println("{:<10} {:>5}  {:>8}", ptr to const char(sqlite3_column_text(LStmt, 0)),
+      sqlite3_column_int(LStmt, 1), sqlite3_column_int64(LStmt, 2));
+  end;
+  sqlite3_finalize(LStmt);
+
+  sqlite3_close(LDb);
+end.

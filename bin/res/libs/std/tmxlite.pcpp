@@ -1,0 +1,93 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  tmxlite.pcpp - the tmxlite unit: `import tmxlite;` reads Tiled maps
+  (https://www.mapeditor.org: .tmx maps, .tsx tilesets, .tx object templates)
+  from PaskalCPP. A self-describing vendor module: it owns every include path,
+  library path and link library it needs, per official target. The library is
+  libtmxlite.a (one per target), built by PaskalCPP-Libs' build-tmxlite.cmd
+  from tmxlite's own CMake project, linked by @linklibrary: every module of
+  the program shares the one copy, and a program links only the libraries it
+  imports.
+
+  The API is tmxlite's C++ API as it ships (https://github.com/fallahn/tmxlite),
+  used straight from PaskalCPP: a `tmx::Map` variable, LMap.load(path) (true
+  when the map and every external tileset and template it names were read;
+  tilesets and images are found relative to the map's folder), then the
+  getters: getOrientation, getTileCount (tiles across / down), getTileSize,
+  getTilesets (each a tmx::Tileset: getFirstGID, getImagePath, getTile(gid)),
+  getLayers (each a `tmx::Layer::Ptr`; getType() says which layer it is and
+  getLayerAs<tmx::TileLayer>() / <tmx::ObjectGroup>() / <tmx::ImageLayer>() /
+  <tmx::LayerGroup>() gives it as that), getProperties (tmx::Property:
+  getName, getType, getIntValue, getStringValue, ...). A tile layer's
+  getTiles() holds one tmx::TileLayer::Tile per cell, row by row: ID is the
+  global tile id (0: empty), flipFlags the Horizontal / Vertical / Diagonal
+  bits; an infinite map keeps its tiles in getChunks() instead. Tile layer
+  data is read in every one of Tiled's "Tile Layer Format" choices: CSV,
+  Base64 (uncompressed), and Base64 compressed with zlib, gzip or zstd
+  (tmxlite is built with USE_EXTLIBS over the zlib, pugixml and zstd units,
+  which this unit imports).
+  LMap.loadFromString(xml, folder) reads a map already in memory. A failed
+  load returns false and leaves the map empty.
+
+  Files are read with the C++ library's streams and the C runtime, so a
+  program that imports HookIO reads maps from an IO or a zip archive as well
+  (tmxlite_ext's LoadTiledMapIO / LoadTiledMapZip do that, and draw the map
+  with raylib).
+==============================================================================*/
+
+module unit tmxlite;
+
+@addincludepath "$P:res/libs/vendor/tmxlite/include";
+
+// The headers select dllimport on Windows unless TMXLITE_STATIC is set; the
+// library was built with it, and every includer needs it too
+@cppdefine "TMXLITE_STATIC";
+
+// libtmxlite.a was built with USE_EXTLIBS: its layer decoders and XML reader
+// are the zlib, pugixml and zstd libraries, each linked through its own unit
+// (imported below; tmxlite's own headers include none of them)
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/tmxlite/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/tmxlite/lib/x86_64-linux-gnu";
+@else
+  @message error "tmxlite: unsupported target";
+@endif
+
+@linklibrary "tmxlite";
+
+import
+  zlib,
+  pugixml,
+  zstd;
+
+// The headers go to this unit's header, so every importer sees tmxlite's API
+cpp header;
+
+#include <tmxlite/Map.hpp>
+#include <tmxlite/Layer.hpp>
+#include <tmxlite/TileLayer.hpp>
+#include <tmxlite/ObjectGroup.hpp>
+#include <tmxlite/ImageLayer.hpp>
+#include <tmxlite/LayerGroup.hpp>
+#include <tmxlite/Tileset.hpp>
+#include <tmxlite/Property.hpp>
+#include <tmxlite/Object.hpp>
+
+end.

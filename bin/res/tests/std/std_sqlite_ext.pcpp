@@ -1,0 +1,143 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_sqlite_ext.pcpp - Std library compliance: the sqlite_ext unit
+  (res\libs\std\sqlite_ext.pcpp)
+
+  A database made on disk with sqlite is opened again through an IO over
+  the file (OpenDatabaseIO): its rows read back as they were written, a
+  write is refused with SQLITE_READONLY, and the IO can be closed while the
+  connection still works (the bytes are its own). The refusals: bytes that
+  are not a database open, and the first statement fails with SQLITE_NOTADB
+  ("file is not a database"); a nil IO is SQLITE_IOERR. Every connection is
+  closed with sqlite3_close.
+*******************************************************************************/
+
+module exe std_sqlite_ext;
+
+/*
+  @@test
+    kind run
+    expect
+    | disk db made true
+    | open io 0
+    | rows 3 sum 60 last third
+    | write refused true
+    | io closed true still reads 3
+    | not a db open 0 prepare 26 file is not a database
+    | nil io 10
+    | zip open 0 levels 3 enemies 67 last Forest
+    | zip wrong password 10
+    | [Heap] Allocs: 8, Frees: 8, Leaked: 0
+  @@end
+*/
+
+import
+  sqlite,
+  sqlite_ext,
+  CustomIO,
+  SysUtils;
+
+const
+  CArchive: string = "$P:../../assets.zip";
+  CEntry: string = "res/assets/data/sample.db";
+
+// The row count, the sum of x and the last name of table t
+routine Show(const ADb: ptr to sqlite3; const ALabel: string);
+var
+  LStmt: ptr to sqlite3_stmt;
+begin
+  LStmt := nil;
+  sqlite3_prepare_v2(ADb, "select count(*), sum(x), max(name) from t", -1, address of LStmt, nil);
+  if sqlite3_step(LStmt) = SQLITE_ROW then
+    println("{} {} sum {} last {}", ALabel, sqlite3_column_int(LStmt, 0),
+      sqlite3_column_int(LStmt, 1), ptr to const char(sqlite3_column_text(LStmt, 2)));
+  end;
+  sqlite3_finalize(LStmt);
+end;
+
+// The row count of table t
+routine Count(const ADb: ptr to sqlite3): int32;
+var
+  LStmt: ptr to sqlite3_stmt;
+  LResult: int32;
+begin
+  LStmt := nil;
+  LResult := -1;
+  sqlite3_prepare_v2(ADb, "select count(*) from t", -1, address of LStmt, nil);
+  if sqlite3_step(LStmt) = SQLITE_ROW then
+    LResult := sqlite3_column_int(LStmt, 0);
+  end;
+  sqlite3_finalize(LStmt);
+  return LResult;
+end;
+
+var
+  LPath: string;
+  LDb: ptr to sqlite3;
+  LIO: IO;
+  LNotDb: IO;
+  LText: string;
+  LResult: int32;
+  LStmt: ptr to sqlite3_stmt;
+
+begin
+  // A small database on disk
+  LPath := ResolvePath("$P:std_sqlite_ext.db");
+  sqlite3_open(LPath.c_str(), address of LDb);
+  sqlite3_exec(LDb, ("drop table if exists t; create table t(x integer, name text); " +
+    "insert into t values(10, 'first'), (20, 'second'), (30, 'third');").c_str(), nil, nil, nil);
+  sqlite3_close(LDb);
+  println("disk db made {}", FileExists(LPath));
+
+  // The same bytes through an IO, read-only and in memory
+  LIO := CreateFileIO(LPath, FileMode.Read);
+  println("open io {}", OpenDatabaseIO(LIO, LDb));
+  Show(LDb, "rows");
+  println("write refused {}", sqlite3_exec(LDb, "insert into t values(40, 'fourth')", nil, nil,
+    nil) = SQLITE_READONLY);
+  println("io closed {} still reads {}", IOClose(LIO), Count(LDb));
+  sqlite3_close(LDb);
+
+  // Bytes that are not a database: the open works, the first statement fails
+  LText := "this is not a database at all, just some text";
+  LNotDb := CreateMemoryIO(address of LText[0], int64(len(LText)), true);
+  LResult := OpenDatabaseIO(LNotDb, LDb);
+  LStmt := nil;
+  println("not a db open {} prepare {} {}", LResult,
+    sqlite3_prepare_v2(LDb, "select * from t", -1, address of LStmt, nil), sqlite3_errmsg(LDb));
+  sqlite3_finalize(LStmt);
+  sqlite3_close(LDb);
+  IOClose(LNotDb);
+
+  // No IO at all
+  println("nil io {}", OpenDatabaseIO(nil, LDb));
+  sqlite3_close(LDb);
+
+  // The database shipped in bin\assets.zip, read straight from its entry
+  LResult := OpenDatabaseZip(CArchive, CEntry, "PaskalCPP", LDb);
+  LStmt := nil;
+  sqlite3_prepare_v2(LDb, "select count(*), sum(enemies), max(name) from levels", -1,
+    address of LStmt, nil);
+  if sqlite3_step(LStmt) = SQLITE_ROW then
+    println("zip open {} levels {} enemies {} last {}", LResult, sqlite3_column_int(LStmt, 0),
+      sqlite3_column_int(LStmt, 1), ptr to const char(sqlite3_column_text(LStmt, 2)));
+  end;
+  sqlite3_finalize(LStmt);
+  sqlite3_close(LDb);
+  println("zip wrong password {}", OpenDatabaseZip(CArchive, CEntry, "wrong", LDb));
+  sqlite3_close(LDb);
+  remove(LPath.c_str());
+end.

@@ -1,0 +1,1305 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  RavenEditor.pcpp - a tool made with Raven over raylib (import raven_raylib):
+  "Raven Studio", a small 3D scene editor. The whole window is designed in
+  XML and loaded from bin\assets.zip with its theme:
+    res/assets/ui/editor_ui.xml     menus, a tool bar, splitters with the
+                                    scene tree, tabs (the 3D scene, the scene
+                                    as JSON, help), the inspector and the log
+    res/assets/ui/editor_theme.xml  the "Studio" theme and its classes
+  raylib draws the 3D view (generated meshes, a small lighting shader, a
+  grid) into a render texture; raven_raylib's CreateRavenTexture makes it
+  the texture of the XML's Viewport, so the scene is laid out, clipped and
+  overdrawn by Raven like any widget, and the Viewport's mouse events drive
+  the editor: left click selects, a drag moves the object on the ground,
+  right drag turns the camera, the wheel zooms. The tree, the inspector
+  (TextInput, ComboBox, ColorPicker, SpinBox, Slider, Checkbox, Expander),
+  the menus and the tool bar all edit the same scene; the JSON tab shows it
+  as data, live, in a read-only TextEditor; the log is a virtual ListView.
+  Every menu item, button and control fires a named action bound here with
+  Raction_bind. The window is raylib_ext's frame window (1280 x 720 units,
+  sized for the monitor's DPI, scaled and letterboxed on resize); F11
+  toggles fullscreen.
+==============================================================================*/
+
+module exe RavenEditor;
+
+@exeicon "$P:res/assets/icons/paskalcpp.ico";
+
+import
+  raylib,
+  raylib_ext,
+  raven,
+  raven_raylib,
+  CustomIO,
+  HookIO,
+  Math;
+
+const
+  CScreenWidth: int32 = 1280;
+  CScreenHeight: int32 = 720;
+  CArchive: string = "$P:../../assets.zip";
+  CPassword: string = "PaskalCPP";
+  CMaxObjects: int32 = 64;
+  CShapeCount: int32 = 6;
+  CLogCapacity: int32 = 500;
+  CDegree: float32 = 0.0174532925f;
+  CWorldHalf: float32 = 15.0f;
+  // The render texture is never smaller than this, in pixels
+  CMinView: int32 = 16;
+
+  // A Lambert light with a sky term, for raylib's generated meshes: raylib
+  // binds mvp, matNormal and colDiffuse (the model's tint) by these names
+  CLitVertex: string = R"(#version 330
+in vec3 vertexPosition;
+in vec3 vertexNormal;
+uniform mat4 mvp;
+uniform mat4 matNormal;
+out vec3 fragNormal;
+void main()
+{
+  fragNormal = normalize(vec3(matNormal * vec4(vertexNormal, 0.0)));
+  gl_Position = mvp * vec4(vertexPosition, 1.0);
+}
+)";
+  CLitFragment: string = R"(#version 330
+in vec3 fragNormal;
+uniform vec4 colDiffuse;
+out vec4 finalColor;
+void main()
+{
+  vec3 normal = normalize(fragNormal);
+  float diffuse = max(dot(normal, normalize(vec3(0.45, 0.8, 0.35))), 0.0);
+  float sky = 0.5 + 0.5 * normal.y;
+  finalColor = vec4(colDiffuse.rgb * (0.22 + 0.62 * diffuse + 0.22 * sky), colDiffuse.a);
+}
+)";
+
+type
+  TShape = choices(sCube, sSphere, sCylinder, sCone, sTorus, sKnot);
+
+  // An object of the scene
+  TSceneObject = record
+    Name: string;
+    Shape: TShape;
+    // Where it stands on the ground (its base)
+    Position: Vector3;
+    // Degrees about Y, its size, its colour
+    Turn: float32;
+    Size: float32;
+    Tint: Color;
+    // Degrees per second while the turntable runs, and how far it has turned
+    Spin: float32;
+    SpinAngle: float32;
+    Bob: bool;
+    Visible: bool;
+    // Its row in the scene tree
+    Item: Rid;
+  end;
+
+var
+  // Raven: the window and the widgets the program drives
+  GUi: Rid;
+  GOutliner: Rid;
+  GRoot: Rid;
+  GOutlinerCount: Rid;
+  GSceneView: Rid;
+  GJson: Rid;
+  GLogView: Rid;
+  GStats: Rid;
+  GPropNone: Rid;
+  GPropPanel: Rid;
+  GName: Rid;
+  GShapeBox: Rid;
+  GColorPicker: Rid;
+  GPosX: Rid;
+  GPosY: Rid;
+  GPosZ: Rid;
+  GTurnSlider: Rid;
+  GTurnValue: Rid;
+  GSizeSlider: Rid;
+  GSizeValue: Rid;
+  GSpinSlider: Rid;
+  GSpinValue: Rid;
+  GBobBox: Rid;
+  GVisibleBox: Rid;
+  GFovSlider: Rid;
+  GFovValue: Rid;
+  GGridBox: Rid;
+  GWireBox: Rid;
+  GAxesBox: Rid;
+  GSkyBox: Rid;
+  GSpinTool: Rid;
+  GMenuGrid: Rid;
+  GMenuWire: Rid;
+  GMenuSpin: Rid;
+  GMenuStudio: Rid;
+  GMenuDark: Rid;
+  GMenuLight: Rid;
+  // set while widgets are filled from code: their callbacks change nothing
+  GUpdating: bool;
+  GQuit: bool;
+
+  // The scene
+  GObjects: array[0..CMaxObjects - 1] of TSceneObject;
+  GObjectCount: int32;
+  GSelected: int32;
+  GCreated: int32;
+  GJsonDirty: bool;
+
+  // The view
+  GModels: array[0..CShapeCount - 1] of Model;
+  GLit: Shader;
+  GCamera: Camera3D;
+  GYaw: float32;
+  GPitch: float32;
+  GDistance: float32;
+  GTarget: Vector3;
+  GFov: float32;
+  GSceneTarget: RenderTexture2D;
+  GRavenTexture: Rid;
+  GViewWidth: int32;
+  GViewHeight: int32;
+  GDragging: bool;
+  GOrbiting: bool;
+  GGrabX: float32;
+  GGrabZ: float32;
+  GShowGrid: bool;
+  GWireframe: bool;
+  GShowAxes: bool;
+  GSpinOn: bool;
+  GSky: int32;
+  GStatsTime: float32;
+
+  // The log: only the lines live here, the ListView asks for those it shows
+  GLog: array[0..CLogCapacity - 1] of string;
+  GLogCount: int32;
+
+// A raylib Vector3 from its three parts
+routine V3(const AX: float32; const AY: float32; const AZ: float32): Vector3;
+var
+  LResult: Vector3;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  LResult.z := AZ;
+  return LResult;
+end;
+
+// A raylib Vector2 from its two parts (::Vector2: Math has one of its own)
+routine V2(const AX: float32; const AY: float32): ::Vector2;
+var
+  LResult: ::Vector2;
+begin
+  LResult.x := AX;
+  LResult.y := AY;
+  return LResult;
+end;
+
+// A raylib color from its red, green and blue parts (0 .. 255)
+routine Rgb(const AR: int32; const AG: int32; const AB: int32): Color;
+var
+  LResult: Color;
+begin
+  LResult.r := AR;
+  LResult.g := AG;
+  LResult.b := AB;
+  LResult.a := 255;
+  return LResult;
+end;
+
+// A widget of the UI by its XML name
+routine Find(const AName: string): Rid;
+begin
+  return Rwidget_find(GUi, AName.c_str());
+end;
+
+routine BoolText(const AValue: bool): string;
+begin
+  if AValue then
+    return "true";
+  end;
+  return "false";
+end;
+
+// A checkbox's state, set from code
+routine SetChecked(const ACheckbox: Rid; const AChecked: bool);
+begin
+  if AChecked then
+    Rcheckbox_set_checked(ACheckbox, R_TRUE);
+  else
+    Rcheckbox_set_checked(ACheckbox, R_FALSE);
+  end;
+end;
+
+// A checkable menu item's state, set from code
+routine SetMenuChecked(const AItem: Rid; const AChecked: bool);
+begin
+  if AChecked then
+    Rmenu_item_set_checked(AItem, R_TRUE);
+  else
+    Rmenu_item_set_checked(AItem, R_FALSE);
+  end;
+end;
+
+// ---- the log ----
+
+// The text of row AIndex, as the virtual ListView asks for it
+routine clink LogRow(AList: Rid; AIndex: int32; AUserData: ptr): ptr to const char;
+begin
+  return GLog[AIndex].c_str();
+end;
+
+// A line at the end of the log: the oldest goes when it is full
+routine AddLog(const AText: string);
+var
+  LIndex: int32;
+begin
+  if GLogCount = CLogCapacity then
+    for LIndex := 1 to CLogCapacity - 1 do
+      GLog[LIndex - 1] := GLog[LIndex];
+    end;
+    GLogCount -= 1;
+  end;
+  GLog[GLogCount] := AText;
+  GLogCount += 1;
+  Rlist_view_set_virtual_items(GLogView, GLogCount, LogRow, nil);
+  Rlist_view_scroll_to_item(GLogView, GLogCount - 1);
+end;
+
+// ---- shapes ----
+
+routine ShapeName(const AShape: TShape): string;
+begin
+  match AShape of
+    TShape.sCube: return "Cube";
+    TShape.sSphere: return "Sphere";
+    TShape.sCylinder: return "Cylinder";
+    TShape.sCone: return "Cone";
+    TShape.sTorus: return "Torus";
+    TShape.sKnot: return "Knot";
+  end;
+  return "";
+end;
+
+// How far above its base a shape's mesh is centred, for a size of 1:
+// raylib's cylinder and cone meshes start at their base, the others are
+// centred on their middle
+routine ShapeLift(const AShape: TShape): float32;
+begin
+  match AShape of
+    TShape.sCylinder: return 0.0f;
+    TShape.sCone: return 0.0f;
+    TShape.sCube: return 0.5f;
+    TShape.sSphere: return 0.5f;
+    TShape.sTorus: return 0.5f;
+    TShape.sKnot: return 0.5f;
+  end;
+  return 0.5f;
+end;
+
+// The colour a new object gets, in turn
+routine PaletteColor(const AIndex: int32): Color;
+begin
+  match AIndex mod 6 of
+    0: return Rgb(255, 107, 107);
+    1: return Rgb(255, 180, 84);
+    2: return Rgb(255, 224, 102);
+    3: return Rgb(123, 216, 143);
+    4: return Rgb(76, 141, 255);
+  end;
+  return Rgb(180, 142, 173);
+end;
+
+// One model per shape, all lit by the same shader
+routine LoadShapes();
+var
+  LIndex: int32;
+begin
+  GModels[int32(TShape.sCube)] := LoadModelFromMesh(GenMeshCube(1.0f, 1.0f, 1.0f));
+  GModels[int32(TShape.sSphere)] := LoadModelFromMesh(GenMeshSphere(0.5f, 24, 32));
+  GModels[int32(TShape.sCylinder)] := LoadModelFromMesh(GenMeshCylinder(0.5f, 1.0f, 32));
+  GModels[int32(TShape.sCone)] := LoadModelFromMesh(GenMeshCone(0.5f, 1.0f, 32));
+  GModels[int32(TShape.sTorus)] := LoadModelFromMesh(GenMeshTorus(0.3f, 1.0f, 24, 48));
+  GModels[int32(TShape.sKnot)] := LoadModelFromMesh(GenMeshKnot(0.5f, 1.0f, 24, 160));
+  GLit := LoadShaderFromMemory(CLitVertex.c_str(), CLitFragment.c_str());
+  for LIndex := 0 to CShapeCount - 1 do
+    GModels[LIndex].materials[0].shader := GLit;
+  end;
+end;
+
+// raylib's UnloadModel leaves a shared shader to the program
+routine UnloadShapes();
+var
+  LIndex: int32;
+begin
+  for LIndex := 0 to CShapeCount - 1 do
+    UnloadModel(GModels[LIndex]);
+  end;
+  UnloadShader(GLit);
+end;
+
+// ---- the scene ----
+
+// The height an object floats at now (0 unless it bobs)
+routine BobHeight(const AIndex: int32): float32;
+begin
+  if not GObjects[AIndex].Bob then
+    return 0.0f;
+  end;
+  return 0.25f * (1.0f + Sin(float32(GetTime()) * 2.0f + float32(AIndex)));
+end;
+
+// The middle of an object, as drawn now
+routine ObjectCenter(const AIndex: int32): Vector3;
+var
+  LPosition: Vector3;
+begin
+  LPosition := GObjects[AIndex].Position;
+  return V3(LPosition.x, LPosition.y + BobHeight(AIndex) + 0.5f * GObjects[AIndex].Size, LPosition.z);
+end;
+
+// Where an object's mesh is drawn: its base lifted by its shape and its bob
+routine ObjectDrawPosition(const AIndex: int32): Vector3;
+var
+  LPosition: Vector3;
+begin
+  LPosition := GObjects[AIndex].Position;
+  return V3(LPosition.x, LPosition.y + BobHeight(AIndex) + ShapeLift(GObjects[AIndex].Shape) * GObjects[AIndex].Size,
+    LPosition.z);
+end;
+
+// The scene as JSON, for the JSON tab
+routine SceneJson(): string;
+var
+  LText: string;
+  LIndex: int32;
+  LObject: TSceneObject;
+begin
+  LText := "{\n  \"objects\": [";
+  for LIndex := 0 to GObjectCount - 1 do
+    LObject := GObjects[LIndex];
+    if LIndex > 0 then
+      LText += ",";
+    end;
+    LText += "\n    {\n";
+    LText += string(TextFormat("      \"name\": \"%s\",\n      \"shape\": \"%s\",\n", LObject.Name.c_str(),
+      ShapeName(LObject.Shape).c_str()));
+    LText += string(TextFormat("      \"position\": [%.2f, %.2f, %.2f],\n", float64(LObject.Position.x),
+      float64(LObject.Position.y), float64(LObject.Position.z)));
+    LText += string(TextFormat("      \"turn\": %.0f,\n      \"size\": %.2f,\n      \"color\": \"#%02X%02X%02X\",\n",
+      float64(LObject.Turn), float64(LObject.Size), int32(LObject.Tint.r), int32(LObject.Tint.g), int32(LObject.Tint.b)));
+    LText += string(TextFormat("      \"spin\": %.0f,\n", float64(LObject.Spin)));
+    LText += "      \"bob\": " + BoolText(LObject.Bob) + ",\n      \"visible\": " + BoolText(LObject.Visible) + "\n    }";
+  end;
+  LText += "\n  ]\n}\n";
+  return LText;
+end;
+
+// The tree's count line and the JSON tab, after the scene changed
+routine RefreshScene();
+var
+  LJson: string;
+begin
+  Rlabel_set_text(GOutlinerCount, TextFormat("%d objects", GObjectCount));
+  LJson := SceneJson();
+  Rtext_editor_set_text(GJson, LJson.c_str());
+  GJsonDirty := false;
+end;
+
+// The inspector from the selected object (or its hint with none)
+routine RefreshInspector();
+var
+  LObject: TSceneObject;
+begin
+  if GSelected < 0 then
+    Rwidget_set_visibility(GPropPanel, R_COLLAPSED);
+    Rwidget_set_visibility(GPropNone, R_VISIBLE);
+    return;
+  end;
+  Rwidget_set_visibility(GPropNone, R_COLLAPSED);
+  Rwidget_set_visibility(GPropPanel, R_VISIBLE);
+  LObject := GObjects[GSelected];
+  GUpdating := true;
+  Rtext_input_set_text(GName, LObject.Name.c_str());
+  Rcombo_box_set_selected(GShapeBox, int32(LObject.Shape));
+  Rcolor_picker_set_color(GColorPicker, float32(LObject.Tint.r) / 255.0f, float32(LObject.Tint.g) / 255.0f,
+    float32(LObject.Tint.b) / 255.0f, 1.0f);
+  Rspin_box_set_value(GPosX, float64(LObject.Position.x));
+  Rspin_box_set_value(GPosY, float64(LObject.Position.y));
+  Rspin_box_set_value(GPosZ, float64(LObject.Position.z));
+  Rslider_set_value(GTurnSlider, LObject.Turn);
+  Rslider_set_value(GSizeSlider, LObject.Size);
+  Rslider_set_value(GSpinSlider, LObject.Spin);
+  SetChecked(GBobBox, LObject.Bob);
+  SetChecked(GVisibleBox, LObject.Visible);
+  GUpdating := false;
+  Rlabel_set_text(GTurnValue, TextFormat("%.0f", float64(LObject.Turn)));
+  Rlabel_set_text(GSizeValue, TextFormat("%.2f", float64(LObject.Size)));
+  Rlabel_set_text(GSpinValue, TextFormat("%.0f /s", float64(LObject.Spin)));
+end;
+
+// AIndex becomes the selection (-1: none), in the tree and the inspector
+routine SelectObject(const AIndex: int32);
+begin
+  GSelected := AIndex;
+  GUpdating := true;
+  if AIndex >= 0 then
+    Rtree_view_set_selected_item(GOutliner, GObjects[AIndex].Item);
+  else
+    Rtree_view_set_selected_item(GOutliner, R_INVALID_ID);
+  end;
+  GUpdating := false;
+  RefreshInspector();
+end;
+
+// A new object at the end of the scene and of the tree; its index, -1 when full
+routine AddObject(const AShape: TShape; const AName: string; const APosition: Vector3; const ATint: Color): int32;
+var
+  LIndex: int32;
+begin
+  if GObjectCount = CMaxObjects then
+    AddLog(string(TextFormat("The scene is full (%d objects)", CMaxObjects)));
+    return -1;
+  end;
+  LIndex := GObjectCount;
+  GObjects[LIndex].Name := AName;
+  GObjects[LIndex].Shape := AShape;
+  GObjects[LIndex].Position := APosition;
+  GObjects[LIndex].Turn := 0.0f;
+  GObjects[LIndex].Size := 1.0f;
+  GObjects[LIndex].Tint := ATint;
+  GObjects[LIndex].Spin := 0.0f;
+  GObjects[LIndex].SpinAngle := 0.0f;
+  GObjects[LIndex].Bob := false;
+  GObjects[LIndex].Visible := true;
+  GObjects[LIndex].Item := Rtree_view_add_item(GOutliner, GRoot, AName.c_str());
+  GObjectCount += 1;
+  GJsonDirty := true;
+  return LIndex;
+end;
+
+// A new object of AShape, named and placed in turn, selected
+routine AddShape(const AShape: TShape);
+var
+  LIndex: int32;
+  LName: string;
+  LPosition: Vector3;
+begin
+  GCreated += 1;
+  LName := ShapeName(AShape) + " " + string(TextFormat("%d", GCreated));
+  LPosition := V3(float32((GCreated * 37) mod 11 - 5), 0.0f, float32((GCreated * 23) mod 9 - 4));
+  LIndex := AddObject(AShape, LName, LPosition, PaletteColor(GCreated));
+  if LIndex >= 0 then
+    AddLog("Added " + LName);
+    SelectObject(LIndex);
+  end;
+end;
+
+routine DeleteSelected();
+var
+  LIndex: int32;
+begin
+  if GSelected < 0 then
+    return;
+  end;
+  AddLog("Deleted " + GObjects[GSelected].Name);
+  Rtree_item_destroy(GObjects[GSelected].Item);
+  for LIndex := GSelected to GObjectCount - 2 do
+    GObjects[LIndex] := GObjects[LIndex + 1];
+  end;
+  GObjectCount -= 1;
+  GJsonDirty := true;
+  SelectObject(-1);
+end;
+
+routine DuplicateSelected();
+var
+  LSource: TSceneObject;
+  LIndex: int32;
+begin
+  if GSelected < 0 then
+    return;
+  end;
+  LSource := GObjects[GSelected];
+  LIndex := AddObject(LSource.Shape, LSource.Name + " copy",
+    V3(Clamp(LSource.Position.x + 1.5f, -CWorldHalf, CWorldHalf), LSource.Position.y, LSource.Position.z), LSource.Tint);
+  if LIndex < 0 then
+    return;
+  end;
+  GObjects[LIndex].Turn := LSource.Turn;
+  GObjects[LIndex].Size := LSource.Size;
+  GObjects[LIndex].Spin := LSource.Spin;
+  GObjects[LIndex].Bob := LSource.Bob;
+  GObjects[LIndex].Visible := LSource.Visible;
+  AddLog("Duplicated " + LSource.Name);
+  SelectObject(LIndex);
+end;
+
+// No objects, the tree back to its root
+routine ClearScene();
+begin
+  Rtree_view_clear_items(GOutliner);
+  GRoot := Rtree_view_add_item(GOutliner, R_INVALID_ID, "Scene");
+  Rtree_item_set_expanded(GRoot, R_TRUE);
+  GObjectCount := 0;
+  GCreated := 0;
+  GJsonDirty := true;
+  SelectObject(-1);
+end;
+
+// The scene the editor opens with
+routine DemoScene();
+var
+  LIndex: int32;
+begin
+  ClearScene();
+  LIndex := AddObject(TShape.sSphere, "Planet", V3(0.0f, 0.0f, 0.0f), Rgb(76, 141, 255));
+  GObjects[LIndex].Size := 1.8f;
+  GObjects[LIndex].Bob := true;
+  LIndex := AddObject(TShape.sTorus, "Ring", V3(3.5f, 0.0f, 0.5f), Rgb(255, 224, 102));
+  GObjects[LIndex].Spin := 60.0f;
+  GObjects[LIndex].Size := 1.4f;
+  LIndex := AddObject(TShape.sCube, "Crate", V3(-3.5f, 0.0f, 0.5f), Rgb(255, 180, 84));
+  GObjects[LIndex].Turn := 25.0f;
+  LIndex := AddObject(TShape.sCone, "Spire", V3(-1.5f, 0.0f, -3.5f), Rgb(180, 142, 173));
+  GObjects[LIndex].Size := 1.6f;
+  LIndex := AddObject(TShape.sCylinder, "Pillar", V3(2.0f, 0.0f, -3.5f), Rgb(200, 205, 215));
+  GObjects[LIndex].Size := 1.2f;
+  LIndex := AddObject(TShape.sKnot, "Knot", V3(0.5f, 0.0f, 3.5f), Rgb(123, 216, 143));
+  GObjects[LIndex].Spin := -45.0f;
+  GObjects[LIndex].Bob := true;
+  GCreated := GObjectCount;
+  AddLog("Demo scene: 6 objects");
+end;
+
+// ---- the inspector ----
+
+// The inspector's widgets into the selected object
+routine ApplyInspector();
+var
+  LShape: int32;
+  LRed: float32;
+  LGreen: float32;
+  LBlue: float32;
+  LAlpha: float32;
+begin
+  if GUpdating or (GSelected < 0) then
+    return;
+  end;
+  LShape := Rcombo_box_get_selected(GShapeBox);
+  if (LShape >= 0) and (LShape < CShapeCount) then
+    GObjects[GSelected].Shape := (TShape)LShape;
+  end;
+  Rcolor_picker_get_color(GColorPicker, address of LRed, address of LGreen, address of LBlue, address of LAlpha);
+  GObjects[GSelected].Tint := Rgb(int32(Round(LRed * 255.0f)), int32(Round(LGreen * 255.0f)), int32(Round(LBlue * 255.0f)));
+  GObjects[GSelected].Position := V3(float32(Rspin_box_get_value(GPosX)), float32(Rspin_box_get_value(GPosY)),
+    float32(Rspin_box_get_value(GPosZ)));
+  GObjects[GSelected].Turn := Rslider_get_value(GTurnSlider);
+  GObjects[GSelected].Size := Rslider_get_value(GSizeSlider);
+  GObjects[GSelected].Spin := Rslider_get_value(GSpinSlider);
+  GObjects[GSelected].Bob := Rcheckbox_is_checked(GBobBox) <> 0;
+  GObjects[GSelected].Visible := Rcheckbox_is_checked(GVisibleBox) <> 0;
+  Rlabel_set_text(GTurnValue, TextFormat("%.0f", float64(GObjects[GSelected].Turn)));
+  Rlabel_set_text(GSizeValue, TextFormat("%.2f", float64(GObjects[GSelected].Size)));
+  Rlabel_set_text(GSpinValue, TextFormat("%.0f /s", float64(GObjects[GSelected].Spin)));
+  GJsonDirty := true;
+end;
+
+// ---- the camera ----
+
+routine ResetCamera();
+begin
+  GYaw := 35.0f;
+  GPitch := 28.0f;
+  GDistance := 15.0f;
+  GTarget := V3(0.0f, 0.6f, 0.0f);
+end;
+
+routine FrameSelection();
+begin
+  if GSelected < 0 then
+    AddLog("Nothing selected to frame");
+    return;
+  end;
+  GTarget := ObjectCenter(GSelected);
+  GDistance := Max(4.0f, GObjects[GSelected].Size * 5.0f);
+  AddLog("Framed " + GObjects[GSelected].Name);
+end;
+
+// An orbit round the target: yaw and pitch in degrees, at a distance
+routine UpdateCamera();
+var
+  LYaw: float32;
+  LPitch: float32;
+begin
+  LYaw := GYaw * CDegree;
+  LPitch := GPitch * CDegree;
+  GCamera.target := GTarget;
+  GCamera.position := V3(GTarget.x + Cos(LPitch) * Sin(LYaw) * GDistance, GTarget.y + Sin(LPitch) * GDistance,
+    GTarget.z + Cos(LPitch) * Cos(LYaw) * GDistance);
+  GCamera.up := V3(0.0f, 1.0f, 0.0f);
+  GCamera.fovy := GFov;
+  GCamera.projection := CAMERA_PERSPECTIVE;
+end;
+
+// ---- the scene view ----
+
+// The render texture at the Viewport's size in pixels (sharp at any DPI and
+// window size), and the Raven texture that shows it, made or re-pointed
+routine UpdateSceneTarget(): bool;
+var
+  LOld: RenderTexture2D;
+  LWidth: int32;
+  LHeight: int32;
+begin
+  if (GViewWidth <= 0) or (GViewHeight <= 0) then
+    Rviewport_get_pixel_size(GSceneView, address of GViewWidth, address of GViewHeight);
+  end;
+  LWidth := Max(GViewWidth, CMinView);
+  LHeight := Max(GViewHeight, CMinView);
+  if (GSceneTarget.id <> 0) and (GSceneTarget.texture.width = LWidth) and (GSceneTarget.texture.height = LHeight) then
+    return true;
+  end;
+  LOld := GSceneTarget;
+  GSceneTarget := LoadRenderTexture(LWidth, LHeight);
+  if GSceneTarget.id = 0 then
+    GSceneTarget := LOld;
+    return LOld.id <> 0;
+  end;
+  SetTextureFilter(GSceneTarget.texture, TEXTURE_FILTER_BILINEAR);
+  if GRavenTexture = R_INVALID_ID then
+    // raylib's render texture as the Viewport's texture; bottom-up, as GL's
+    GRavenTexture := CreateRavenTexture(GSceneTarget.texture);
+    Rviewport_set_texture(GSceneView, GRavenTexture);
+    Rviewport_set_flip_y(GSceneView, R_TRUE);
+  else
+    SetRavenTexture(GRavenTexture, GSceneTarget.texture);
+  end;
+  // The Raven texture shows the new one: the old can go
+  if LOld.id <> 0 then
+    UnloadRenderTexture(LOld);
+  end;
+  return true;
+end;
+
+// The ray under a point of the Viewport (its event's local position)
+routine ViewRay(const AEvent: ptr to const REvent): Ray;
+var
+  LX: float32;
+  LY: float32;
+  LWidth: float32;
+  LHeight: float32;
+  LPixel: ::Vector2;
+begin
+  Rwidget_get_rect(GSceneView, address of LX, address of LY, address of LWidth, address of LHeight);
+  LPixel := V2(0.0f, 0.0f);
+  if (LWidth > 0.0f) and (LHeight > 0.0f) then
+    // Logical units in the widget -> pixels of the render texture
+    LPixel := V2(AEvent^.local_x / LWidth * float32(GSceneTarget.texture.width),
+      AEvent^.local_y / LHeight * float32(GSceneTarget.texture.height));
+  end;
+  return GetScreenToWorldRayEx(LPixel, GCamera, GSceneTarget.texture.width, GSceneTarget.texture.height);
+end;
+
+// The visible object a ray hits first (its bounding sphere); -1 for none
+routine PickObject(const ARay: Ray): int32;
+var
+  LIndex: int32;
+  LBest: int32;
+  LBestDistance: float32;
+  LHit: RayCollision;
+begin
+  LBest := -1;
+  LBestDistance := 1.0e9f;
+  for LIndex := 0 to GObjectCount - 1 do
+    if GObjects[LIndex].Visible then
+      LHit := GetRayCollisionSphere(ARay, ObjectCenter(LIndex), 0.62f * GObjects[LIndex].Size);
+      if LHit.hit and (LHit.distance < LBestDistance) then
+        LBest := LIndex;
+        LBestDistance := LHit.distance;
+      end;
+    end;
+  end;
+  return LBest;
+end;
+
+// Where a ray meets the level plane at AHeight; false when it never does
+routine RayOnPlane(const ARay: Ray; const AHeight: float32; var APoint: Vector3): bool;
+var
+  LT: float32;
+begin
+  if Abs(ARay.direction.y) < 0.0001f then
+    return false;
+  end;
+  LT := (AHeight - ARay.position.y) / ARay.direction.y;
+  if LT < 0.0f then
+    return false;
+  end;
+  APoint := V3(ARay.position.x + ARay.direction.x * LT, AHeight, ARay.position.z + ARay.direction.z * LT);
+  return true;
+end;
+
+// The Viewport's mouse: select and drag with the left button, orbit with
+// the right one, zoom with the wheel
+routine clink OnSceneEvent(AWidget: Rid; AEvent: ptr to const REvent; AUserData: ptr): int32;
+var
+  LRay: Ray;
+  LHit: Vector3;
+  LIndex: int32;
+begin
+  if GSceneTarget.id = 0 then
+    return R_FALSE;
+  end;
+  if AEvent^.type = R_EVENT_MOUSE_DOWN then
+    if AEvent^.button = R_MOUSE_RIGHT then
+      GOrbiting := true;
+      return R_TRUE;
+    end;
+    if AEvent^.button = R_MOUSE_LEFT then
+      LRay := ViewRay(AEvent);
+      LIndex := PickObject(LRay);
+      SelectObject(LIndex);
+      GDragging := false;
+      if LIndex >= 0 then
+        if RayOnPlane(LRay, GObjects[LIndex].Position.y, LHit) then
+          // Held where it was grabbed, not by its middle
+          GGrabX := GObjects[LIndex].Position.x - LHit.x;
+          GGrabZ := GObjects[LIndex].Position.z - LHit.z;
+          GDragging := true;
+        end;
+      end;
+      return R_TRUE;
+    end;
+  end;
+  if AEvent^.type = R_EVENT_MOUSE_MOVE then
+    if GOrbiting then
+      GYaw -= AEvent^.delta_x * 0.4f;
+      GPitch := Clamp(GPitch + AEvent^.delta_y * 0.3f, 5.0f, 85.0f);
+      return R_TRUE;
+    end;
+    if GDragging and (GSelected >= 0) then
+      LRay := ViewRay(AEvent);
+      if RayOnPlane(LRay, GObjects[GSelected].Position.y, LHit) then
+        GObjects[GSelected].Position.x := Clamp(LHit.x + GGrabX, -CWorldHalf, CWorldHalf);
+        GObjects[GSelected].Position.z := Clamp(LHit.z + GGrabZ, -CWorldHalf, CWorldHalf);
+        GJsonDirty := true;
+        RefreshInspector();
+      end;
+      return R_TRUE;
+    end;
+  end;
+  if AEvent^.type = R_EVENT_MOUSE_UP then
+    if GDragging and (GSelected >= 0) then
+      AddLog(string(TextFormat("Moved %s to %.2f, %.2f", GObjects[GSelected].Name.c_str(),
+        float64(GObjects[GSelected].Position.x), float64(GObjects[GSelected].Position.z))));
+    end;
+    GDragging := false;
+    GOrbiting := false;
+    return R_TRUE;
+  end;
+  if AEvent^.type = R_EVENT_MOUSE_WHEEL then
+    GDistance := Clamp(GDistance * (1.0f - AEvent^.wheel_y * 0.1f), 3.0f, 40.0f);
+    return R_TRUE;
+  end;
+  return R_FALSE;
+end;
+
+// The Viewport's new size in pixels: UpdateSceneTarget follows it
+routine clink OnSceneResized(AViewport: Rid; AWidth: int32; AHeight: int32; AUserData: ptr);
+begin
+  GViewWidth := AWidth;
+  GViewHeight := AHeight;
+end;
+
+routine SkyColor(): Color;
+begin
+  match GSky of
+    1: return Rgb(150, 188, 228);
+    2: return Rgb(10, 12, 20);
+  end;
+  return Rgb(34, 38, 52);
+end;
+
+routine DrawObject(const AIndex: int32);
+var
+  LPosition: Vector3;
+  LScale: Vector3;
+  LAngle: float32;
+  LModel: int32;
+  LHighlight: Color;
+begin
+  LPosition := ObjectDrawPosition(AIndex);
+  LScale := V3(GObjects[AIndex].Size, GObjects[AIndex].Size, GObjects[AIndex].Size);
+  LAngle := GObjects[AIndex].Turn + GObjects[AIndex].SpinAngle;
+  LModel := int32(GObjects[AIndex].Shape);
+  if GWireframe then
+    DrawModelWiresEx(GModels[LModel], LPosition, V3(0.0f, 1.0f, 0.0f), LAngle, LScale, GObjects[AIndex].Tint);
+  else
+    DrawModelEx(GModels[LModel], LPosition, V3(0.0f, 1.0f, 0.0f), LAngle, LScale, GObjects[AIndex].Tint);
+  end;
+  // The selection: its wires, faint (a dense mesh would be covered), and a
+  // ring on the ground
+  if AIndex = GSelected then
+    LHighlight := Rgb(255, 214, 90);
+    DrawModelWiresEx(GModels[LModel], LPosition, V3(0.0f, 1.0f, 0.0f), LAngle, LScale, Fade(LHighlight, 0.3f));
+    DrawCircle3D(V3(GObjects[AIndex].Position.x, 0.02f, GObjects[AIndex].Position.z), 0.8f * GObjects[AIndex].Size,
+      V3(1.0f, 0.0f, 0.0f), 90.0f, LHighlight);
+  end;
+end;
+
+// The 3D view into its render texture
+routine DrawScene();
+var
+  LIndex: int32;
+begin
+  BeginTextureMode(GSceneTarget);
+  ClearBackground(SkyColor());
+  BeginMode3D(GCamera);
+  if GShowGrid then
+    DrawGrid(30, 1.0f);
+  end;
+  if GShowAxes then
+    DrawLine3D(V3(0.0f, 0.01f, 0.0f), V3(2.0f, 0.01f, 0.0f), Rgb(235, 80, 80));
+    DrawLine3D(V3(0.0f, 0.01f, 0.0f), V3(0.0f, 2.0f, 0.0f), Rgb(110, 210, 110));
+    DrawLine3D(V3(0.0f, 0.01f, 0.0f), V3(0.0f, 0.01f, 2.0f), Rgb(90, 140, 255));
+  end;
+  for LIndex := 0 to GObjectCount - 1 do
+    if GObjects[LIndex].Visible then
+      DrawObject(LIndex);
+    end;
+  end;
+  EndMode3D();
+  EndTextureMode();
+end;
+
+// ---- view options ----
+
+// The menus, the tool bar and the Rendering switches showing the options
+routine SyncViewOptions();
+begin
+  GUpdating := true;
+  SetMenuChecked(GMenuGrid, GShowGrid);
+  SetMenuChecked(GMenuWire, GWireframe);
+  SetMenuChecked(GMenuSpin, GSpinOn);
+  SetChecked(GGridBox, GShowGrid);
+  SetChecked(GWireBox, GWireframe);
+  SetChecked(GSpinTool, GSpinOn);
+  GUpdating := false;
+end;
+
+// Theme 0 Studio (editor_theme.xml), 1 Raven's Dark, 2 Raven's Light
+routine UseTheme(const AIndex: int32);
+begin
+  if AIndex = 0 then
+    Rtheme_use("Studio");
+  else
+    if AIndex = 1 then
+      Rtheme_apply(R_THEME_DARK);
+    else
+      Rtheme_apply(R_THEME_LIGHT);
+    end;
+  end;
+  SetMenuChecked(GMenuStudio, AIndex = 0);
+  SetMenuChecked(GMenuDark, AIndex = 1);
+  SetMenuChecked(GMenuLight, AIndex = 2);
+end;
+
+// ---- actions (named in editor_ui.xml) ----
+
+routine clink OnSceneNew(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  ClearScene();
+  AddLog("New scene");
+end;
+
+routine clink OnSceneDemo(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  DemoScene();
+end;
+
+routine clink OnQuit(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  GQuit := true;
+end;
+
+routine clink OnDuplicate(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  DuplicateSelected();
+end;
+
+routine clink OnDelete(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  DeleteSelected();
+end;
+
+routine clink OnSelectNone(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  SelectObject(-1);
+end;
+
+routine clink OnAddCube(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  AddShape(TShape.sCube);
+end;
+
+routine clink OnAddSphere(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  AddShape(TShape.sSphere);
+end;
+
+routine clink OnAddCylinder(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  AddShape(TShape.sCylinder);
+end;
+
+routine clink OnAddCone(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  AddShape(TShape.sCone);
+end;
+
+routine clink OnAddTorus(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  AddShape(TShape.sTorus);
+end;
+
+routine clink OnAddKnot(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  AddShape(TShape.sKnot);
+end;
+
+routine clink OnViewGrid(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  GShowGrid := not GShowGrid;
+  SyncViewOptions();
+end;
+
+routine clink OnViewWire(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  GWireframe := not GWireframe;
+  SyncViewOptions();
+end;
+
+routine clink OnViewSpin(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  GSpinOn := not GSpinOn;
+  SyncViewOptions();
+end;
+
+routine clink OnToolSpin(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  if GUpdating then
+    return;
+  end;
+  GSpinOn := Rcheckbox_is_checked(ASender) <> 0;
+  SyncViewOptions();
+end;
+
+routine clink OnViewFrame(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  FrameSelection();
+end;
+
+routine clink OnViewReset(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  ResetCamera();
+end;
+
+routine clink OnThemeStudio(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  UseTheme(0);
+end;
+
+routine clink OnThemeDark(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  UseTheme(1);
+end;
+
+routine clink OnThemeLight(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  UseTheme(2);
+end;
+
+routine clink OnPropChanged(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  ApplyInspector();
+end;
+
+routine clink OnCameraChanged(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  GFov := Rslider_get_value(GFovSlider);
+  Rlabel_set_text(GFovValue, TextFormat("%.0f", float64(GFov)));
+end;
+
+routine clink OnRenderChanged(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  if GUpdating then
+    return;
+  end;
+  GShowGrid := Rcheckbox_is_checked(GGridBox) <> 0;
+  GWireframe := Rcheckbox_is_checked(GWireBox) <> 0;
+  GShowAxes := Rcheckbox_is_checked(GAxesBox) <> 0;
+  GSky := Rcombo_box_get_selected(GSkyBox);
+  SyncViewOptions();
+end;
+
+// Every keystroke in the name field renames the selection, in the tree too
+routine clink OnNameChanged(AInput: Rid; AText: ptr to const char; AUserData: ptr);
+begin
+  if GUpdating or (GSelected < 0) then
+    return;
+  end;
+  GObjects[GSelected].Name := string(AText);
+  Rtree_item_set_text(GObjects[GSelected].Item, AText);
+  GJsonDirty := true;
+end;
+
+// A row of the tree selected, with the mouse or the keyboard
+routine clink OnTreeSelection(ATree: Rid; AItem: Rid; AUserData: ptr);
+var
+  LIndex: int32;
+begin
+  if GUpdating then
+    return;
+  end;
+  GSelected := -1;
+  for LIndex := 0 to GObjectCount - 1 do
+    if GObjects[LIndex].Item = AItem then
+      GSelected := LIndex;
+    end;
+  end;
+  RefreshInspector();
+end;
+
+const
+  // The About dialog, built from XML text (Rwidget_create_from_xml)
+  CAboutXml: string = R"(<Border Padding="20" CornerRadius="10" Width="440">
+  <VBox Spacing="12">
+    <Label Text="Raven Studio" TextSize="20"/>
+    <Label Wrap="true" Markdown="true">A scene editor written in **PaskalCPP**: raylib draws the 3D view, **Raven** draws every widget around it, from one XML file in the shared assets archive.</Label>
+    <Label Name="about.versions" Opacity="0.7"/>
+    <Button Text="Close" Style="Primary" OnClicked="about.close" Slot.HAlign="Right"/>
+  </VBox>
+</Border>)";
+
+// Help > About: a dialog over the window that does not stop the loop
+routine clink OnAbout(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+var
+  LContent: Rid;
+begin
+  LContent := Rwidget_create_from_xml(CAboutXml.c_str(), CAboutXml.size());
+  if LContent = R_INVALID_ID then
+    return;
+  end;
+  Rlabel_set_text(Rwidget_find(LContent, "about.versions"), TextFormat("Raven %s, raylib %s", Rget_version(), RAYLIB_VERSION));
+  Rdialog_open(GUi, LContent, nil, nil);
+end;
+
+routine clink OnAboutClose(ASender: Rid; AAction: ptr to const char; AUserData: ptr);
+begin
+  Rdialog_close(ASender, 1);
+end;
+
+routine clink OnError(ACode: RError; ASeverity: RSeverity; ADetail: ptr to const char);
+begin
+  println("[Raven] {} ({}): {}", Rerror_to_string(ACode), Rseverity_to_string(ASeverity), ADetail);
+end;
+
+routine BindActions();
+begin
+  Raction_bind("scene.new", OnSceneNew, nil);
+  Raction_bind("scene.demo", OnSceneDemo, nil);
+  Raction_bind("app.quit", OnQuit, nil);
+  Raction_bind("scene.duplicate", OnDuplicate, nil);
+  Raction_bind("scene.delete", OnDelete, nil);
+  Raction_bind("scene.select_none", OnSelectNone, nil);
+  Raction_bind("add.cube", OnAddCube, nil);
+  Raction_bind("add.sphere", OnAddSphere, nil);
+  Raction_bind("add.cylinder", OnAddCylinder, nil);
+  Raction_bind("add.cone", OnAddCone, nil);
+  Raction_bind("add.torus", OnAddTorus, nil);
+  Raction_bind("add.knot", OnAddKnot, nil);
+  Raction_bind("view.grid", OnViewGrid, nil);
+  Raction_bind("view.wire", OnViewWire, nil);
+  Raction_bind("view.spin", OnViewSpin, nil);
+  Raction_bind("tool.spin", OnToolSpin, nil);
+  Raction_bind("view.frame", OnViewFrame, nil);
+  Raction_bind("view.reset", OnViewReset, nil);
+  Raction_bind("theme.studio", OnThemeStudio, nil);
+  Raction_bind("theme.dark", OnThemeDark, nil);
+  Raction_bind("theme.light", OnThemeLight, nil);
+  Raction_bind("prop.changed", OnPropChanged, nil);
+  Raction_bind("cam.changed", OnCameraChanged, nil);
+  Raction_bind("render.changed", OnRenderChanged, nil);
+  Raction_bind("help.about", OnAbout, nil);
+  Raction_bind("about.close", OnAboutClose, nil);
+end;
+
+routine FindWidgets();
+begin
+  GOutliner := Find("outliner");
+  GOutlinerCount := Find("outliner.count");
+  GSceneView := Find("scene");
+  GJson := Find("json");
+  GLogView := Find("log");
+  GStats := Find("stats");
+  GPropNone := Find("prop.none");
+  GPropPanel := Find("prop.panel");
+  GName := Find("prop.name");
+  GShapeBox := Find("prop.shape");
+  GColorPicker := Find("prop.color");
+  GPosX := Find("prop.x");
+  GPosY := Find("prop.y");
+  GPosZ := Find("prop.z");
+  GTurnSlider := Find("prop.turn");
+  GTurnValue := Find("prop.turn.value");
+  GSizeSlider := Find("prop.size");
+  GSizeValue := Find("prop.size.value");
+  GSpinSlider := Find("prop.spin");
+  GSpinValue := Find("prop.spin.value");
+  GBobBox := Find("prop.bob");
+  GVisibleBox := Find("prop.visible");
+  GFovSlider := Find("cam.fov");
+  GFovValue := Find("cam.fov.value");
+  GGridBox := Find("render.grid");
+  GWireBox := Find("render.wire");
+  GAxesBox := Find("render.axes");
+  GSkyBox := Find("render.sky");
+  GSpinTool := Find("tool.spin");
+  GMenuGrid := Find("menu.grid");
+  GMenuWire := Find("menu.wire");
+  GMenuSpin := Find("menu.spin");
+  GMenuStudio := Find("menu.studio");
+  GMenuDark := Find("menu.dark");
+  GMenuLight := Find("menu.light");
+end;
+
+// ---- the loop ----
+
+routine Run();
+var
+  LDelta: float32;
+  LIndex: int32;
+  LRed: float32;
+  LGreen: float32;
+  LBlue: float32;
+  LAlpha: float32;
+begin
+  while not WindowShouldClose() and not GQuit do
+    if IsKeyPressed(KEY_F11) then
+      ToggleFrameFullscreen();
+    end;
+    LDelta := GetFrameTime();
+    if GSpinOn then
+      for LIndex := 0 to GObjectCount - 1 do
+        GObjects[LIndex].SpinAngle += GObjects[LIndex].Spin * LDelta;
+      end;
+    end;
+    UpdateCamera();
+    if GJsonDirty then
+      RefreshScene();
+    end;
+    GStatsTime += LDelta;
+    if GStatsTime > 0.25f then
+      GStatsTime := 0.0f;
+      Rlabel_set_text(GStats, TextFormat("%d objects     %d FPS     view %d x %d px", GObjectCount, GetFPS(),
+        GSceneTarget.texture.width, GSceneTarget.texture.height));
+    end;
+    // Raven's frame: its input, its layout, the actions and events it fires
+    if not UpdateRaven(GUi) then
+      leave;
+    end;
+    // The frame takes the theme's window colour, whatever theme is in use
+    Rtheme_get_color(R_COLOR_WINDOW, address of LRed, address of LGreen, address of LBlue, address of LAlpha);
+    SetFrameColor(Rgb(int32(Round(LRed * 255.0f)), int32(Round(LGreen * 255.0f)), int32(Round(LBlue * 255.0f))));
+    if UpdateSceneTarget() then
+      DrawScene();
+    end;
+
+    BeginDrawing();
+    BeginFrame();
+    DrawRaven(GUi);
+    EndFrame();
+    EndDrawing();
+  end;
+end;
+
+var
+  LZip: IOSource;
+  LPrefix: string;
+  LTheme: ptr to const char;
+
+begin
+  SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
+  if not InitFrameWindow(CScreenWidth, CScreenHeight, "PaskalCPP - Raven Studio") then
+    println("the window did not open");
+    return;
+  end;
+  SetTargetFPS(60);
+  // Esc belongs to Raven (menus, the dialog), not to raylib's way out
+  SetExitKey(KEY_NULL);
+  Rerror_set_callback(OnError);
+  if not InitRaven("RavenEditor") then
+    println("Raven did not start");
+    CloseWindow();
+    return;
+  end;
+
+  // The shared assets archive, as io://<n>/<entry>: Raven reads the theme
+  // and the window from it with its own calls
+  LZip := CreateZipIOSource(CArchive, CPassword);
+  LPrefix := RegisterIOSource(LZip);
+  LTheme := Rtheme_load((LPrefix + "/res/assets/ui/editor_theme.xml").c_str());
+  if LTheme <> nil then
+    Rtheme_use(LTheme);
+  end;
+  BindActions();
+  GUi := Rwindow_create_from_xml_file((LPrefix + "/res/assets/ui/editor_ui.xml").c_str());
+
+  if GUi = R_INVALID_ID then
+    println("the UI did not load");
+  else
+    FindWidgets();
+    // Events that are no action: plain callbacks
+    Rtree_view_set_selection_changed_callback(GOutliner, OnTreeSelection, nil);
+    Rtext_input_set_changed_callback(GName, OnNameChanged, nil);
+    Rwidget_set_event_callback(GSceneView, OnSceneEvent, nil);
+    Rviewport_set_resize_callback(GSceneView, OnSceneResized, nil);
+    GRavenTexture := R_INVALID_ID;
+    LoadShapes();
+    GShowGrid := true;
+    GShowAxes := true;
+    GSpinOn := true;
+    GFov := Rslider_get_value(GFovSlider);
+    Rlabel_set_text(GFovValue, TextFormat("%.0f", float64(GFov)));
+    ResetCamera();
+    SyncViewOptions();
+    AddLog(string(TextFormat("Raven %s on raylib %s, the window from assets.zip", Rget_version(), RAYLIB_VERSION)));
+    DemoScene();
+    SelectObject(0);
+    Run();
+    UnloadShapes();
+  end;
+
+  CloseRaven();
+  // Raven is gone: nothing shows the render texture any more
+  if GSceneTarget.id <> 0 then
+    UnloadRenderTexture(GSceneTarget);
+  end;
+  UnregisterIO(LPrefix);
+  IOSourceClose(LZip);
+  CloseWindow();
+end.

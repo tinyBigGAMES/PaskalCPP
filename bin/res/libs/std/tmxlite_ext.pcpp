@@ -1,0 +1,1028 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  tmxlite_ext.pcpp - the tmxlite_ext unit: `import tmxlite_ext;` loads a Tiled
+  map with the textures it draws from and draws it with raylib, in a few
+  lines: LoadTiledMap(path, LMap), DrawTiledMap(LMap, x, y, WHITE) once a
+  frame, UnloadTiledMap(LMap).
+
+  A TiledMap holds the map as tmxlite read it (its Map field: every layer,
+  object, tileset and property, through tmxlite's own API) and the textures
+  its tiles and image layers draw from, each image loaded once. The map can
+  come from a file (LoadTiledMap), from any IOSource (LoadTiledMapIO: a zip
+  archive, a folder) or from a zip archive by path (LoadTiledMapZip): its
+  external tilesets (.tsx), object templates (.tx) and images are read from
+  the same place, relative to the map, as Tiled wrote them.
+
+  DrawTiledMap draws the visible tile layers and image layers in their order,
+  group layers with their children, as Tiled shows them: orthogonal maps in
+  their render order, isometric, staggered and hexagonal maps by Tiled's own
+  placement rules; each tile on its cell's bottom-left corner at its image's
+  size, moved by its tileset's tile offset and flipped by its flip flags
+  (diagonal first, then horizontal, then vertical, Tiled's order); every
+  layer and group moved by its offset, faded by its opacity and tinted by its
+  tint colour; an image layer drawn at its offset, repeated across the map's
+  size along each axis it repeats on. Object layers are not drawn: their
+  objects are the program's (spawn points, triggers, pickups), read through
+  AMap.Map's layers. Parallax factors are tmxlite's data for a camera the
+  program keeps (Layer::getParallaxFactor). Animated tiles draw their tile as
+  it is (Tileset::Tile::animation lists the frames).
+
+  Textures need a window (InitWindow first). Images are decoded by raylib
+  (PNG, BMP, TGA, JPG, QOI, ...) through raylib_ext's LoadImageIO, so a
+  program's SetRaylibIOSource never changes where a map's images come from.
+  The IO and zip forms read the map's own files through the HookIO hooks,
+  with the source as the calling thread's own path source
+  (SetIOThreadPathSource) for the load: other threads, and the program's own
+  path source, are left as they were.
+==============================================================================*/
+
+module unit tmxlite_ext;
+
+import
+  tmxlite,
+  raylib,
+  raylib_ext,
+  CustomIO,
+  HookIO,
+  Math,
+  SysUtils;
+
+exported type
+  /// One image a map draws from, loaded once however many tiles use it.
+  /// @since 0.3
+  /// @see TiledMap
+  TiledMapImage = record
+    /// The image's path as tmxlite resolved it (a disk path, or the entry's
+    /// path in the source)
+    Path: string;
+    /// True when the tileset or image layer names a colour to make clear
+    HasKey: bool;
+    /// That colour (Tiled's "transparent colour"); its alpha is ignored
+    KeyColour: Color;
+    /// The texture, unloaded by UnloadTiledMap
+    TextureHandle: Texture2D;
+  end;
+
+  /// Where one global tile id's pixels are.
+  /// @since 0.3
+  /// @see TiledMap
+  TiledMapTile = record
+    /// Its image in TiledMap.Images; -1: the id draws nothing
+    ImageIndex: int32;
+    /// Its pixels in that image
+    Source: Rectangle;
+    /// Its tileset's tile offset to the right, in pixels
+    OffsetX: float32;
+    /// Its tileset's tile offset down, in pixels
+    OffsetY: float32;
+  end;
+
+  /// A Tiled map, loaded with what it draws from: LoadTiledMap,
+  /// LoadTiledMapIO or LoadTiledMapZip fill it, DrawTiledMap and
+  /// DrawTiledLayer draw it, UnloadTiledMap frees its textures. It is used
+  /// in place (a var or const parameter), never copied: tmxlite's map cannot
+  /// be.
+  /// @example `LoadTiledMap("$P:../../res/assets/maps/overworld.tmx", LWorld); DrawTiledMap(LWorld, 0.0f, 0.0f, WHITE);`
+  /// @since 0.3
+  /// @see LoadTiledMap
+  TiledMap = record
+    /// The map as tmxlite read it: layers, objects, tilesets, properties
+    Map: tmx::Map;
+    /// Every image the map draws from
+    Images: array of TiledMapImage;
+    /// Indexed by global tile id - 1
+    Tiles: array of TiledMapTile;
+  end;
+
+type
+  // Where a layer is drawn and how: the place its (0, 0) lands (the map's
+  // place plus every offset on the way), its colour, and the map's own place
+  // (what a repeated image layer fills from)
+  TmxliteExtDoPen = record
+    X: float32;
+    Y: float32;
+    Tint: Color;
+    MapX: float32;
+    MapY: float32;
+  end;
+
+  // A layer as the kind getType() names (tmxlite's getLayerAs is this cast)
+  TmxliteExtDoTileLayer = ptr to const tmx::TileLayer;
+  TmxliteExtDoImageLayer = ptr to const tmx::ImageLayer;
+  TmxliteExtDoGroupLayer = ptr to const tmx::LayerGroup;
+  TmxliteExtDoLayer = ptr to const tmx::Layer;
+
+  // Tiled's hexagonal / staggered render parameters (HexagonalRenderer's
+  // RenderParams); a staggered map is a hexagonal one with no side length
+  TmxliteExtDoHex = record
+    TileWidth: int32;
+    TileHeight: int32;
+    StaggerX: bool;
+    StaggerEven: int32;
+    SideX: int32;
+    SideY: int32;
+    SideOffsetX: int32;
+    SideOffsetY: int32;
+    ColumnWidth: int32;
+    RowHeight: int32;
+  end;
+
+const
+  // tmxlite's flip flag bits (tmx::TileLayer::FlipFlag)
+  CTmxliteExtDoFlipH: uint8 = 8;
+  CTmxliteExtDoFlipV: uint8 = 4;
+  CTmxliteExtDoFlipD: uint8 = 2;
+
+// raylib's colour from tmxlite's
+routine TmxliteExtDoColor(const AColour: tmx::Colour): Color;
+var
+  LResult: Color;
+begin
+  LResult.r := AColour.r;
+  LResult.g := AColour.g;
+  LResult.b := AColour.b;
+  LResult.a := AColour.a;
+  return LResult;
+end;
+
+// ATint times a layer's tint colour, its alpha times AOpacity (0 to 1)
+routine TmxliteExtDoTint(const ATint: Color; const ALayerTint: tmx::Colour;
+  const AOpacity: float32): Color;
+var
+  LResult: Color;
+  LAlpha: float32;
+begin
+  LResult.r := uint8((int32(ATint.r) * int32(ALayerTint.r)) div 255);
+  LResult.g := uint8((int32(ATint.g) * int32(ALayerTint.g)) div 255);
+  LResult.b := uint8((int32(ATint.b) * int32(ALayerTint.b)) div 255);
+  LAlpha := float32((int32(ATint.a) * int32(ALayerTint.a)) div 255) * AOpacity;
+  LResult.a := uint8(Round(float64(LAlpha)));
+  return LResult;
+end;
+
+// Every texture of AMap unloaded and its tables emptied; the map itself kept
+routine TmxliteExtDoFreeImages(var AMap: TiledMap);
+var
+  LIndex: int32;
+begin
+  for LIndex := 0 to int32(len(AMap.Images)) - 1 do
+    UnloadTexture(AMap.Images[LIndex].TextureHandle);
+  end;
+  setlength(AMap.Images, 0);
+  setlength(AMap.Tiles, 0);
+end;
+
+// AMap emptied: no textures, an empty tmxlite map
+routine TmxliteExtDoClear(var AMap: TiledMap);
+begin
+  TmxliteExtDoFreeImages(AMap);
+  AMap.Map := tmx::Map();
+end;
+
+// True when an image's colour key is AHasKey / AKey: both none, or the same
+// colour (alpha left out: Tiled's transparent colour has none)
+routine TmxliteExtDoSameKey(const AImage: TiledMapImage; const AHasKey: bool;
+  const AKey: Color): bool;
+begin
+  if AImage.HasKey <> AHasKey then
+    return false;
+  end;
+  if not AHasKey then
+    return true;
+  end;
+  return (AImage.KeyColour.r = AKey.r) and (AImage.KeyColour.g = AKey.g) and
+    (AImage.KeyColour.b = AKey.b);
+end;
+
+// The image file APath as an IO: ASource's entry, or with no source the
+// file on disk; nil when it cannot be opened
+routine TmxliteExtDoOpen(const ASource: IOSource; const APath: string): IO;
+begin
+  if ASource = nil then
+    return CreateFileIO(APath, FileMode.Read);
+  end;
+  return IOSourceOpen(ASource, APath);
+end;
+
+// The index of APath's image with that colour key in AMap.Images; -1 when
+// it is not loaded
+routine TmxliteExtDoFind(const AMap: TiledMap; const APath: string; const AHasKey: bool;
+  const AKey: Color): int32;
+var
+  LIndex: int32;
+begin
+  for LIndex := 0 to int32(len(AMap.Images)) - 1 do
+    if (AMap.Images[LIndex].Path = APath) and
+      TmxliteExtDoSameKey(AMap.Images[LIndex], AHasKey, AKey) then
+      return LIndex;
+    end;
+  end;
+  return -1;
+end;
+
+// The index of APath's image (with its colour key) in AMap.Images, read and
+// made a texture the first time it is named; -1 when it cannot be read or
+// decoded, or no texture can be made (no window)
+routine TmxliteExtDoImage(var AMap: TiledMap; const ASource: IOSource; const APath: string;
+  const AHasKey: bool; const AKey: Color): int32;
+var
+  LIndex: int32;
+  LCount: int32;
+  LFile: IO;
+  LImage: Image;
+  LTexture: Texture2D;
+  LKey: Color;
+begin
+  LIndex := TmxliteExtDoFind(AMap, APath, AHasKey, AKey);
+  if LIndex >= 0 then
+    return LIndex;
+  end;
+  LCount := int32(len(AMap.Images));
+  LFile := TmxliteExtDoOpen(ASource, APath);
+  if LFile = nil then
+    return -1;
+  end;
+  LImage := LoadImageIO(LFile, GetFileExtension(APath.c_str()));
+  IOClose(LFile);
+  if LImage.data = nil then
+    return -1;
+  end;
+  if AHasKey then
+    // Every pixel of Tiled's transparent colour becomes clear: the image
+    // gets an alpha channel first, so the clear pixels keep theirs
+    ImageFormat(address of LImage, PIXELFORMAT_UNCOMPRESSED_R8G8B8A8);
+    LKey := AKey;
+    LKey.a := 255;
+    ImageColorReplace(address of LImage, LKey, BLANK);
+  end;
+  LTexture := LoadTextureFromImage(LImage);
+  UnloadImage(LImage);
+  if LTexture.id = 0 then
+    return -1;
+  end;
+  setlength(AMap.Images, LCount + 1);
+  AMap.Images[LCount].Path := APath;
+  AMap.Images[LCount].HasKey := AHasKey;
+  AMap.Images[LCount].KeyColour := AKey;
+  AMap.Images[LCount].TextureHandle := LTexture;
+  return LCount;
+end;
+
+// The global ids of ASet entered in AMap.Tiles, their images loaded: false
+// when an image a tile draws from cannot be read
+routine TmxliteExtDoAddTileset(var AMap: TiledMap; const ASource: IOSource;
+  const ASet: tmx::Tileset): bool;
+var
+  LGid: int64;
+  LTile: ptr to const tmx::Tileset::Tile;
+  LIndex: int32;
+  LHasKey: bool;
+  LKey: Color;
+  LOffsetX: float32;
+  LOffsetY: float32;
+begin
+  // A tileset with no tiles has no global ids to enter
+  if ASet.getTiles().size() = 0 then
+    return true;
+  end;
+  LHasKey := ASet.hasTransparency();
+  LKey := TmxliteExtDoColor(ASet.getTransparencyColour());
+  // tmxlite keeps the tile offset unsigned: a negative offset comes back
+  // whole through the int32 cast
+  LOffsetX := float32(int32(ASet.getTileOffset().x));
+  LOffsetY := float32(int32(ASet.getTileOffset().y));
+  for LGid := int64(ASet.getFirstGID()) to int64(ASet.getLastGID()) do
+    LTile := ASet.getTile(uint32(LGid));
+    if (LTile <> nil) and (LTile^.imagePath <> "") and (LTile^.imageSize.x > 0) and
+      (LTile^.imageSize.y > 0) then
+      LIndex := TmxliteExtDoImage(AMap, ASource, LTile^.imagePath, LHasKey, LKey);
+      if LIndex < 0 then
+        return false;
+      end;
+      AMap.Tiles[LGid - 1].ImageIndex := LIndex;
+      AMap.Tiles[LGid - 1].Source.x := float32(LTile^.imagePosition.x);
+      AMap.Tiles[LGid - 1].Source.y := float32(LTile^.imagePosition.y);
+      AMap.Tiles[LGid - 1].Source.width := float32(LTile^.imageSize.x);
+      AMap.Tiles[LGid - 1].Source.height := float32(LTile^.imageSize.y);
+      AMap.Tiles[LGid - 1].OffsetX := LOffsetX;
+      AMap.Tiles[LGid - 1].OffsetY := LOffsetY;
+    end;
+  end;
+  return true;
+end;
+
+// AMap.Tiles made from the map's tilesets: one entry per global id up to the
+// highest, each drawing nothing until its tileset enters it; false when an
+// image a tile draws from cannot be read
+routine TmxliteExtDoBuildTiles(var AMap: TiledMap; const ASource: IOSource): bool;
+var
+  LSet: int32;
+  LLast: int64;
+  LGid: int64;
+begin
+  LLast := 0;
+  for LSet := 0 to int32(AMap.Map.getTilesets().size()) - 1 do
+    if (AMap.Map.getTilesets()[LSet].getTiles().size() > 0) and
+      (int64(AMap.Map.getTilesets()[LSet].getLastGID()) > LLast) then
+      LLast := int64(AMap.Map.getTilesets()[LSet].getLastGID());
+    end;
+  end;
+  setlength(AMap.Tiles, LLast);
+  for LGid := 0 to LLast - 1 do
+    AMap.Tiles[LGid].ImageIndex := -1;
+    AMap.Tiles[LGid].Source.x := 0.0f;
+    AMap.Tiles[LGid].Source.y := 0.0f;
+    AMap.Tiles[LGid].Source.width := 0.0f;
+    AMap.Tiles[LGid].Source.height := 0.0f;
+    AMap.Tiles[LGid].OffsetX := 0.0f;
+    AMap.Tiles[LGid].OffsetY := 0.0f;
+  end;
+  for LSet := 0 to int32(AMap.Map.getTilesets().size()) - 1 do
+    if not TmxliteExtDoAddTileset(AMap, ASource, AMap.Map.getTilesets()[LSet]) then
+      return false;
+    end;
+  end;
+  return true;
+end;
+
+// The images of every image layer in ALayers (groups walked into) loaded;
+// false when one cannot be read
+routine TmxliteExtDoLayerImages(var AMap: TiledMap; const ASource: IOSource;
+  const ALayers: std::vector<tmx::Layer::Ptr>): bool;
+var
+  LIndex: int32;
+  LLayer: TmxliteExtDoLayer;
+  LImageLayer: TmxliteExtDoImageLayer;
+  LGroup: TmxliteExtDoGroupLayer;
+begin
+  for LIndex := 0 to int32(ALayers.size()) - 1 do
+    LLayer := ALayers[LIndex].get();
+    if LLayer^.getType() = tmx::Layer::Type::Image then
+      LImageLayer := static_cast<TmxliteExtDoImageLayer>(LLayer);
+      if (LImageLayer^.getImagePath() <> "") and (TmxliteExtDoImage(AMap, ASource,
+        LImageLayer^.getImagePath(), LImageLayer^.hasTransparency(),
+        TmxliteExtDoColor(LImageLayer^.getTransparencyColour())) < 0) then
+        return false;
+      end;
+    else
+      if LLayer^.getType() = tmx::Layer::Type::Group then
+        LGroup := static_cast<TmxliteExtDoGroupLayer>(LLayer);
+        if not TmxliteExtDoLayerImages(AMap, ASource, LGroup^.getLayers()) then
+          return false;
+        end;
+      end;
+    end;
+  end;
+  return true;
+end;
+
+// AMap loaded from APath (with no source a disk path, else the map's path in
+// ASource, read through this thread's path source): the map, its tile table
+// and every image it draws from; false, AMap empty, when any cannot be read
+routine TmxliteExtDoLoad(const ASource: IOSource; const APath: string; var AMap: TiledMap): bool;
+begin
+  TmxliteExtDoClear(AMap);
+  if not AMap.Map.load(APath) then
+    TmxliteExtDoClear(AMap);
+    return false;
+  end;
+  if (not TmxliteExtDoBuildTiles(AMap, ASource)) or
+    (not TmxliteExtDoLayerImages(AMap, ASource, AMap.Map.getLayers())) then
+    TmxliteExtDoClear(AMap);
+    return false;
+  end;
+  return true;
+end;
+
+// Tiled's hexagonal render parameters for AMap's tile size, stagger and side
+// length (a staggered map is drawn as a hexagonal one with no side). Tiled
+// rounds the tile size down to even for these maps.
+routine TmxliteExtDoHexOf(const AMap: TiledMap): TmxliteExtDoHex;
+var
+  LHex: TmxliteExtDoHex;
+  LTileW: int32;
+  LTileH: int32;
+  LSide: int32;
+begin
+  LTileW := int32(AMap.Map.getTileSize().x);
+  LTileH := int32(AMap.Map.getTileSize().y);
+  LTileW := LTileW - (LTileW mod 2);
+  LTileH := LTileH - (LTileH mod 2);
+  LSide := 0;
+  if AMap.Map.getOrientation() = tmx::Orientation::Hexagonal then
+    LSide := int32(Round(float64(AMap.Map.getHexSideLength())));
+  end;
+  LHex.TileWidth := LTileW;
+  LHex.TileHeight := LTileH;
+  LHex.StaggerX := AMap.Map.getStaggerAxis() = tmx::StaggerAxis::X;
+  LHex.StaggerEven := 0;
+  if AMap.Map.getStaggerIndex() = tmx::StaggerIndex::Even then
+    LHex.StaggerEven := 1;
+  end;
+  LHex.SideX := 0;
+  LHex.SideY := 0;
+  if LHex.StaggerX then
+    LHex.SideX := LSide;
+  else
+    LHex.SideY := LSide;
+  end;
+  LHex.SideOffsetX := (LTileW - LHex.SideX) div 2;
+  LHex.SideOffsetY := (LTileH - LHex.SideY) div 2;
+  LHex.ColumnWidth := LHex.SideOffsetX + LHex.SideX;
+  LHex.RowHeight := LHex.SideOffsetY + LHex.SideY;
+  return LHex;
+end;
+
+// True when AMap places its cells by the hexagonal rules
+routine TmxliteExtDoIsHex(const AMap: TiledMap): bool;
+begin
+  return (AMap.Map.getOrientation() = tmx::Orientation::Staggered) or
+    (AMap.Map.getOrientation() = tmx::Orientation::Hexagonal);
+end;
+
+// True when column (staggered along X) or row (along Y) AIndex is moved by
+// half a cell (Tiled's doStaggerX / doStaggerY)
+routine TmxliteExtDoStaggered(const AHex: TmxliteExtDoHex; const AIndex: int32): bool;
+begin
+  return ((AIndex & 1) xor AHex.StaggerEven) <> 0;
+end;
+
+// The top-left corner of cell (AX, AY)'s box, from the map's (0, 0), as
+// Tiled's renderers place it
+routine TmxliteExtDoCell(const AMap: TiledMap; const AHex: TmxliteExtDoHex; const AX: int32;
+  const AY: int32; var ALeft: float32; var ATop: float32);
+var
+  LTileW: float32;
+  LTileH: float32;
+  LOriginX: float32;
+begin
+  LTileW := float32(AMap.Map.getTileSize().x);
+  LTileH := float32(AMap.Map.getTileSize().y);
+  if AMap.Map.getOrientation() = tmx::Orientation::Isometric then
+    // The map's top corner sits half its height in tiles from the left
+    LOriginX := float32(AMap.Map.getTileCount().y) * LTileW / 2.0f;
+    ALeft := float32(AX - AY) * LTileW / 2.0f + LOriginX - LTileW / 2.0f;
+    ATop := float32(AX + AY) * LTileH / 2.0f;
+    return;
+  end;
+  if not TmxliteExtDoIsHex(AMap) then
+    ALeft := float32(AX) * LTileW;
+    ATop := float32(AY) * LTileH;
+    return;
+  end;
+  if AHex.StaggerX then
+    ALeft := float32(AX * AHex.ColumnWidth);
+    ATop := float32(AY * (AHex.TileHeight + AHex.SideY));
+    if TmxliteExtDoStaggered(AHex, AX) then
+      ATop := ATop + float32(AHex.RowHeight);
+    end;
+  else
+    ALeft := float32(AX * (AHex.TileWidth + AHex.SideX));
+    ATop := float32(AY * AHex.RowHeight);
+    if TmxliteExtDoStaggered(AHex, AY) then
+      ALeft := ALeft + float32(AHex.ColumnWidth);
+    end;
+  end;
+end;
+
+// The map's size in pixels by Tiled's rules (its renderers' mapSize)
+routine TmxliteExtDoSize(const AMap: TiledMap): ::Vector2;
+var
+  LResult: ::Vector2;
+  LHex: TmxliteExtDoHex;
+  LWidth: float32;
+  LHeight: float32;
+  LTileW: float32;
+  LTileH: float32;
+  LCountX: int32;
+  LCountY: int32;
+begin
+  LCountX := int32(AMap.Map.getTileCount().x);
+  LCountY := int32(AMap.Map.getTileCount().y);
+  LTileW := float32(AMap.Map.getTileSize().x);
+  LTileH := float32(AMap.Map.getTileSize().y);
+  if AMap.Map.getOrientation() = tmx::Orientation::Isometric then
+    LWidth := float32(LCountX + LCountY) * LTileW / 2.0f;
+    LHeight := float32(LCountX + LCountY) * LTileH / 2.0f;
+  else
+    if TmxliteExtDoIsHex(AMap) then
+      LHex := TmxliteExtDoHexOf(AMap);
+      if LHex.StaggerX then
+        LWidth := float32(LCountX * LHex.ColumnWidth + LHex.SideOffsetX);
+        LHeight := float32(LCountY * (LHex.TileHeight + LHex.SideY));
+        if LCountX > 1 then
+          LHeight := LHeight + float32(LHex.RowHeight);
+        end;
+      else
+        LWidth := float32(LCountX * (LHex.TileWidth + LHex.SideX));
+        LHeight := float32(LCountY * LHex.RowHeight + LHex.SideOffsetY);
+        if LCountY > 1 then
+          LWidth := LWidth + float32(LHex.ColumnWidth);
+        end;
+      end;
+    else
+      LWidth := float32(LCountX) * LTileW;
+      LHeight := float32(LCountY) * LTileH;
+    end;
+  end;
+  LResult.x := LWidth;
+  LResult.y := LHeight;
+  return LResult;
+end;
+
+// The tile of global id AGid with its flip flags, its box's bottom-left
+// corner at (AX, ABottom); an id no tileset enters draws nothing
+routine TmxliteExtDoDrawTile(const AMap: TiledMap; const AGid: uint32; const AFlags: uint8;
+  const AX: float32; const ABottom: float32; const ATint: Color);
+var
+  LTile: TiledMapTile;
+  LSource: Rectangle;
+  LDest: Rectangle;
+  LOrigin: ::Vector2;
+  LRotation: float32;
+  LFlipX: bool;
+  LFlipY: bool;
+begin
+  if (AGid = 0) or (int64(AGid) > int64(len(AMap.Tiles))) then
+    return;
+  end;
+  LTile := AMap.Tiles[int64(AGid) - 1];
+  if LTile.ImageIndex < 0 then
+    return;
+  end;
+  LFlipX := (AFlags & CTmxliteExtDoFlipH) <> 0;
+  LFlipY := (AFlags & CTmxliteExtDoFlipV) <> 0;
+  LRotation := 0.0f;
+  if (AFlags & CTmxliteExtDoFlipD) <> 0 then
+    // Tiled swaps x and y (the diagonal flip) before the other two flips. A
+    // swap is a vertical flip followed by a quarter turn clockwise, and a
+    // flip before that turn is the other axis's flip after it: the turned
+    // image is flipped across by the vertical flag and down by the inverse
+    // of the horizontal one
+    LRotation := 90.0f;
+    LFlipX := (AFlags & CTmxliteExtDoFlipV) <> 0;
+    LFlipY := (AFlags & CTmxliteExtDoFlipH) = 0;
+  end;
+  // raylib flips the image for a negative source width / height
+  LSource := LTile.Source;
+  if LFlipX then
+    LSource.width := -LSource.width;
+  end;
+  if LFlipY then
+    LSource.height := -LSource.height;
+  end;
+  // Drawn about its box's centre, so a quarter turn stays on the box
+  LDest.width := LTile.Source.width;
+  LDest.height := LTile.Source.height;
+  LDest.x := AX + LTile.OffsetX + LDest.width / 2.0f;
+  LDest.y := ABottom - LDest.height + LTile.OffsetY + LDest.height / 2.0f;
+  LOrigin.x := LDest.width / 2.0f;
+  LOrigin.y := LDest.height / 2.0f;
+  DrawTexturePro(AMap.Images[LTile.ImageIndex].TextureHandle, LSource, LDest, LOrigin,
+    LRotation, ATint);
+end;
+
+// One cell of a tile layer: its tile at cell (AX, AY), under APen; the tile
+// sits on the cell's bottom-left corner
+routine TmxliteExtDoDrawCell(const AMap: TiledMap; const AHex: TmxliteExtDoHex;
+  const ATile: tmx::TileLayer::Tile; const AX: int32; const AY: int32;
+  const APen: TmxliteExtDoPen);
+var
+  LLeft: float32;
+  LTop: float32;
+begin
+  if ATile.ID = 0 then
+    return;
+  end;
+  LLeft := 0.0f;
+  LTop := 0.0f;
+  TmxliteExtDoCell(AMap, AHex, AX, AY, LLeft, LTop);
+  TmxliteExtDoDrawTile(AMap, ATile.ID, ATile.flipFlags, APen.X + LLeft,
+    APen.Y + LTop + float32(AMap.Map.getTileSize().y), APen.Tint);
+end;
+
+// Step AStep of ACount steps, counted from the start, or from the end when
+// not AForward
+routine TmxliteExtDoAlong(const AStep: int32; const ACount: int32; const AForward: bool): int32;
+begin
+  if AForward then
+    return AStep;
+  end;
+  return ACount - 1 - AStep;
+end;
+
+// A block of tiles (a layer's, or one chunk's): AWidth x AHeight cells of
+// ATiles, row by row, the first at tile (AX0, AY0), in the order Tiled draws
+// them, so a tile taller than its cell covers the cells behind it
+routine TmxliteExtDoDrawCells(const AMap: TiledMap; const AHex: TmxliteExtDoHex;
+  const ATiles: std::vector<tmx::TileLayer::Tile>; const AX0: int32; const AY0: int32;
+  const AWidth: int32; const AHeight: int32; const APen: TmxliteExtDoPen);
+var
+  LOrder: tmx::RenderOrder;
+  LRight: bool;
+  LDown: bool;
+  LStepX: int32;
+  LStepY: int32;
+  LRow: int32;
+  LCol: int32;
+  LPass: int32;
+  LSum: int32;
+begin
+  if (AWidth <= 0) or (AHeight <= 0) or
+    (int64(ATiles.size()) < int64(AWidth) * int64(AHeight)) then
+    return;
+  end;
+  if AMap.Map.getOrientation() = tmx::Orientation::Isometric then
+    // By screen rows: the cells of one diagonal x + y share a row, drawn
+    // left to right
+    for LSum := 0 to AWidth + AHeight - 2 do
+      for LCol := 0 to AWidth - 1 do
+        LRow := LSum - LCol;
+        if (LRow >= 0) and (LRow < AHeight) then
+          TmxliteExtDoDrawCell(AMap, AHex, ATiles[LRow * AWidth + LCol], AX0 + LCol, AY0 + LRow, APen);
+        end;
+      end;
+    end;
+    return;
+  end;
+  if TmxliteExtDoIsHex(AMap) then
+    for LRow := 0 to AHeight - 1 do
+      if AHex.StaggerX then
+        // A row's raised columns first, then the lowered ones between them
+        for LPass := 0 to 1 do
+          for LCol := 0 to AWidth - 1 do
+            if TmxliteExtDoStaggered(AHex, AX0 + LCol) = (LPass = 1) then
+              TmxliteExtDoDrawCell(AMap, AHex, ATiles[LRow * AWidth + LCol], AX0 + LCol, AY0 + LRow, APen);
+            end;
+          end;
+        end;
+      else
+        for LCol := 0 to AWidth - 1 do
+          TmxliteExtDoDrawCell(AMap, AHex, ATiles[LRow * AWidth + LCol], AX0 + LCol, AY0 + LRow, APen);
+        end;
+      end;
+    end;
+    return;
+  end;
+  // Orthogonal: in the map's render order (right-down unless it says)
+  LOrder := AMap.Map.getRenderOrder();
+  LRight := (LOrder <> tmx::RenderOrder::LeftDown) and (LOrder <> tmx::RenderOrder::LeftUp);
+  LDown := (LOrder <> tmx::RenderOrder::RightUp) and (LOrder <> tmx::RenderOrder::LeftUp);
+  for LStepY := 0 to AHeight - 1 do
+    LRow := TmxliteExtDoAlong(LStepY, AHeight, LDown);
+    for LStepX := 0 to AWidth - 1 do
+      LCol := TmxliteExtDoAlong(LStepX, AWidth, LRight);
+      TmxliteExtDoDrawCell(AMap, AHex, ATiles[LRow * AWidth + LCol], AX0 + LCol, AY0 + LRow, APen);
+    end;
+  end;
+end;
+
+// A tile layer: its cells, or an infinite map's chunks
+routine TmxliteExtDoDrawTileLayer(const AMap: TiledMap; const ALayer: TmxliteExtDoTileLayer;
+  const APen: TmxliteExtDoPen);
+var
+  LHex: TmxliteExtDoHex;
+  LIndex: int32;
+begin
+  LHex := TmxliteExtDoHexOf(AMap);
+  TmxliteExtDoDrawCells(AMap, LHex, ALayer^.getTiles(), 0, 0, int32(ALayer^.getSize().x),
+    int32(ALayer^.getSize().y), APen);
+  for LIndex := 0 to int32(ALayer^.getChunks().size()) - 1 do
+    TmxliteExtDoDrawCells(AMap, LHex, ALayer^.getChunks()[LIndex].tiles,
+      ALayer^.getChunks()[LIndex].position.x, ALayer^.getChunks()[LIndex].position.y,
+      ALayer^.getChunks()[LIndex].size.x, ALayer^.getChunks()[LIndex].size.y, APen);
+  end;
+end;
+
+// An image layer: its image at APen's place, repeated across the map's size
+// along each axis it repeats on
+routine TmxliteExtDoDrawImageLayer(const AMap: TiledMap; const ALayer: TmxliteExtDoImageLayer;
+  const APen: TmxliteExtDoPen);
+var
+  LIndex: int32;
+  LTexture: Texture2D;
+  LWidth: float32;
+  LHeight: float32;
+  LSize: ::Vector2;
+  LStartX: float32;
+  LStartY: float32;
+  LEndX: float32;
+  LEndY: float32;
+  LPlace: ::Vector2;
+begin
+  if ALayer^.getImagePath() = "" then
+    return;
+  end;
+  LIndex := TmxliteExtDoFind(AMap, ALayer^.getImagePath(), ALayer^.hasTransparency(),
+    TmxliteExtDoColor(ALayer^.getTransparencyColour()));
+  if LIndex < 0 then
+    return;
+  end;
+  LTexture := AMap.Images[LIndex].TextureHandle;
+  LWidth := float32(LTexture.width);
+  LHeight := float32(LTexture.height);
+  if (LWidth <= 0.0f) or (LHeight <= 0.0f) then
+    return;
+  end;
+  LSize := TmxliteExtDoSize(AMap);
+  LStartX := APen.X;
+  LEndX := APen.X + LWidth;
+  if ALayer^.hasRepeatX() then
+    // From the copy that covers the map's left edge to the last one that
+    // starts before its right edge
+    while LStartX > APen.MapX do
+      LStartX := LStartX - LWidth;
+    end;
+    while LStartX + LWidth <= APen.MapX do
+      LStartX := LStartX + LWidth;
+    end;
+    LEndX := APen.MapX + LSize.x;
+  end;
+  LStartY := APen.Y;
+  LEndY := APen.Y + LHeight;
+  if ALayer^.hasRepeatY() then
+    while LStartY > APen.MapY do
+      LStartY := LStartY - LHeight;
+    end;
+    while LStartY + LHeight <= APen.MapY do
+      LStartY := LStartY + LHeight;
+    end;
+    LEndY := APen.MapY + LSize.y;
+  end;
+  LPlace.y := LStartY;
+  while LPlace.y < LEndY do
+    LPlace.x := LStartX;
+    while LPlace.x < LEndX do
+      DrawTextureV(LTexture, LPlace, APen.Tint);
+      LPlace.x := LPlace.x + LWidth;
+    end;
+    LPlace.y := LPlace.y + LHeight;
+  end;
+end;
+
+// ALayer drawn under APen, moved by its offset, faded by its opacity and
+// tinted by its tint colour, when it is visible or AForce; a group's
+// children drawn the same way under it
+routine TmxliteExtDoDrawLayer(const AMap: TiledMap; const ALayer: TmxliteExtDoLayer;
+  const APen: TmxliteExtDoPen; const AForce: bool);
+var
+  LPen: TmxliteExtDoPen;
+  LGroup: TmxliteExtDoGroupLayer;
+  LIndex: int32;
+begin
+  if (not AForce) and (not ALayer^.getVisible()) then
+    return;
+  end;
+  LPen := APen;
+  LPen.X := APen.X + float32(ALayer^.getOffset().x);
+  LPen.Y := APen.Y + float32(ALayer^.getOffset().y);
+  LPen.Tint := TmxliteExtDoTint(APen.Tint, ALayer^.getTintColour(), ALayer^.getOpacity());
+  if ALayer^.getType() = tmx::Layer::Type::Tile then
+    TmxliteExtDoDrawTileLayer(AMap, static_cast<TmxliteExtDoTileLayer>(ALayer), LPen);
+    return;
+  end;
+  if ALayer^.getType() = tmx::Layer::Type::Image then
+    TmxliteExtDoDrawImageLayer(AMap, static_cast<TmxliteExtDoImageLayer>(ALayer), LPen);
+    return;
+  end;
+  if ALayer^.getType() = tmx::Layer::Type::Group then
+    LGroup := static_cast<TmxliteExtDoGroupLayer>(ALayer);
+    for LIndex := 0 to int32(LGroup^.getLayers().size()) - 1 do
+      TmxliteExtDoDrawLayer(AMap, LGroup^.getLayers()[LIndex].get(), LPen, false);
+    end;
+  end;
+end;
+
+// The pen a map drawn at (AX, AY) in ATint starts with
+routine TmxliteExtDoPenAt(const AX: float32; const AY: float32; const ATint: Color): TmxliteExtDoPen;
+var
+  LPen: TmxliteExtDoPen;
+begin
+  LPen.X := AX;
+  LPen.Y := AY;
+  LPen.Tint := ATint;
+  LPen.MapX := AX;
+  LPen.MapY := AY;
+  return LPen;
+end;
+
+/// Loads a Tiled map file with everything it draws from: its external
+/// tilesets and object templates (tmxlite), and every tileset and image
+/// layer image as a texture. Whatever AMap held is unloaded first. Needs a
+/// window (the textures).
+/// @param APath the .tmx file (`$P:` and the other SysUtils.ResolvePath
+///   forms are resolved first); the files it names are read relative to it
+/// @param AMap filled with the map
+/// @returns true when the map and every file it names were read; false, AMap
+///   empty, when one could not be read or decoded, or no texture could be
+///   made
+/// @example `if not LoadTiledMap("$P:../../res/assets/maps/overworld.tmx", LWorld) then return; end;`
+/// @see LoadTiledMapZip
+/// @see UnloadTiledMap
+/// @since 0.3
+exported routine LoadTiledMap(const APath: string; var AMap: TiledMap): bool;
+begin
+  return TmxliteExtDoLoad(nil, ResolvePath(APath), AMap);
+end;
+
+/// Loads a Tiled map from an IOSource, as LoadTiledMap loads one from a
+/// file: the map, its tilesets, templates and images are the source's
+/// entries, found relative to the map as Tiled wrote them ("../images/x.png"
+/// beside "maps/level.tmx" is "images/x.png"). tmxlite reads them through
+/// the HookIO hooks with ASource as this thread's path source for the call
+/// (SetIOThreadPathSource); the one the thread had is put back after, and
+/// other threads never see it. The source stays the caller's. Needs a window.
+/// @param ASource the files (CreateZipIOSource's, CreateFolderIOSource's,
+///   any source)
+/// @param APath the map's path in the source, `/` separated
+/// @param AMap filled with the map
+/// @returns true when the map and every file it names were read; false, AMap
+///   empty, when ASource is nil or one could not be read or decoded
+/// @example `LoadTiledMapIO(CreateZipIOSource("$P:assets.zip"), "maps/level.tmx", LLevel);`
+/// @see LoadTiledMap
+/// @since 0.3
+exported routine LoadTiledMapIO(const ASource: IOSource; const APath: string; var AMap: TiledMap): bool;
+var
+  LBefore: IOSource;
+  LResult: bool;
+begin
+  if ASource = nil then
+    TmxliteExtDoClear(AMap);
+    return false;
+  end;
+  LBefore := GetIOThreadPathSource();
+  if not SetIOThreadPathSource(ASource) then
+    TmxliteExtDoClear(AMap);
+    return false;
+  end;
+  LResult := TmxliteExtDoLoad(ASource, APath, AMap);
+  // The thread's own source back; with no memory to register it again the
+  // thread is left with none rather than with ASource
+  if not SetIOThreadPathSource(LBefore) then
+    SetIOThreadPathSource(nil);
+  end;
+  return LResult;
+end;
+
+/// Loads a Tiled map from an entry of a zip archive, with its tilesets,
+/// templates and images from the same archive (CreateZipIOSource opens it,
+/// LoadTiledMapIO loads the map, the archive is closed after: the textures
+/// are the map's own). Needs a window.
+/// @param AArchive the zip file (`$P:` resolved, as CreateZipIOSource does)
+/// @param AEntry the map's path in the archive, `/` separated
+/// @param APassword the archive's password ("" for none)
+/// @param AMap filled with the map
+/// @returns true when the map and every file it names were read; false, AMap
+///   empty, when the archive or an entry cannot be opened (a wrong password
+///   included), read or decoded
+/// @example `LoadTiledMapZip("$P:../../assets.zip", "res/assets/maps/overworld.tmx", "PaskalCPP", LWorld);`
+/// @see LoadTiledMapIO
+/// @since 0.3
+exported routine LoadTiledMapZip(const AArchive: string; const AEntry: string;
+  const APassword: string; var AMap: TiledMap): bool;
+var
+  LSource: IOSource;
+  LResult: bool;
+begin
+  LSource := CreateZipIOSource(AArchive, APassword);
+  if LSource = nil then
+    TmxliteExtDoClear(AMap);
+    return false;
+  end;
+  LResult := LoadTiledMapIO(LSource, AEntry, AMap);
+  IOSourceClose(LSource);
+  return LResult;
+end;
+
+/// LoadTiledMapZip for an archive with no password.
+/// @param AArchive the zip file
+/// @param AEntry the map's path in the archive
+/// @param AMap filled with the map
+/// @returns true when the map and every file it names were read
+/// @since 0.3
+exported routine LoadTiledMapZip(const AArchive: string; const AEntry: string;
+  var AMap: TiledMap): bool;
+begin
+  return LoadTiledMapZip(AArchive, AEntry, "", AMap);
+end;
+
+/// Unloads a map's textures and empties it (a map that did not load, or was
+/// unloaded already, is fine). Needs the window that loaded it still open.
+/// @param AMap the map
+/// @example `UnloadTiledMap(LWorld);`
+/// @see LoadTiledMap
+/// @since 0.3
+exported routine UnloadTiledMap(var AMap: TiledMap);
+begin
+  TmxliteExtDoClear(AMap);
+end;
+
+/// True when a map is loaded (a Load call succeeded and it was not
+/// unloaded since).
+/// @param AMap the map
+/// @returns false for an empty map
+/// @since 0.3
+exported routine IsTiledMapValid(const AMap: TiledMap): bool;
+begin
+  return (AMap.Map.getTileSize().x > 0) and (AMap.Map.getTileSize().y > 0);
+end;
+
+/// Draws a map: every visible tile layer and image layer in the map's
+/// order, groups with their children (see the unit header for how each is
+/// placed, flipped, faded and tinted). Object layers are not drawn. Call it
+/// between BeginDrawing and EndDrawing (or inside BeginMode2D for a camera,
+/// BeginTextureMode for a render texture).
+/// @param AMap the map; an empty one draws nothing
+/// @param APosX where the map's left edge goes, in pixels
+/// @param APosY where the map's top edge goes, in pixels
+/// @param ATint multiplied into every pixel (WHITE: as it is)
+/// @example `DrawTiledMap(LWorld, 0.0f, 0.0f, WHITE);`
+/// @see DrawTiledLayer
+/// @since 0.3
+exported routine DrawTiledMap(const AMap: TiledMap; const APosX: float32; const APosY: float32;
+  const ATint: Color);
+var
+  LIndex: int32;
+  LPen: TmxliteExtDoPen;
+begin
+  LPen := TmxliteExtDoPenAt(APosX, APosY, ATint);
+  for LIndex := 0 to int32(AMap.Map.getLayers().size()) - 1 do
+    TmxliteExtDoDrawLayer(AMap, AMap.Map.getLayers()[LIndex].get(), LPen, false);
+  end;
+end;
+
+/// Draws one top-level layer of a map as DrawTiledMap draws it, whether
+/// or not it is marked visible (a group's children still follow their own
+/// visibility): a layer kept hidden in Tiled (a collision layer) can still
+/// be drawn on demand, and the program can draw its own sprites between
+/// two layers.
+/// @param AMap the map
+/// @param ALayer the layer's index in AMap.Map.getLayers() (GetTiledLayerIndex
+///   finds it by name); out of range draws nothing
+/// @param APosX where the map's left edge goes, in pixels
+/// @param APosY where the map's top edge goes, in pixels
+/// @param ATint multiplied into every pixel
+/// @example `DrawTiledLayer(LWorld, GetTiledLayerIndex(LWorld, "ground"), 0.0f, 0.0f, WHITE);`
+/// @see DrawTiledMap
+/// @since 0.3
+exported routine DrawTiledLayer(const AMap: TiledMap; const ALayer: int32; const APosX: float32;
+  const APosY: float32; const ATint: Color);
+begin
+  if (ALayer < 0) or (int64(ALayer) >= int64(AMap.Map.getLayers().size())) then
+    return;
+  end;
+  TmxliteExtDoDrawLayer(AMap, AMap.Map.getLayers()[ALayer].get(),
+    TmxliteExtDoPenAt(APosX, APosY, ATint), true);
+end;
+
+/// The index of a map's top-level layer by its name, for DrawTiledLayer and
+/// AMap.Map.getLayers().
+/// @param AMap the map
+/// @param ALayerName the layer's name in Tiled (case-sensitive)
+/// @returns the first layer of that name; -1 when there is none
+/// @example `LGround := GetTiledLayerIndex(LWorld, "ground");`
+/// @see DrawTiledLayer
+/// @since 0.3
+exported routine GetTiledLayerIndex(const AMap: TiledMap; const ALayerName: string): int32;
+var
+  LIndex: int32;
+begin
+  for LIndex := 0 to int32(AMap.Map.getLayers().size()) - 1 do
+    if AMap.Map.getLayers()[LIndex].get()^.getName() = ALayerName then
+      return LIndex;
+    end;
+  end;
+  return -1;
+end;
+
+/// A map's size in pixels as Tiled gives it for its orientation: orthogonal
+/// tiles across times tile width (and down), isometric (across + down) half
+/// tiles each way, staggered and hexagonal by Tiled's own stagger rules. For
+/// an infinite map it is the size its width and height in tiles give.
+/// @param AMap the map; an empty one is 0 x 0
+/// @returns the width (x) and height (y)
+/// @example `LTarget := LoadRenderTexture(int32(GetTiledMapSize(LWorld).x), int32(GetTiledMapSize(LWorld).y));`
+/// @see DrawTiledMap
+/// @since 0.3
+exported routine GetTiledMapSize(const AMap: TiledMap): ::Vector2;
+begin
+  return TmxliteExtDoSize(AMap);
+end;
+
+end.

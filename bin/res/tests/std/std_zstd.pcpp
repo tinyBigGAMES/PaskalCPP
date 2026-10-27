@@ -1,0 +1,77 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_zstd.pcpp - Std library compliance: the zstd unit
+  (res\libs\std\zstd.pcpp)
+
+  zstd's one-shot API used from PaskalCPP: the library's version, a
+  compressible text packed with ZSTD_compress (the frame records the text's
+  size), unpacked with ZSTD_decompress back to the same bytes.
+
+  The refusal: bytes that are not a zstd frame decompress to an error, and
+  ZSTD_getErrorCode names it as an unknown frame prefix.
+*******************************************************************************/
+
+module exe std_zstd;
+
+/*
+  @@test
+    kind run
+    expect
+    | version 1.5.7
+    | packed true smaller true
+    | frame size 240 known true
+    | unpacked true same true
+    | bad error true unknown frame true
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  zstd;
+
+var
+  LText: string;
+  LPacked: string;
+  LUnpacked: string;
+  LBad: string;
+  LSize: uint64;
+  LIndex: int32;
+
+begin
+  println("version {}", ZSTD_versionString());
+
+  // 240 bytes of one repeated row: zstd packs it well below its size
+  LText := "";
+  for LIndex := 1 to 10 do
+    LText := LText + "0123456789abcdefghijklmn";
+  end;
+  LPacked.resize(ZSTD_compressBound(LText.size()));
+  LSize := ZSTD_compress(LPacked.data(), LPacked.size(), LText.data(), LText.size(), 3);
+  println("packed {} smaller {}", ZSTD_isError(LSize) = 0, LSize < LText.size());
+  LPacked.resize(LSize);
+  println("frame size {} known {}", ZSTD_getFrameContentSize(LPacked.data(), LPacked.size()),
+    ZSTD_getFrameContentSize(LPacked.data(), LPacked.size()) = LText.size());
+
+  LUnpacked.resize(LText.size());
+  LSize := ZSTD_decompress(LUnpacked.data(), LUnpacked.size(), LPacked.data(), LPacked.size());
+  println("unpacked {} same {}", ZSTD_isError(LSize) = 0, LUnpacked = LText);
+
+  // Not a zstd frame: an error code, the unknown-prefix one
+  LBad := "not a zstd frame";
+  LSize := ZSTD_decompress(LUnpacked.data(), LUnpacked.size(), LBad.data(), LBad.size());
+  println("bad error {} unknown frame {}", ZSTD_isError(LSize) <> 0,
+    ZSTD_getErrorCode(LSize) = ZSTD_error_prefix_unknown);
+end.

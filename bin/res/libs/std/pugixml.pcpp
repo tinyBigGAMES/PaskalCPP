@@ -1,0 +1,50 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  pugixml.pcpp - the pugixml unit: `import pugixml;` reads and writes XML
+  from PaskalCPP with pugixml (https://pugixml.org: pugi::xml_document,
+  load_string / load_file / save_file, xml_node and xml_attribute walking,
+  XPath). A self-describing vendor module: it owns every include path,
+  library path and link library it needs, per official target. The library
+  is libpugixml.a (one per target), built by PaskalCPP-Libs'
+  build-pugixml.cmd from pugixml's own CMake project, static, at its
+  default configuration (STL, exceptions, XPath, char strings).
+==============================================================================*/
+
+module unit pugixml;
+
+// Self-describing vendor module: it owns every path it needs.
+
+@addincludepath "$P:res/libs/vendor/pugixml/include";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/pugixml/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/pugixml/lib/x86_64-linux-gnu";
+@else
+  @message error "pugixml: unsupported target";
+@endif
+
+@linklibrary "pugixml";
+
+// The header goes to this unit's header, so every importer sees pugixml's API
+cpp header;
+
+#include "pugixml.hpp"
+
+end.

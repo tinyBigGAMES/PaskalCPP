@@ -18,13 +18,19 @@
   API is called as written in C++ (ImGui::Begin, ImGui::Text, ...): it is
   plain mixed C++ inside PaskalCPP code. The window shows a raylib texture
   through rlImGuiImage and a Font Awesome icon (the font rlImGui loads).
+  It runs in raylib_ext's frame window (1280 x 800 units, sized for the
+  monitor's DPI, scaled and letterboxed on resize), ImGui inside it through
+  rlimgui_ext (BeginFrameImGui / EndFrameImGui): ImGui works in the same
+  units, its text sharp at the frame's real size. F11 toggles fullscreen.
 ==============================================================================*/
 
 module exe Simple;
 
 import
   raylib,
-  rlimgui;
+  raylib_ext,
+  rlimgui,
+  rlimgui_ext;
 
 const
   CScreenWidth: int32 = 1280;
@@ -38,15 +44,15 @@ var
   LClicks: int32;
 
 begin
-  // HighDPI: raylib sizes the window for the monitor's DPI scale (and follows
-  // it to another monitor) and works in logical pixels; rlImGui hands ImGui
-  // that scale, so ImGui's text and widgets grow with it and its fonts are
-  // drawn at the full resolution. Without the flag raylib 6.2 reports a DPI
-  // scale of 1 and ImGui stays at its 1x size on a high DPI monitor.
-  SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT | FLAG_WINDOW_RESIZABLE |
-    FLAG_WINDOW_HIGHDPI);
-  InitWindow(CScreenWidth, CScreenHeight, "PaskalCPP - rlImGui simple");
+  // The frame window: sized for the monitor's DPI (and follows it to another
+  // monitor); the program and ImGui both work in its 1280 x 800 units
+  SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
+  if not InitFrameWindow(CScreenWidth, CScreenHeight, "PaskalCPP - rlImGui simple") then
+    println("the window did not open");
+    return;
+  end;
   SetTargetFPS(144);
+  SetFrameColor(DARKGRAY);
   // true = the dark style
   rlImGuiSetup(true);
 
@@ -60,10 +66,14 @@ begin
   LClicks := 0;
 
   while not WindowShouldClose() do
-    BeginDrawing();
-    ClearBackground(DARKGRAY);
+    if IsKeyPressed(KEY_F11) then
+      ToggleFrameFullscreen();
+    end;
 
-    rlImGuiBegin();
+    BeginDrawing();
+    BeginFrame();
+
+    BeginFrameImGui();
 
     if LShowDemo then
       ImGui::ShowDemoWindow(address of LShowDemo);
@@ -86,8 +96,9 @@ begin
       ImGui::End();
     end;
 
-    rlImGuiEnd();
+    EndFrameImGui();
 
+    // After ImGui, still in frame units
     if IsMouseButtonDown(MOUSE_BUTTON_LEFT) then
       DrawText("Down", 10, 10, 20, GREEN);
     end;
@@ -95,6 +106,7 @@ begin
       DrawText("Focused", 100, 10, 20, WHITE);
     end;
 
+    EndFrame();
     EndDrawing();
   end;
 

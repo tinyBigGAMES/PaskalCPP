@@ -1,0 +1,441 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_raven_raylib.pcpp - Std library compliance: the raven_raylib unit
+  (res\libs\std\raven_raylib.pcpp), Raven drawn by raylib, in hidden
+  windows with the screen read back.
+
+  Before any window: InitRaven refuses, UpdateRaven is false, and DrawRaven
+  draws nothing (the screen is the clear colour where a button would be).
+  A plain raylib window: the Raven window takes the screen's size in
+  logical units and the window's DPI scale (GetWindowDpi / 96, the
+  framebuffer then exactly raylib's pixels); the button is drawn where
+  Raven laid it out, the window around the UI stays the game's clear
+  colour; a click injected on the choice box opens its popup, drawn below
+  the box where the screen was the clear colour before; what Raven copies
+  reaches the OS clipboard through UpdateRaven. CloseRaven ends Raven and
+  InitRaven starts it again. raylib_ext's frame window: the Raven window is
+  the frame's base size, its UI scale the letterbox's density, and the
+  button is drawn inside BeginFrame at its base-unit place through the
+  letterbox. CreateRavenTexture: refused before InitRaven and for a texture
+  of id 0; a render texture cleared by raylib shows in a Viewport, cleared
+  again it shows the new colour at once (Raven draws raylib's texture, no
+  copy); SetRavenTexture points it at another render texture, refuses a
+  texture Raven made from its own pixels and a texture of id 0; after
+  Rtexture_destroy and after CloseRaven, raylib's textures still draw
+  (Raven never unloads them).
+
+  The keyboard and the mouse from raylib need a focused window, which a
+  hidden test window never is; the examples (raven RavenRaylib and
+  RavenRaylibZip) and the atom 13 probe show them.
+
+  Each row prints ok or FAIL with its name; the last is `done <failures>`.
+  raylib's own log is off (SetTraceLogLevel(LOG_NONE)).
+*******************************************************************************/
+
+module exe std_raven_raylib;
+
+/*
+  @@test
+    kind run
+    expect
+    | ok no window: InitRaven refuses
+    | ok no window: UpdateRaven false
+    | ok window opens
+    | ok draw before InitRaven draws nothing
+    | ok InitRaven
+    | ok size is the screen in logical units
+    | ok scale is the window DPI scale
+    | ok button drawn where laid out
+    | ok the game shows around the UI
+    | ok below the choice is the game before
+    | ok popup drawn below the choice
+    | ok clipboard reaches the OS
+    | ok closed
+    | ok starts again
+    | ok frame window opens
+    | ok frame: size is the base size
+    | ok frame: scale is the letterbox density
+    | ok frame: button drawn through the letterbox
+    | ok texture: refused without Raven
+    | ok texture: id 0 refused
+    | ok texture: made
+    | ok texture: raylib's pixels in the Viewport
+    | ok texture: drawn again, shown at once
+    | ok texture: re-pointed
+    | ok texture: the new one shown
+    | ok texture: one Raven owns is not re-pointed
+    | ok texture: id 0 not re-pointed
+    | ok texture: destroyed, raylib's texture still draws
+    | ok texture: CloseRaven leaves raylib's texture
+    | done 0
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  raylib,
+  rlgl,
+  raylib_ext,
+  raven,
+  raven_raylib,
+  Math;
+
+var
+  GFails: int32;
+  // A colour Raven's default theme never draws
+  GClear: Color;
+
+routine Check(const AName: string; const AOk: bool);
+begin
+  if AOk then
+    println("ok {}", AName);
+  else
+    println("FAIL {}", AName);
+    GFails := GFails + 1;
+  end;
+end;
+
+routine Near(const AGot: float32; const AWant: float32): bool;
+begin
+  return (AGot - AWant < 0.001) and (AWant - AGot < 0.001);
+end;
+
+routine SameColor(const AA: Color; const AB: Color): bool;
+begin
+  return (AA.r = AB.r) and (AA.g = AB.g) and (AA.b = AB.b);
+end;
+
+// The screen's pixel at AX, AY (framebuffer pixels), before EndDrawing
+routine Pixel(const AX: float32; const AY: float32): Color;
+var
+  LShot: Image;
+  LResult: Color;
+begin
+  LShot := LoadImageFromScreen();
+  LResult := GetImageColor(LShot, int32(AX), int32(AY));
+  UnloadImage(LShot);
+  return LResult;
+end;
+
+// The middle of a widget in Raven's logical units
+routine Middle(const AWidget: Rid): ::Vector2;
+var
+  LX: float32;
+  LY: float32;
+  LW: float32;
+  LH: float32;
+  LResult: ::Vector2;
+begin
+  Rwidget_get_rect(AWidget, address of LX, address of LY, address of LW, address of LH);
+  LResult.x := LX + LW * 0.5f;
+  LResult.y := LY + LH * 0.5f;
+  return LResult;
+end;
+
+// The bottom of a widget in logical units
+routine Bottom(const AWidget: Rid): float32;
+var
+  LX: float32;
+  LY: float32;
+  LW: float32;
+  LH: float32;
+begin
+  Rwidget_get_rect(AWidget, address of LX, address of LY, address of LW, address of LH);
+  return LY + LH;
+end;
+
+// A column at the top left: a button, then a choice box with room below it
+routine BuildUi(var AButton: Rid; var AChoice: Rid): Rid;
+var
+  LWindow: Rid;
+  LBox: Rid;
+begin
+  LWindow := Rwindow_create("std_raven_raylib", 320, 240, R_WINDOW_DEFAULT);
+  LBox := Rwidget_create(R_WIDGET_VBOX);
+  Rwindow_set_content(LWindow, LBox);
+  AButton := Rwidget_add_child(LBox, Rbutton_create("Button"));
+  Rbutton_set_style(AButton, R_BUTTON_PRIMARY);
+  AChoice := Rwidget_add_child(LBox, Rwidget_create(R_WIDGET_COMBO_BOX));
+  Rcombo_box_add_item(AChoice, "One");
+  Rcombo_box_add_item(AChoice, "Two");
+  Rcombo_box_add_item(AChoice, "Three");
+  Rwidget_set_size(AChoice, 120.0f, -1.0f);
+  return LWindow;
+end;
+
+// Raven frames over a cleared screen, enough for an animation to end
+routine Frames(const AWindow: Rid; const ACount: int32);
+var
+  LFrame: int32;
+begin
+  for LFrame := 1 to ACount do
+    UpdateRaven(AWindow);
+    BeginDrawing();
+    ClearBackground(GClear);
+    DrawRaven(AWindow);
+    EndDrawing();
+  end;
+end;
+
+// Before any window, and a draw before InitRaven
+routine TestNoRaven();
+var
+  LColor: Color;
+begin
+  Check("no window: InitRaven refuses", not InitRaven("std_raven_raylib"));
+  Check("no window: UpdateRaven false", not UpdateRaven(0));
+  SetConfigFlags(FLAG_WINDOW_HIDDEN);
+  InitWindow(320, 240, "std_raven_raylib");
+  Check("window opens", IsWindowReady());
+  BeginDrawing();
+  ClearBackground(GClear);
+  DrawRaven(0);
+  LColor := Pixel(20.0f, 12.0f);
+  EndDrawing();
+  Check("draw before InitRaven draws nothing", SameColor(LColor, GClear));
+end;
+
+// The plain window (TestNoRaven's): layout, drawing, popup, clipboard
+routine TestWindow();
+var
+  LUi: Rid;
+  LButton: Rid;
+  LChoice: Rid;
+  LScale: float32;
+  LWidth: int32;
+  LHeight: int32;
+  LAt: ::Vector2;
+  LBelow: float32;
+  LButtonColor: Color;
+  LCorner: Color;
+  LBefore: Color;
+  LAfter: Color;
+begin
+  Check("InitRaven", InitRaven("std_raven_raylib"));
+  LUi := BuildUi(LButton, LChoice);
+  Frames(LUi, 3);
+
+  LScale := float32(float32(GetWindowDpi()) / 96.0);
+  Rwindow_get_size(LUi, address of LWidth, address of LHeight);
+  Check("size is the screen in logical units",
+    (LWidth = int32(Round(float32(GetScreenWidth()) / LScale))) and
+    (LHeight = int32(Round(float32(GetScreenHeight()) / LScale))));
+  Check("scale is the window DPI scale", Near(Rget_ui_scale(), LScale));
+
+  // Raven's logical units x the scale = raylib's pixels
+  LAt := Middle(LButton);
+  LBelow := Bottom(LChoice) + 30.0f;
+  UpdateRaven(LUi);
+  BeginDrawing();
+  ClearBackground(GClear);
+  DrawRaven(LUi);
+  LButtonColor := Pixel(LAt.x * LScale, LAt.y * LScale);
+  LCorner := Pixel(float32(GetScreenWidth() - 2), float32(GetScreenHeight() - 2));
+  LBefore := Pixel(Middle(LChoice).x * LScale, LBelow * LScale);
+  EndDrawing();
+  Check("button drawn where laid out", not SameColor(LButtonColor, GClear));
+  Check("the game shows around the UI", SameColor(LCorner, GClear));
+  Check("below the choice is the game before", SameColor(LBefore, GClear));
+
+  // A click on the choice box: its popup opens below it (fades in: frames)
+  LAt := Middle(LChoice);
+  Rwindow_inject_mouse_move(LUi, LAt.x, LAt.y);
+  Rwindow_inject_mouse_button(LUi, R_MOUSE_LEFT, R_TRUE);
+  Frames(LUi, 1);
+  Rwindow_inject_mouse_button(LUi, R_MOUSE_LEFT, R_FALSE);
+  Frames(LUi, 40);
+  UpdateRaven(LUi);
+  BeginDrawing();
+  ClearBackground(GClear);
+  DrawRaven(LUi);
+  LAfter := Pixel(LAt.x * LScale, LBelow * LScale);
+  EndDrawing();
+  Check("popup drawn below the choice", not SameColor(LAfter, GClear));
+
+  Rclipboard_set_text("std_raven_raylib copied");
+  UpdateRaven(LUi);
+  Check("clipboard reaches the OS", TextIsEqual(GetClipboardText(), "std_raven_raylib copied"));
+
+  CloseRaven();
+  Check("closed", (Ris_initialized() = 0) and not UpdateRaven(LUi));
+  Check("starts again", InitRaven("std_raven_raylib"));
+  CloseRaven();
+  CloseWindow();
+end;
+
+// raylib_ext's frame window: base units through the letterbox
+routine TestFrame();
+var
+  LUi: Rid;
+  LButton: Rid;
+  LChoice: Rid;
+  LBox: Rectangle;
+  LZoom: float32;
+  LWidth: int32;
+  LHeight: int32;
+  LAt: ::Vector2;
+  LColor: Color;
+  LFrame: int32;
+begin
+  SetConfigFlags(FLAG_WINDOW_HIDDEN);
+  Check("frame window opens", InitFrameWindow(320, 180, "std_raven_raylib"));
+  InitRaven("std_raven_raylib");
+  LUi := BuildUi(LButton, LChoice);
+  SetFrameColor(GClear);
+  for LFrame := 1 to 3 do
+    UpdateRaven(LUi);
+    BeginDrawing();
+    BeginFrame();
+    DrawRaven(LUi);
+    EndFrame();
+    EndDrawing();
+  end;
+
+  Rwindow_get_size(LUi, address of LWidth, address of LHeight);
+  Check("frame: size is the base size", (LWidth = 320) and (LHeight = 180));
+  LBox := GetLetterboxRect(GetScreenWidth(), GetScreenHeight(), 320, 180);
+  LZoom := LBox.width / 320.0f;
+  Check("frame: scale is the letterbox density", Near(Rget_ui_scale(), LZoom));
+
+  LAt := Middle(LButton);
+  UpdateRaven(LUi);
+  BeginDrawing();
+  BeginFrame();
+  DrawRaven(LUi);
+  EndFrame();
+  LColor := Pixel(LBox.x + LAt.x * LZoom, LBox.y + LAt.y * LZoom);
+  EndDrawing();
+  Check("frame: button drawn through the letterbox", not SameColor(LColor, GClear));
+  CloseRaven();
+  CloseWindow();
+end;
+
+// A render texture cleared to AColor by raylib
+routine FillTarget(const ATarget: RenderTexture2D; const AColor: Color);
+begin
+  BeginTextureMode(ATarget);
+  ClearBackground(AColor);
+  EndTextureMode();
+end;
+
+// The screen's pixel at the middle of AView after one Raven frame
+routine ViewPixel(const AUi: Rid; const AView: Rid; const AScale: float32): Color;
+var
+  LAt: ::Vector2;
+  LResult: Color;
+begin
+  UpdateRaven(AUi);
+  LAt := Middle(AView);
+  BeginDrawing();
+  ClearBackground(GClear);
+  DrawRaven(AUi);
+  LResult := Pixel(LAt.x * AScale, LAt.y * AScale);
+  EndDrawing();
+  return LResult;
+end;
+
+// A raylib texture drawn at the top left, read back at its middle. raylib
+// only queues DrawTexture in its batch, so the batch is drawn before the read
+routine TexturePixel(const ATexture: Texture2D): Color;
+var
+  LResult: Color;
+begin
+  BeginDrawing();
+  ClearBackground(GClear);
+  DrawTexture(ATexture, 0, 0, WHITE);
+  rlDrawRenderBatchActive();
+  LResult := Pixel(float32(ATexture.width div 2), float32(ATexture.height div 2));
+  EndDrawing();
+  return LResult;
+end;
+
+// raylib's render textures in a Viewport through CreateRavenTexture
+routine TestTexture();
+var
+  LUi: Rid;
+  LBox: Rid;
+  LView: Rid;
+  LRaven: Rid;
+  LOwn: Rid;
+  LTarget: RenderTexture2D;
+  LSecond: RenderTexture2D;
+  LNone: Texture2D;
+  LScale: float32;
+  LWhite: array[0..3] of uint8;
+  LColor: Color;
+begin
+  SetConfigFlags(FLAG_WINDOW_HIDDEN);
+  InitWindow(320, 240, "std_raven_raylib");
+  LTarget := LoadRenderTexture(64, 64);
+  LSecond := LoadRenderTexture(32, 32);
+  Check("texture: refused without Raven", CreateRavenTexture(LTarget.texture) = R_INVALID_ID);
+  InitRaven("std_raven_raylib");
+  LUi := Rwindow_create("std_raven_raylib", 320, 240, R_WINDOW_DEFAULT);
+  LBox := Rwidget_create(R_WIDGET_VBOX);
+  Rwindow_set_content(LUi, LBox);
+  LView := Rwidget_add_child(LBox, Rwidget_create(R_WIDGET_VIEWPORT));
+  Rwidget_set_size(LView, 160.0f, 120.0f);
+  LNone := LTarget.texture;
+  LNone.id := 0;
+  Check("texture: id 0 refused", CreateRavenTexture(LNone) = R_INVALID_ID);
+
+  FillTarget(LTarget, GREEN);
+  LRaven := CreateRavenTexture(LTarget.texture);
+  Check("texture: made", LRaven <> R_INVALID_ID);
+  Rviewport_set_texture(LView, LRaven);
+  Frames(LUi, 3);
+  LScale := Rget_ui_scale();
+  Check("texture: raylib's pixels in the Viewport", SameColor(ViewPixel(LUi, LView, LScale), GREEN));
+  FillTarget(LTarget, BLUE);
+  Check("texture: drawn again, shown at once", SameColor(ViewPixel(LUi, LView, LScale), BLUE));
+
+  FillTarget(LSecond, YELLOW);
+  Check("texture: re-pointed", SetRavenTexture(LRaven, LSecond.texture));
+  Check("texture: the new one shown", SameColor(ViewPixel(LUi, LView, LScale), YELLOW));
+  LWhite[0] := 255;
+  LWhite[1] := 255;
+  LWhite[2] := 255;
+  LWhite[3] := 255;
+  LOwn := Rtexture_create_from_pixels(address of LWhite[0], 1, 1);
+  Check("texture: one Raven owns is not re-pointed", not SetRavenTexture(LOwn, LSecond.texture));
+  Check("texture: id 0 not re-pointed", not SetRavenTexture(LRaven, LNone));
+
+  Rviewport_set_texture(LView, R_INVALID_ID);
+  Rtexture_destroy(LRaven);
+  Check("texture: destroyed, raylib's texture still draws", SameColor(TexturePixel(LSecond.texture), YELLOW));
+  CloseRaven();
+  LColor := TexturePixel(LTarget.texture);
+  Check("texture: CloseRaven leaves raylib's texture", SameColor(LColor, BLUE));
+  UnloadRenderTexture(LSecond);
+  UnloadRenderTexture(LTarget);
+  CloseWindow();
+end;
+
+begin
+  GFails := 0;
+  GClear.r := 255;
+  GClear.g := 0;
+  GClear.b := 255;
+  GClear.a := 255;
+  SetTraceLogLevel(LOG_NONE);
+  TestNoRaven();
+  if IsWindowReady() then
+    TestWindow();
+  end;
+  TestFrame();
+  TestTexture();
+  println("done {}", GFails);
+end.

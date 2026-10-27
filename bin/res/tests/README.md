@@ -70,7 +70,9 @@ A test describes itself in one block, anywhere in the file, inside a `/* */` com
 | `dep` | builds it only when a test that needs it runs | never a result of its own |
 | `unit` | analyzes it, builds nothing | it reports exactly the reports its markers name |
 | `cli` | runs `pcpp.exe` itself with `args` | its output equals the `expect` lines and its exit code equals `exitcode` |
+| `manual` | nothing: a person checks it by hand in the editor | never a result: `testbed -list -kind manual` lists these files |
 
+- A `manual` file is one only a person can check: what the editor shows (the `lsp_*` files) or what the debugger does (the `dbg_*` files). The suite finds and lists it but never runs it, even when it is named alone.
 - A `tests` file turns on `@unitTestMode on;` itself and holds `test` blocks (see [Unit testing](https://paskalcpp.org/docs/testing.html)). A file with no tests fails: a vacuous pass would hide a broken file.
 - A `cli` test checks pcpp's own command line. It runs once, on this machine, at `x86_64-windows-gnu`, debug, console.
 
@@ -78,7 +80,7 @@ A test describes itself in one block, anywhere in the file, inside a `/* */` com
 
 | Key | Value | Kinds |
 |---|---|---|
-| `kind` | `run` `build` `error` `tests` `dep` `unit` `cli` | every kind |
+| `kind` | `run` `build` `error` `tests` `dep` `unit` `cli` `manual` | every kind |
 | `deps` | the stems of the `dep` tests this test needs | every kind but `cli` |
 | `targets` | `x86_64-windows-gnu` and / or `x86_64-linux-gnu` | every kind but `cli` |
 | `opt` | `debug` `safe` `fast` `small` | every kind but `cli` |
@@ -163,7 +165,7 @@ A test that links a library or a DLL the suite must build first names it in `dep
 Run `testbed.exe` from the `bin` folder:
 
 ```
-testbed -all                                   every test, every cell
+testbed -all                                   every test, every cell (each target at every optimize level)
 testbed type.type_record                       one test
 testbed "type.*"                               every test of an area
 testbed "type.type_record*"                    a glob over ids
@@ -173,10 +175,17 @@ testbed -all -opt fast                         one optimize level (repeat -opt f
 testbed -all -kind error                       one kind
 testbed -failed                                only what failed in the last run
 testbed -list "lex.*"                          list the tests (-v: every cell)
+testbed -root C:\my\tests -all                 only the tests under one folder
+testbed -rpc status                            the running testbed's progress, as JSON
+testbed -rpc stop                              stop the running testbed cleanly
+testbed -rpc wait 600                          wait for it to finish (its exit code)
 testbed -h                                     every option
 ```
 
-- The exit code is 0 when everything passed, 1 when something failed, 2 for bad arguments, and 3 when the run was stopped.
+- The exit code is 0 when everything passed, 1 when something failed, 2 for bad arguments, and 3 when the run was stopped. `-rpc` adds 4 when no testbed is running and 5 when `-rpc wait` runs out of time.
+- A run goes cell by cell: every test on Windows at debug, then at safe, fast and small, then the same on Linux, so each target's toolchain and build cache stay warm instead of every test switching targets.
+- One testbed runs per output folder: a second one started while the first runs is refused with TS0111.
+- A running testbed answers `testbed -rpc <command>` from another console: `status` (the cell, the test, the counts and how long since it last checked in, as one JSON line), `failures` (the failed tests so far, as JSON), `stop` (the same as the stop key: the running test finishes, nothing more starts), `abort` (the same as pressing it twice) and `wait [seconds]` (until the run ends; exits with the run's own exit code).
 - To stop a run cleanly, press `Ctrl+Shift+Alt+X` (it works from any window, so it also stops a run with no console) or create the file `bin\output\testbed.stop`. The test that is running finishes, nothing more starts, and the summary says `STOPPED after N of M`. Press again (or create the file again) to end the running test at once: its processes are ended and it is listed as skipped, `stopped`. `Ctrl+C` is not a clean stop.
 - A run prints one line per test and cell, and the first difference of each failure, then the totals. The last run's results are kept in `bin\output\testsuite-results.txt`, which `-failed` reads.
 - Linux tests run through WSL. On a machine without WSL they are skipped with the reason, never counted as passed.

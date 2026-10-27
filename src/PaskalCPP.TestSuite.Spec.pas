@@ -351,6 +351,11 @@ type
     // file a test imports). False = discovery errors reported (FErrors)
     function Scan(const AFilename: string; out ASpec: TPCTestSpec;
       out AHasSpec: Boolean): Boolean;
+    // The spec of an example program (an example root's file): its own spec
+    // when it has one, else the implied one, a build test in the default
+    // cells whose range is the file's first byte. False = discovery errors
+    // reported (FErrors)
+    function ScanExample(const AFilename: string; out ASpec: TPCTestSpec): Boolean;
     // AFilename's report markers, appended to AMarkers. False = a malformed
     // marker or no text (reported)
     function ScanMarkers(const AFilename: string; var AMarkers: TArray<TPCTestMarker>): Boolean;
@@ -1324,6 +1329,27 @@ begin
   DoCheckCppBlocks();
   if AHasSpec then
     DoFinish();
+  ASpec := FSpec;
+  Result := not FHadError;
+end;
+
+function TPCTestSpecScanner.ScanExample(const AFilename: string;
+  out ASpec: TPCTestSpec): Boolean;
+var
+  LHasSpec: Boolean;
+begin
+  Result := Scan(AFilename, ASpec, LHasSpec);
+  if (not Result) or LHasSpec then
+    Exit;
+
+  // No spec: the example must build, clean, in the default cells. The
+  // file's state from Scan is still loaded, so DoFinish applies the same
+  // defaults a written "kind build" spec gets
+  FSpec.Kind := skBuild;
+  FHasKind := True;
+  FSpec.SpecRange.Clear();
+  FStream.SourceText().FillRange(FSpec.SpecRange, 0, 0);
+  DoFinish();
   ASpec := FSpec;
   Result := not FHadError;
 end;

@@ -1,0 +1,101 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  LdtkTownZip.pcpp - LDtkLoader + raylib example: LdtkTown's project read
+  straight from bin\assets.zip (password "PaskalCPP"). LoadLdtkProjectZip
+  reads the .ldtk and its tileset's image
+  (../tilesets/tinytown/tinytown.png) from the archive, as LDtk wrote it
+  relative to the project; nothing is unpacked to disk. The "Town" level is
+  drawn zoomed 2x on its own background colour in raylib_ext's frame window
+  (960 x 544 units, sized for the monitor's DPI, scaled and letterboxed on
+  resize); F11 toggles fullscreen; Escape or the close button ends it.
+==============================================================================*/
+
+module exe LdtkTownZip;
+
+import
+  ldtkloader,
+  ldtk_ext,
+  raylib,
+  raylib_ext,
+  Math;
+
+const
+  CLevel: string = "Town";
+  CZoom: float32 = 2.0f;
+
+var
+  LWorld: LdtkProject;
+  LLevel: ptr to const ldtk::Level;
+  LBackground: Color;
+  LCamera: Camera2D;
+  LSize: ::Vector2;
+
+begin
+  SetConfigFlags(FLAG_VSYNC_HINT);
+  // The frame opens before the project loads: its textures need the window
+  if not InitFrameWindow(960, 544, "PaskalCPP + LDtk: Tiny Town from a zip") then
+    println("the window did not open");
+    return;
+  end;
+  SetTargetFPS(60);
+  if not LoadLdtkProjectZip("$P:../../assets.zip", "res/assets/maps/overworld.ldtk", "PaskalCPP",
+    LWorld) then
+    println("the project could not be loaded from assets.zip: {}", LWorld.ErrorMessage);
+    CloseWindow();
+    return;
+  end;
+  LLevel := FindLdtkLevel(LWorld, CLevel);
+  if LLevel = nil then
+    println("the project has no level \"{}\"", CLevel);
+    UnloadLdtkProject(LWorld);
+    CloseWindow();
+    return;
+  end;
+  LBackground.r := LLevel^.bg_color.r;
+  LBackground.g := LLevel^.bg_color.g;
+  LBackground.b := LLevel^.bg_color.b;
+  LBackground.a := 255;
+  SetFrameColor(LBackground);
+  // The whole level fills the frame: CZoom, or less when the level is bigger
+  LSize := GetLdtkLevelSize(LWorld, CLevel);
+  LCamera.offset.x := 0.0f;
+  LCamera.offset.y := 0.0f;
+  LCamera.target.x := 0.0f;
+  LCamera.target.y := 0.0f;
+  LCamera.rotation := 0.0f;
+  LCamera.zoom := CZoom;
+  if (LSize.x > 0.0f) and (LSize.y > 0.0f) then
+    LCamera.zoom := Min(CZoom, Min(float32(GetFrameWidth()) / LSize.x, float32(GetFrameHeight()) / LSize.y));
+  end;
+  while not WindowShouldClose() do
+    if IsKeyPressed(KEY_F11) then
+      ToggleFrameFullscreen();
+    end;
+    BeginDrawing();
+    BeginFrame();
+    // The level's camera composed with the frame's
+    BeginFrameMode2D(LCamera);
+    DrawLdtkLevel(LWorld, CLevel, 0.0f, 0.0f, WHITE);
+    EndFrameMode2D();
+    DrawRectangle(0, 0, GetFrameWidth(), 28, Fade(BLACK, 0.6f));
+    DrawText(TextFormat("loaded from assets.zip: %d layers, %d image(s)",
+      int32(LLevel^.allLayers().size()), int32(len(LWorld.Images))), 10, 6, 20, RAYWHITE);
+    EndFrame();
+    EndDrawing();
+  end;
+  UnloadLdtkProject(LWorld);
+  CloseWindow();
+end.

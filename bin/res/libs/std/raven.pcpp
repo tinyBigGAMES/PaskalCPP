@@ -1,0 +1,101 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  raven.pcpp - the raven unit: `import raven;` builds user interfaces with
+  Raven (https://github.com/oscar-soirey/Raven), a GUI library in C11:
+  widgets, layout panels, themes, XML-described windows, text input, menus,
+  dialogs. A self-describing vendor module: it owns every include path,
+  library path and link library it needs, per official target. The library
+  is libraven.a (one per target), built by PaskalCPP-Libs' build-raven.cmd
+  from Raven's own CMake project (static; examples, tests, tools and web
+  pages off), shipped under Raven's Apache-2.0 license with its NOTICE and
+  the licenses of the components it bundles (stb, Roboto, Roboto Mono,
+  tweetnacl) in res\libs\vendor\raven. On Windows it links winhttp user32
+  gdi32 shell32 comdlg32 ole32; on Linux X11 pthread m dl. Its Vulkan
+  renderer opens the Vulkan loader at run time: nothing links it.
+
+  Inside a raylib program Raven is used through raven_raylib (raylib keeps
+  the window, the loop, audio and the game's drawing; Raven draws its
+  widgets in the raylib frame). On its own, the API is Raven's C API as it
+  ships, called straight from PaskalCPP:
+  - Setup: Rinit(R_BACKEND_VULKAN) opens Raven with its own OS windows;
+    Rinit_ex(address of LDesc) takes an RInitDesc (backend, app_name,
+    headless = true for no OS window, disable_render_thread). R_BACKEND_NULL
+    renders nothing (headless runs and tests). Rshutdown() ends it.
+  - Windows and widgets: Rwindow_create(title, width, height,
+    R_WINDOW_DEFAULT) gives a window's Rid; Rwidget_create(R_WIDGET_VBOX)
+    and the kind constructors (Rlabel_create, Rbutton_create, ...) give
+    widgets; Rwidget_add_child(parent, child) places a child and returns
+    it; Rwindow_set_content(window, root) sets what a window shows.
+  - Each frame: Rdraw_frame() processes the pending events, runs the
+    posted tasks and timers, then lays out and paints the windows that
+    changed (false once Rquit was called or the last window is closed); a
+    headless window takes its input through Rwindow_inject_mouse_move /
+    _mouse_button / _mouse_wheel / _key / _text.
+  - Callbacks are C functions: `routine clink OnClicked(AButton: Rid;
+    AUserData: ptr)` passed by its bare name, e.g. to
+    Rbutton_set_clicked_callback(button, OnClicked, nil).
+  - Errors: Rerror_set_callback(handler) reports Raven's errors with their
+    code, severity and detail (Rerror_to_string / Rseverity_to_string).
+  - Files: every load (XML windows, themes, fonts, textures, Rfile_read)
+    looks in Raven's memory files first (Rfile_register_memory), then opens
+    the path with the C runtime, which HookIO reaches: a zip such as
+    bin\assets.zip loads with Raven's own calls, through an io:// prefix
+    (RegisterIOSource(CreateZipIOSource(archive, password)) + "/entry") or
+    with the zip as the thread's path source (SetIOThreadPathSource) and the
+    entry's own name. An XML window's images and fonts are named relative to
+    it and come from the same place.
+==============================================================================*/
+
+module unit raven;
+
+// Self-describing vendor module: it owns every path it needs.
+
+@addincludepath "$P:res/libs/vendor/raven/include";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/raven/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/linux64/lib";
+  @addlibrarypath "$P:res/libs/vendor/raven/lib/x86_64-linux-gnu";
+@else
+  @message error "raven: unsupported target";
+@endif
+
+@linklibrary "raven";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @linklibrary "winhttp";
+  @linklibrary "user32";
+  @linklibrary "gdi32";
+  @linklibrary "shell32";
+  @linklibrary "comdlg32";
+  @linklibrary "ole32";
+@elseif TARGET_X86_64_LINUX_GNU
+  @linklibrary "X11";
+  @linklibrary "pthread";
+  @linklibrary "m";
+  @linklibrary "dl";
+@endif
+
+// The header goes to this unit's header, so every importer sees Raven's API
+cpp header;
+
+#include "Raven.h"
+
+end.

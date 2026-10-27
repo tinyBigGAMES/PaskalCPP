@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down" width="2" height="2" tilewidth="8" tileheight="8" infinite="0" nextlayerid="9" nextobjectid="3">
+ <tileset firstgid="1" source="std_tmxlite_tiles.tsx"/>
+ <layer id="1" name="gzip" width="2" height="2">
+  <data encoding="base64" compression="gzip">H4sIAAAAAAACCmNkYGhggAImIAYAWDewSBAAAAA=</data>
+ </layer>
+ <layer id="2" name="zstd" width="2" height="2">
+  <data encoding="base64" compression="zstd">KLUv/SAQgQAAAAAAAAEAAEABAAAgAAAAAA==</data>
+ </layer>
+</map>

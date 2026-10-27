@@ -3918,6 +3918,7 @@ var
   LBuildZigPath: string;
   LContent: string;
   LUTF8NoBOM: TEncoding;
+  LError: string;
 begin
   Result := False;
 
@@ -3951,13 +3952,16 @@ begin
   LBuildZigPath := TUtils.JoinResolvedPath(FOutputPath, 'build.zig');
   LContent := GenerateBuildZig();
 
-  // Write without a BOM - Zig does not accept a BOM in source files
+  // Write without a BOM - Zig does not accept a BOM in source files. Written
+  // only when its bytes changed (TUtils.WriteBytesIfChanged): zig checks
+  // time stamps, and an unchanged build.zig keeps its build runner cached
   LUTF8NoBOM := TUTF8Encoding.Create(False);
   try
     try
       TUtils.CreateDirInPath(LBuildZigPath);
-      TFile.WriteAllText(LBuildZigPath, LContent, LUTF8NoBOM);
-      Result := True;
+      Result := TUtils.WriteBytesIfChanged(LBuildZigPath, LUTF8NoBOM.GetBytes(LContent), LError);
+      if (not Result) and Assigned(FErrors) then
+        FErrors.Add(esError, PC_ERR_ZIGBUILD_SAVEFAILED, RSZigBuildSaveFailed, [LError]);
     except
       on E: Exception do
       begin

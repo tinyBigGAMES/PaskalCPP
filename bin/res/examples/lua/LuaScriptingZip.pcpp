@@ -1,0 +1,70 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  LuaScriptingZip.pcpp - Lua example (import lua): a script run straight
+  from bin\assets.zip. The entry res/assets/scripts/hello.lua (password
+  PaskalCPP) is opened as a CustomIO IO and registered with HookIO; Lua's
+  own luaL_loadfile then reads its io:// path through the hooks, with no
+  file unpacked to disk and no Lua-side change. The script's globals and a
+  function it defines are read back from PaskalCPP.
+==============================================================================*/
+
+module exe LuaScriptingZip;
+
+import
+  lua,
+  CustomIO,
+  HookIO;
+
+var
+  LZip: IO;
+  LPrefix: string;
+  LL: ptr to lua_State;
+  LResult: int32;
+
+begin
+  LZip := CreateZipFileIO("$P:../../assets.zip", "res/assets/scripts/hello.lua", "PaskalCPP");
+  if LZip = nil then
+    println("cannot open hello.lua in assets.zip");
+    return;
+  end;
+  LPrefix := RegisterIO(LZip);
+
+  LL := luaL_newstate();
+  luaL_openlibs(LL);
+  // luaL_loadfile reads the zip entry through its io:// path
+  LResult := luaL_loadfile(LL, (LPrefix + "/hello.lua").c_str());
+  if LResult = LUA_OK then
+    LResult := lua_pcall(LL, 0, 0, 0);
+  end;
+  if LResult <> LUA_OK then
+    println("hello.lua failed: {}", lua_tostring(LL, -1));
+  else
+    lua_getglobal(LL, "greeting");
+    lua_getglobal(LL, "answer");
+    println("{} (answer {})", lua_tostring(LL, -2), lua_tointeger(LL, -1));
+    lua_pop(LL, 2);
+    // Call the script's own function
+    lua_getglobal(LL, "square");
+    lua_pushinteger(LL, 12);
+    if lua_pcall(LL, 1, 1, 0) = LUA_OK then
+      println("square(12) = {}", lua_tointeger(LL, -1));
+    end;
+    lua_pop(LL, 1);
+  end;
+  lua_close(LL);
+  UnregisterIO(LPrefix);
+  IOClose(LZip);
+end.

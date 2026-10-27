@@ -27,6 +27,7 @@ module exe VideoPlayer;
 
 import
   sfml_ext,
+  Math,
   SysUtils;
 
 const
@@ -76,7 +77,7 @@ begin
     println("{} did not open", VideoEntry(AIndex));
     return false;
   end;
-  LScale := std::min(960.0f / float32(AVideo.getSize().x), 540.0f / float32(AVideo.getSize().y));
+  LScale := Min(960.0f / float32(AVideo.getSize().x), 540.0f / float32(AVideo.getSize().y));
   AVideo.setScale(sf::Vector2f(LScale, LScale));
   AVideo.setOrigin(sf::Vector2f(float32(AVideo.getSize().x) / 2.0f, float32(AVideo.getSize().y) / 2.0f));
   AVideo.setPosition(sf::Vector2f(480.0f, 270.0f));

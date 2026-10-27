@@ -1,0 +1,335 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_ldtk_ext.pcpp - Std library compliance: the ldtk_ext unit
+  (res\libs\std\ldtk_ext.pcpp)
+
+  The fixtures of std_ldtkloader are loaded and drawn into a clear render
+  texture in a hidden window, and the pixels read back. Tile 0 of the
+  fixture tileset has four quadrants of their own colour (red, green / blue,
+  white), tile 1 is yellow, so each cell prints its quadrants' colours (R G
+  B W Y, . clear, ? blended) and every flip shows where LDtk puts them. The
+  expected rows are printed by scripts\vendor\gen_ldtk_fixtures.py from
+  LDtk's own rules (layer order, tile place and offset, flip bits), not
+  from ldtk_ext: the Start level's four flips, its half-alpha tile, its
+  offset layer and its hidden layer left out; the hidden layer drawn on
+  demand (DrawLdtkLayer); the Cave level; the level saved in its own file.
+
+  Then: FindLdtkLevel / FindLdtkLayer and GetLdtkLevelSize, a name that is
+  not there included; LoadLdtkProjectIO over a folder source draws what the
+  file form draws (its level file too) and puts back the thread's own path
+  source; the example's town from bin\assets.zip (LoadLdtkProjectZip) draws
+  the same pixels as from its files. The refusals, each with its reason in
+  ErrorMessage and the project left empty: a project the source does not
+  have, a nil source, a tileset image that is not there, a file that is not
+  valid JSON, a wrong zip password.
+*******************************************************************************/
+
+module exe std_ldtk_ext;
+
+/*
+  @@test
+    kind run
+    expect
+    | load true images 1 tilesets 1 valid true error []
+    | start row 0 RGBW GRWB BWRG WBGR YYYY
+    | start row 1 YYYY .... ???? YYYY ....
+    | hidden layer drawn row 0 YYYY YYYY YYYY YYYY YYYY
+    | cave row 0 YYYY RGBW
+    | ext row 0 WBGR YYYY
+    | find Start true Cave true Nope false layer Ground true Nope false from nil false
+    | size Start 40x16 Cave 16x8 Nope 0x0
+    | io load true same pixels true ext same pixels true thread source kept true
+    | io missing false valid false from LDtkLoader true
+    | nil source false error [ldtk_ext: no source]
+    | no image false valid false tileset Quads true path true
+    | bad json false parse error true
+    | zip load true file load true levels 1 same pixels true
+    | zip wrong password false valid false from LDtkLoader true
+    | [Heap] Allocs: 21, Frees: 21, Leaked: 0
+  @@end
+*/
+
+import
+  ldtkloader,
+  ldtk_ext,
+  raylib,
+  CustomIO,
+  HookIO,
+  SysUtils;
+
+const
+  CFixtures: string = "$P:../../res/tests/std/fixtures/";
+  CArchive: string = "$P:../../assets.zip";
+  CTownEntry: string = "res/assets/maps/overworld.ldtk";
+  CTownFile: string = "$P:../../res/assets/maps/overworld.ldtk";
+
+// A pixel as one letter: R G B W Y for the fixture colours, . clear, ?
+// anything else (a blended pixel)
+routine Letter(const AImage: Image; const AX: int32; const AY: int32): string;
+var
+  LColor: Color;
+begin
+  LColor := GetImageColor(AImage, AX, AY);
+  if LColor.a = 0 then
+    return ".";
+  end;
+  if LColor.a <> 255 then
+    return "?";
+  end;
+  if (LColor.r = 255) and (LColor.g = 0) and (LColor.b = 0) then
+    return "R";
+  end;
+  if (LColor.r = 0) and (LColor.g = 255) and (LColor.b = 0) then
+    return "G";
+  end;
+  if (LColor.r = 0) and (LColor.g = 0) and (LColor.b = 255) then
+    return "B";
+  end;
+  if (LColor.r = 255) and (LColor.g = 255) and (LColor.b = 255) then
+    return "W";
+  end;
+  if (LColor.r = 255) and (LColor.g = 255) and (LColor.b = 0) then
+    return "Y";
+  end;
+  return "?";
+end;
+
+// A level (or one layer of it when ALayerName is not "") drawn at (0, 0) on
+// a clear AWidth x AHeight render texture, read back top row first
+routine Render(const AProject: LdtkProject; const ALevelName: string; const ALayerName: string;
+  const AWidth: int32; const AHeight: int32): Image;
+var
+  LTarget: RenderTexture2D;
+  LImage: Image;
+begin
+  LTarget := LoadRenderTexture(AWidth, AHeight);
+  BeginTextureMode(LTarget);
+  ClearBackground(BLANK);
+  if ALayerName = "" then
+    DrawLdtkLevel(AProject, ALevelName, 0.0f, 0.0f, WHITE);
+  else
+    DrawLdtkLayer(AProject, ALevelName, ALayerName, 0.0f, 0.0f, WHITE);
+  end;
+  EndTextureMode();
+  LImage := LoadImageFromTexture(LTarget.texture);
+  // A render texture's rows come back bottom first
+  ImageFlipVertical(address of LImage);
+  UnloadRenderTexture(LTarget);
+  return LImage;
+end;
+
+// The quadrant letters of the 8x8 cells of one row: " TLTRBLBR" per cell
+routine CellRow(const AImage: Image; const ARow: int32; const ACells: int32): string;
+var
+  LCol: int32;
+  LText: string;
+begin
+  LText := "";
+  for LCol := 0 to ACells - 1 do
+    LText := LText + " " + Letter(AImage, LCol * 8 + 2, ARow * 8 + 2) +
+      Letter(AImage, LCol * 8 + 6, ARow * 8 + 2) + Letter(AImage, LCol * 8 + 2, ARow * 8 + 6) +
+      Letter(AImage, LCol * 8 + 6, ARow * 8 + 6);
+  end;
+  return LText;
+end;
+
+// True when two images hold the same pixels
+routine SamePixels(const AFirst: Image; const ASecond: Image): bool;
+var
+  LX: int32;
+  LY: int32;
+  LA: Color;
+  LB: Color;
+begin
+  if (AFirst.width <> ASecond.width) or (AFirst.height <> ASecond.height) then
+    return false;
+  end;
+  for LY := 0 to AFirst.height - 1 do
+    for LX := 0 to AFirst.width - 1 do
+      LA := GetImageColor(AFirst, LX, LY);
+      LB := GetImageColor(ASecond, LX, LY);
+      if (LA.r <> LB.r) or (LA.g <> LB.g) or (LA.b <> LB.b) or (LA.a <> LB.a) then
+        return false;
+      end;
+    end;
+  end;
+  return true;
+end;
+
+// The main fixture: what it loaded, its levels' pixels and the hidden layer
+// drawn on demand; the external-level fixture's pixels
+routine TestDraw();
+var
+  LProject: LdtkProject;
+  LLoaded: bool;
+  LImage: Image;
+begin
+  LLoaded := LoadLdtkProject(CFixtures + "std_ldtkloader.ldtk", LProject);
+  println("load {} images {} tilesets {} valid {} error [{}]", LLoaded, len(LProject.Images),
+    len(LProject.Tilesets), IsLdtkProjectValid(LProject), LProject.ErrorMessage);
+  LImage := Render(LProject, "Start", "", 40, 16);
+  println("start row 0{}", CellRow(LImage, 0, 5));
+  println("start row 1{}", CellRow(LImage, 1, 5));
+  UnloadImage(LImage);
+  LImage := Render(LProject, "Start", "Hidden", 40, 16);
+  println("hidden layer drawn row 0{}", CellRow(LImage, 0, 5));
+  UnloadImage(LImage);
+  LImage := Render(LProject, "Cave", "", 16, 8);
+  println("cave row 0{}", CellRow(LImage, 0, 2));
+  UnloadImage(LImage);
+  UnloadLdtkProject(LProject);
+
+  LoadLdtkProject(CFixtures + "std_ldtkloader_ext.ldtk", LProject);
+  LImage := Render(LProject, "Outside", "", 16, 8);
+  println("ext row 0{}", CellRow(LImage, 0, 2));
+  UnloadImage(LImage);
+  UnloadLdtkProject(LProject);
+end;
+
+// The lookups by name, and the levels' sizes
+routine TestFind();
+var
+  LProject: LdtkProject;
+  LStart: ptr to const ldtk::Level;
+begin
+  LoadLdtkProject(CFixtures + "std_ldtkloader.ldtk", LProject);
+  LStart := FindLdtkLevel(LProject, "Start");
+  println("find Start {} Cave {} Nope {} layer Ground {} Nope {} from nil {}", LStart <> nil,
+    FindLdtkLevel(LProject, "Cave") <> nil, FindLdtkLevel(LProject, "Nope") <> nil,
+    FindLdtkLayer(LStart, "Ground") <> nil, FindLdtkLayer(LStart, "Nope") <> nil,
+    FindLdtkLayer(nil, "Ground") <> nil);
+  println("size Start {}x{} Cave {}x{} Nope {}x{}", int32(GetLdtkLevelSize(LProject, "Start").x),
+    int32(GetLdtkLevelSize(LProject, "Start").y), int32(GetLdtkLevelSize(LProject, "Cave").x),
+    int32(GetLdtkLevelSize(LProject, "Cave").y), int32(GetLdtkLevelSize(LProject, "Nope").x),
+    int32(GetLdtkLevelSize(LProject, "Nope").y));
+  UnloadLdtkProject(LProject);
+end;
+
+// A level drawn from a project loaded from its file and from AFolder: the
+// same pixels
+routine SameAsFile(const AFolder: IOSource; const AFile: string; const ALevelName: string;
+  const AWidth: int32; const AHeight: int32): bool;
+var
+  LFromFile: LdtkProject;
+  LFromIO: LdtkProject;
+  LFileImage: Image;
+  LIOImage: Image;
+  LResult: bool;
+begin
+  LoadLdtkProject(CFixtures + AFile, LFromFile);
+  LoadLdtkProjectIO(AFolder, AFile, LFromIO);
+  LFileImage := Render(LFromFile, ALevelName, "", AWidth, AHeight);
+  LIOImage := Render(LFromIO, ALevelName, "", AWidth, AHeight);
+  LResult := IsLdtkProjectValid(LFromIO) and SamePixels(LFileImage, LIOImage);
+  UnloadImage(LFileImage);
+  UnloadImage(LIOImage);
+  UnloadLdtkProject(LFromFile);
+  UnloadLdtkProject(LFromIO);
+  return LResult;
+end;
+
+// The IO form over a folder source: the same pixels as the file form (the
+// level file read through the source too), the thread's own path source put
+// back; then the refusals
+routine TestIO();
+var
+  LFolder: IOSource;
+  LKept: IOSource;
+  LProject: LdtkProject;
+  LLoaded: bool;
+  LSame: bool;
+  LSameExt: bool;
+begin
+  LFolder := CreateFolderIOSource(ResolvePath(CFixtures));
+  // A thread source of the caller's own, which the load must put back
+  LKept := CreateFolderIOSource(ExeDir());
+  SetIOThreadPathSource(LKept);
+  LLoaded := LoadLdtkProjectIO(LFolder, "std_ldtkloader.ldtk", LProject);
+  LSame := SameAsFile(LFolder, "std_ldtkloader.ldtk", "Start", 40, 16);
+  LSameExt := SameAsFile(LFolder, "std_ldtkloader_ext.ldtk", "Outside", 16, 8);
+  println("io load {} same pixels {} ext same pixels {} thread source kept {}", LLoaded, LSame,
+    LSameExt, GetIOThreadPathSource() = LKept);
+  SetIOThreadPathSource(nil);
+
+  LLoaded := LoadLdtkProjectIO(LFolder, "std_ldtkloader_nowhere.ldtk", LProject);
+  println("io missing {} valid {} from LDtkLoader {}", LLoaded, IsLdtkProjectValid(LProject),
+    LProject.ErrorMessage.starts_with("LDtkLoader exception"));
+  LLoaded := LoadLdtkProjectIO(nil, "std_ldtkloader.ldtk", LProject);
+  println("nil source {} error [{}]", LLoaded, LProject.ErrorMessage);
+  UnloadLdtkProject(LProject);
+  IOSourceClose(LFolder);
+  IOSourceClose(LKept);
+end;
+
+// A tileset image that is not there, and a file that is not valid JSON
+routine TestRefusals();
+var
+  LProject: LdtkProject;
+  LLoaded: bool;
+begin
+  LLoaded := LoadLdtkProject(CFixtures + "std_ldtkloader_noimg.ldtk", LProject);
+  println("no image {} valid {} tileset Quads {} path {}", LLoaded, IsLdtkProjectValid(LProject),
+    LProject.ErrorMessage.starts_with("ldtk_ext: cannot read the image of tileset \"Quads\""),
+    LProject.ErrorMessage.ends_with("std_ldtkloader_nowhere.png"));
+  LLoaded := LoadLdtkProject(CFixtures + "std_ldtkloader_bad.ldtk", LProject);
+  println("bad json {} parse error {}", LLoaded, LProject.ErrorMessage.contains("parse_error"));
+  UnloadLdtkProject(LProject);
+end;
+
+// The example's town from bin\assets.zip and from its files: the same pixels
+routine TestZip();
+var
+  LZip: LdtkProject;
+  LFile: LdtkProject;
+  LZipLoaded: bool;
+  LFileLoaded: bool;
+  LZipImage: Image;
+  LFileImage: Image;
+  LWidth: int32;
+  LHeight: int32;
+begin
+  LZipLoaded := LoadLdtkProjectZip(CArchive, CTownEntry, "PaskalCPP", LZip);
+  LFileLoaded := LoadLdtkProject(CTownFile, LFile);
+  LWidth := int32(GetLdtkLevelSize(LFile, "Town").x);
+  LHeight := int32(GetLdtkLevelSize(LFile, "Town").y);
+  LZipImage := Render(LZip, "Town", "", LWidth, LHeight);
+  LFileImage := Render(LFile, "Town", "", LWidth, LHeight);
+  println("zip load {} file load {} levels {} same pixels {}", LZipLoaded, LFileLoaded,
+    LZip.Project.value().getWorld().allLevels().size(), SamePixels(LZipImage, LFileImage));
+  UnloadImage(LZipImage);
+  UnloadImage(LFileImage);
+  UnloadLdtkProject(LFile);
+  LZipLoaded := LoadLdtkProjectZip(CArchive, CTownEntry, "wrong", LZip);
+  println("zip wrong password {} valid {} from LDtkLoader {}", LZipLoaded,
+    IsLdtkProjectValid(LZip), LZip.ErrorMessage.starts_with("LDtkLoader exception"));
+  UnloadLdtkProject(LZip);
+end;
+
+begin
+  SetTraceLogLevel(LOG_NONE);
+  SetConfigFlags(FLAG_WINDOW_HIDDEN);
+  InitWindow(64, 64, "std_ldtk_ext");
+  if not IsWindowReady() then
+    println("no window");
+    return;
+  end;
+  TestDraw();
+  TestFind();
+  TestIO();
+  TestRefusals();
+  TestZip();
+  CloseWindow();
+end.

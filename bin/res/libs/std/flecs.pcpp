@@ -1,0 +1,90 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  flecs.pcpp - the flecs unit: `import flecs;` organizes a program's data as
+  entities, components and systems with flecs
+  (https://github.com/SanderMertens/flecs), an entity component system with a
+  C99 core and a C++ API. A self-describing vendor module: it owns every
+  include path, library path, define and link library it needs, per official
+  target. The library is libflecs_static.a (one per target), built by
+  PaskalCPP-Libs' build-flecs.cmd from flecs' own CMake project (the static
+  target, every addon at upstream's defaults), shipped under flecs' MIT
+  license. The unit defines flecs_STATIC for every importer (without it
+  flecs.h marks the API dllimport on Windows). On Windows it links wsock32,
+  ws2_32 (the REST addon's sockets) and dbghelp; on Linux pthread.
+
+  The API is flecs' C++ API as it ships (namespace flecs), called straight
+  from PaskalCPP:
+  - The world: a `var LWorld: flecs::world;` holds every entity and
+    component; it is created by its declaration and freed (with everything
+    in it) when it goes out of scope.
+  - Components: any PaskalCPP record is a component. A component is
+    registered the first time it is used; LWorld.component<T>() registers it
+    up front and gives its entity (its .id() is nonzero).
+  - Entities: LWorld.entity() makes one, LWorld.entity("Name") makes a named
+    one (LWorld.lookup("Name") finds it again). LE.set(LValue) adds or
+    replaces a component value, LE.get<T>() reads it (the entity must have
+    it), LE.try_get<T>() gives a pointer, nil when the entity lacks it.
+    LE.has<T>(), LE.remove<T>(), LE.destruct() and LE.is_alive() do what
+    they say.
+  - Queries: LWorld.query<A, B>() matches every entity that has all of the
+    listed components; .count() is how many match, .each(R) calls R once per
+    match.
+  - Systems: LWorld.system<A, B>("Name").each(R) registers R to run once per
+    matching entity on every LWorld.progress(ADeltaTime) (true while the
+    world has not been told to quit; ADeltaTime 0 measures the time itself).
+  - Callbacks for .each are ordinary routines, one parameter per listed
+    component in the same order: `var` for a component the routine writes,
+    `const` for one it only reads (`routine Move(var AP: Position; const AV:
+    Velocity);`). A first parameter `const AE: flecs::entity` also receives
+    the entity being visited.
+==============================================================================*/
+
+module unit flecs;
+
+// Self-describing vendor module: it owns every path it needs.
+
+@addincludepath "$P:res/libs/vendor/flecs/include";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/flecs/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/flecs/lib/x86_64-linux-gnu";
+@else
+  @message error "flecs: unsupported target";
+@endif
+
+// Static library: flecs.h selects dllimport unless this is defined
+@cppdefine "flecs_STATIC";
+
+@linklibrary "flecs_static";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @linklibrary "wsock32";
+  @linklibrary "ws2_32";
+  @linklibrary "dbghelp";
+@elseif TARGET_X86_64_LINUX_GNU
+  @linklibrary "pthread";
+@endif
+
+// The header goes to this unit's header, so every importer sees flecs' API
+cpp header;
+
+#include "flecs.h"
+
+end.

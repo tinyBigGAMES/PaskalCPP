@@ -1,0 +1,137 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  LuaScripting.pcpp - Lua example: the program is the engine, a Lua script
+  holds the game rules. PaskalCPP gives Lua two functions (say, roll); the
+  script defines the heroes and on_turn(attacker, defender), which decides
+  what an attack does. The engine runs the turns, calling into the script
+  each time, until one side falls. Change the rules by changing the script,
+  not the program.
+==============================================================================*/
+
+module exe LuaScripting;
+
+import
+  lua;
+
+// The rules, in Lua. In a real game this is a file: luaL_loadfile
+const
+  CScript: string =
+    "heroes = {\n" +
+    "  { name = 'Knight', hp = 30, attack = 6, armor = 2 },\n" +
+    "  { name = 'Rogue',  hp = 22, attack = 8, armor = 0 },\n" +
+    "}\n" +
+    "function on_turn(a, d)\n" +
+    "  local hit = roll(1, 6) + a.attack - d.armor\n" +
+    "  if roll(1, 10) == 10 then\n" +
+    "    hit = hit * 2\n" +
+    "    say(a.name .. ' lands a critical hit!')\n" +
+    "  end\n" +
+    "  d.hp = math.max(d.hp - hit, 0)\n" +
+    "  say(string.format('%s hits %s for %d (%d left)', a.name, d.name, hit, d.hp))\n" +
+    "  return d.hp == 0\n" +
+    "end\n";
+
+var
+  // The engine's dice: a fixed seed, so every run tells the same story
+  GSeed: uint32;
+
+// say(text): the script prints through the engine
+routine clink LuaSay(AL: ptr to lua_State): int32;
+begin
+  println("  {}", luaL_checkstring(AL, 1));
+  return 0;
+end;
+
+// roll(lo, hi): a number lo..hi from the engine's dice
+routine clink LuaRoll(AL: ptr to lua_State): int32;
+var
+  LLo: lua_Integer;
+  LHi: lua_Integer;
+begin
+  LLo := luaL_checkinteger(AL, 1);
+  LHi := luaL_checkinteger(AL, 2);
+  // A small linear congruential generator
+  GSeed := GSeed * 1103515245 + 12345;
+  lua_pushinteger(AL, LLo + lua_Integer((GSeed shr 16) mod uint32(LHi - LLo + 1)));
+  return 1;
+end;
+
+// Calls the script's on_turn(heroes[AAttacker], heroes[ADefender]): true
+// when the defender fell. A script error ends the program with Lua's message
+routine Turn(const AL: ptr to lua_State; const AAttacker: int32;
+  const ADefender: int32): bool;
+var
+  LFell: bool;
+begin
+  lua_getglobal(AL, "on_turn");
+  lua_getglobal(AL, "heroes");
+  // The two heroes from the heroes table (Lua arrays count from 1), then the
+  // table itself goes, leaving the function and its two arguments
+  lua_rawgeti(AL, -1, AAttacker);
+  lua_rawgeti(AL, -2, ADefender);
+  lua_remove(AL, -3);
+  if lua_pcall(AL, 2, 1, 0) <> LUA_OK then
+    raise(lua_tostring(AL, -1));
+  end;
+  LFell := lua_toboolean(AL, -1) <> 0;
+  lua_pop(AL, 1);
+  return LFell;
+end;
+
+// The name of heroes[AIndex]
+routine PrintWinner(const AL: ptr to lua_State; const AIndex: int32);
+begin
+  lua_getglobal(AL, "heroes");
+  lua_rawgeti(AL, -1, AIndex);
+  lua_getfield(AL, -1, "name");
+  println("{} wins.", lua_tostring(AL, -1));
+  lua_pop(AL, 3);
+end;
+
+var
+  LL: ptr to lua_State;
+  LAttacker: int32;
+  LRound: int32;
+  LOver: bool;
+
+begin
+  GSeed := 2026;
+  LL := luaL_newstate();
+  luaL_openlibs(LL);
+  lua_register(LL, "say", LuaSay);
+  lua_register(LL, "roll", LuaRoll);
+
+  // Load and run the rules: this defines heroes and on_turn
+  if (luaL_loadstring(LL, CScript.c_str()) <> LUA_OK) or (lua_pcall(LL, 0, 0, 0) <> LUA_OK) then
+    raise(lua_tostring(LL, -1));
+  end;
+  println("{} - the rules are a Lua script", LUA_RELEASE);
+
+  LAttacker := 1;
+  LRound := 0;
+  LOver := false;
+  while not LOver do
+    LRound := LRound + 1;
+    println("round {}", LRound);
+    LOver := Turn(LL, LAttacker, 3 - LAttacker);
+    if LOver then
+      PrintWinner(LL, LAttacker);
+    end;
+    LAttacker := 3 - LAttacker;
+  end;
+
+  lua_close(LL);
+end.

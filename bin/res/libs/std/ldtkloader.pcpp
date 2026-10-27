@@ -1,0 +1,84 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  ldtkloader.pcpp - the ldtkloader unit: `import ldtkloader;` reads LDtk
+  projects (https://ldtk.io: .ldtk projects, .ldtkl level files) from
+  PaskalCPP. A self-describing vendor module: it owns every include path,
+  library path and link library it needs, per official target. The library
+  is libLDtkLoader.a (one per target), built by PaskalCPP-Libs'
+  build-ldtkloader.cmd from LDtkLoader's own CMake project, linked by
+  @linklibrary: every module of the program shares the one copy, and a
+  program links only the libraries it imports.
+
+  The API is LDtkLoader's C++ API as it ships
+  (https://github.com/Madour/LDtkLoader), used straight from PaskalCPP: an
+  `ldtk::Project` variable, LProject.loadFromFile(path) (the project and,
+  when it saves its levels separately, every level file it names, found
+  relative to the project), then the getters: allWorlds / getWorld (a
+  project of one world answers getWorld()), a world's allLevels / getLevel
+  (by name, uid or iid), a level's name, size, position, bg_color, fields
+  (getField<T>(name)) and allLayers / getLayer(name), a layer's getType
+  (ldtk::LayerType::IntGrid, Entities, Tiles, AutoLayer), getName,
+  isVisible, getCellSize, getGridSize, getOffset, getOpacity, hasTileset /
+  getTileset, allTiles (each an ldtk::Tile: tileId, flipX, flipY, alpha,
+  getPosition, getTextureRect), getIntGridVal(x, y) and allEntities /
+  getEntitiesByName (each an ldtk::Entity: getName, getPosition, getSize,
+  fields through getField<T>(name), T one of int, float, bool,
+  std::string, ldtk::Color, ldtk::IntPoint, ldtk::EnumValue,
+  ldtk::FilePath, ldtk::EntityRef; a field's value() reads it, is_null()
+  tells an empty one). allTilesets / getTileset give each tileset's path
+  (relative to the project), tile_size and getTileTexturePos.
+
+  LDtkLoader reports a problem by throwing (an `std::invalid_argument`
+  "LDtkLoader exception ...", or the JSON reader's own exception for a file
+  that is not valid JSON): a file it cannot open or read, a level, layer,
+  entity, tileset or field asked for by a name that is not there. A
+  PaskalCPP program catches it with `guard ... except ... end;` (excmsg()
+  is the exception's text). A Project, World, Level, Layer or Entity is
+  never copied: it is used in place, by const reference (`ptr to const` in
+  PaskalCPP), and one Project reads another file with loadFromFile again.
+  A project whose JSON version is not LDtkLoader's own major.minor (1.5)
+  still loads, with a warning on stdout.
+
+  Files are read with the C++ library's streams, so a program that imports
+  HookIO reads projects from an IO or a zip archive as well (ldtk_ext's
+  LoadLdtkProjectIO / LoadLdtkProjectZip do that, and draw the levels with
+  raylib).
+==============================================================================*/
+
+module unit ldtkloader;
+
+@addincludepath "$P:res/libs/vendor/ldtkloader/include";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/ldtkloader/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/ldtkloader/lib/x86_64-linux-gnu";
+@else
+  @message error "ldtkloader: unsupported target";
+@endif
+
+@linklibrary "LDtkLoader";
+
+// The headers go to this unit's header, so every importer sees LDtkLoader's
+// API (Project.hpp includes every other public header)
+cpp header;
+
+#include <LDtkLoader/Project.hpp>
+
+end.

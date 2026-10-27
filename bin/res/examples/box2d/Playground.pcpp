@@ -19,15 +19,19 @@
     right click  drop a ball at the mouse
     space        an explosion at the mouse
     R            build the pyramid again
-  Bodies Box2D has put to sleep (at rest, no longer simulated) are drawn
-  faded. A body that falls off the platform's edge and out of view is
-  removed from the world, so it can be played for as long as you like.
+    F11          fullscreen on / off
+  The window is raylib_ext's frame window: drawn in 1280 x 720 units, sized
+  for the monitor's DPI, scaled and letterboxed on resize. Bodies Box2D has
+  put to sleep (at rest, no longer simulated) are drawn faded. A body that
+  falls off the platform's edge and out of view is removed from the world,
+  so it can be played for as long as you like.
 ==============================================================================*/
 
 module exe Playground;
 
 import
   raylib,
+  raylib_ext,
   box2d,
   SysUtils;
 
@@ -94,22 +98,22 @@ begin
   return LResult;
 end;
 
-// World meters to window pixels. Box2D's y points up, the window's down; the
-// world's x = 0 is the middle of the window
+// World meters to frame units. Box2D's y points up, the frame's down; the
+// world's x = 0 is the middle of the frame
 routine ToScreen(const APoint: b2Vec2): Vector2;
 var
   LResult: Vector2;
 begin
-  LResult.x := float64(GetScreenWidth()) * 0.5 + APoint.x * CPixelsPerMeter;
-  LResult.y := float64(GetScreenHeight()) - CGroundOffset - APoint.y * CPixelsPerMeter;
+  LResult.x := float64(CScreenWidth) * 0.5 + APoint.x * CPixelsPerMeter;
+  LResult.y := float64(CScreenHeight) - CGroundOffset - APoint.y * CPixelsPerMeter;
   return LResult;
 end;
 
-// Window pixels back to world meters (where the mouse points)
+// Frame units back to world meters (where the mouse points)
 routine ToWorld(const APoint: Vector2): b2Vec2;
 begin
-  return V2((APoint.x - float64(GetScreenWidth()) * 0.5) / CPixelsPerMeter,
-    (float64(GetScreenHeight()) - CGroundOffset - APoint.y) / CPixelsPerMeter);
+  return V2((APoint.x - float64(CScreenWidth) * 0.5) / CPixelsPerMeter,
+    (float64(CScreenHeight) - CGroundOffset - APoint.y) / CPixelsPerMeter);
 end;
 
 // Adds a box body: a static one (the platform) never moves
@@ -219,7 +223,7 @@ var
 begin
   // Half extent 0.4 .. 1.4 m: boxes 0.8 .. 2.8 m across
   LHalf := float64(GetRandomValue(40, 140)) / 100.0;
-  AddBox(ToWorld(GetMousePosition()), LHalf, LHalf, false,
+  AddBox(ToWorld(GetFrameMousePosition()), LHalf, LHalf, false,
     ColorFromHSV(float64(GetRandomValue(0, 359)), 0.6, 0.95));
 end;
 
@@ -230,7 +234,7 @@ var
 begin
   // Radius 0.4 .. 1.3 m
   LRadius := float64(GetRandomValue(40, 130)) / 100.0;
-  AddBall(ToWorld(GetMousePosition()), LRadius,
+  AddBall(ToWorld(GetFrameMousePosition()), LRadius,
     ColorFromHSV(float64(GetRandomValue(0, 359)), 0.45, 1.0));
 end;
 
@@ -240,12 +244,12 @@ var
   LBlast: b2ExplosionDef;
 begin
   LBlast := b2DefaultExplosionDef();
-  LBlast.position := ToWorld(GetMousePosition());
+  LBlast.position := ToWorld(GetFrameMousePosition());
   LBlast.radius := CBlastRadius;
   LBlast.falloff := 2.0;
   LBlast.impulsePerLength := 15.0;
   b2World_Explode(GWorld, address of LBlast);
-  GBlastAt := GetMousePosition();
+  GBlastAt := GetFrameMousePosition();
   GBlastLeft := CBlastShow;
 end;
 
@@ -339,14 +343,14 @@ begin
   LText := FormatStr("{} bodies, {} awake, {} fallen off", len(GPieces),
     b2World_GetAwakeBodyCount(GWorld), GFallen);
   DrawText(LText.c_str(), 20, 52, 20, Rgb(200, 205, 220));
-  DrawText("left click: box   right click: ball   space: explode   R: reset", 20, 78,
+  DrawText("left click: box   right click: ball   space: explode   R: reset   F11: fullscreen", 20, 78,
     20, Rgb(140, 148, 170));
   if GFullLeft > 0.0 then
     LText := FormatStr("The world is full: {} bodies. Push some off the edge.",
       CMaxPieces);
     DrawText(LText.c_str(), 20, 104, 20, Rgb(255, 170, 90));
   end;
-  DrawFPS(GetScreenWidth() - 100, 16);
+  DrawFPS(CScreenWidth - 100, 16);
 end;
 
 var
@@ -354,15 +358,22 @@ var
   LRing: float64;
 
 begin
-  // HighDPI: the window is scaled to the monitor's DPI (and follows it to
-  // another monitor); raylib keeps drawing and the mouse in logical pixels,
-  // so everything below works in the 1280 x 720 it asks for
-  SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_HIGHDPI);
-  InitWindow(CScreenWidth, CScreenHeight, "PaskalCPP - Box2D Playground");
+  // The frame window (raylib_ext): sized for the monitor's DPI (and follows
+  // it to another monitor), scaled and letterboxed on resize; drawing and the
+  // frame mouse are in base units, so everything below works in the
+  // 1280 x 720 it asks for
+  SetConfigFlags(FLAG_MSAA_4X_HINT);
+  if not InitFrameWindow(CScreenWidth, CScreenHeight, "PaskalCPP - Box2D Playground") then
+    println("the window did not open");
+    return;
+  end;
   SetTargetFPS(60);
   BuildWorld();
 
   while not WindowShouldClose() do
+    if IsKeyPressed(KEY_F11) then
+      ToggleFrameFullscreen();
+    end;
     if IsMouseButtonPressed(MOUSE_BUTTON_LEFT) then
       DropBox();
     end;
@@ -385,7 +396,8 @@ begin
     end;
 
     BeginDrawing();
-    DrawRectangleGradientV(0, 0, GetScreenWidth(), GetScreenHeight(), Rgb(24, 28, 40),
+    BeginFrame();
+    DrawRectangleGradientV(0, 0, CScreenWidth, CScreenHeight, Rgb(24, 28, 40),
       Rgb(60, 70, 96));
     for LI := 0 to len(GPieces) - 1 do
       DrawPiece(GPieces[LI]);
@@ -399,6 +411,7 @@ begin
     end;
 
     DrawHud();
+    EndFrame();
     EndDrawing();
   end;
 

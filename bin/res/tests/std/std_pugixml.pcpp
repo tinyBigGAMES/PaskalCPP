@@ -1,0 +1,74 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_pugixml.pcpp - Std library compliance: the pugixml unit
+  (res\libs\std\pugixml.pcpp)
+
+  pugixml's API used from PaskalCPP: a document loaded from a string, its
+  root's attributes read as text and as numbers, its child elements walked
+  in order, one of them found by an XPath query.
+
+  The refusal: XML whose end tag does not match its start tag does not load
+  (status_end_element_mismatch).
+*******************************************************************************/
+
+module exe std_pugixml;
+
+/*
+  @@test
+    kind run
+    expect
+    | load true
+    | map tiled width 5 height 2
+    | layer ground
+    | layer sky
+    | xpath sky
+    | bad loaded false mismatch true
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  pugixml;
+
+var
+  LDoc: pugi::xml_document;
+  LBad: pugi::xml_document;
+  LResult: pugi::xml_parse_result;
+  LNode: pugi::xml_node;
+  LXml: string;
+
+begin
+  LXml := "<map name='tiled' width='5' height='2'><layer name='ground'/>" +
+    "<layer name='sky'/></map>";
+  LResult := LDoc.load_string(LXml.c_str());
+  println("load {}", LResult.status = pugi::status_ok);
+
+  LNode := LDoc.child("map");
+  println("map {} width {} height {}", LNode.attribute("name").value(),
+    LNode.attribute("width").as_int(), LNode.attribute("height").as_int());
+
+  // The children in document order, then the second one by XPath
+  LNode := LDoc.child("map").first_child();
+  println("layer {}", LNode.attribute("name").value());
+  LNode := LNode.next_sibling("layer");
+  println("layer {}", LNode.attribute("name").value());
+  println("xpath {}", LDoc.select_node("/map/layer[2]").node().attribute("name").value());
+
+  // An end tag that closes the wrong element
+  LResult := LBad.load_string("<a><b></a>");
+  println("bad loaded {} mismatch {}", LResult.status = pugi::status_ok,
+    LResult.status = pugi::status_end_element_mismatch);
+end.

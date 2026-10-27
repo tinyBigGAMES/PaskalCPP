@@ -1,0 +1,83 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  yyjson.pcpp - the yyjson unit: `import yyjson;` reads and writes JSON with
+  yyjson (https://github.com/ibireme/yyjson), a fast JSON library in C. A
+  self-describing vendor module: it owns every include path, library path
+  and link library it needs, per official target. The library is
+  libyyjson.a (one per target), built by PaskalCPP-Libs' build-yyjson.cmd
+  from yyjson's own CMake project (static, the full API at upstream's
+  defaults), shipped under yyjson's MIT license.
+
+  The API is yyjson's C API as it ships, called straight from PaskalCPP:
+  - Reading: yyjson_read(text, length, flags) parses UTF-8 text into a
+    read-only `ptr to yyjson_doc` (nil on failure); yyjson_read_opts takes a
+    `ptr to yyjson_read_err` that receives the error code (a
+    YYJSON_READ_ERROR_* constant), its message and the byte position in the
+    text where reading stopped. yyjson_read_file(path, flags, nil, err)
+    reads a file: it opens it with the C runtime's fopen, so with HookIO
+    imported it reads a registered IO's io:// path as well, a zip entry of
+    bin\assets.zip included, with no extra unit. A failure is told by the
+    error's code, not its text: a file that does not open is
+    YYJSON_READ_ERROR_FILE_OPEN, whose message yyjson's reader spells
+    "failed to read file". yyjson_doc_free frees the document and every
+    value in it.
+  - Walking: yyjson_doc_get_root gives the root `ptr to yyjson_val`;
+    yyjson_obj_get(obj, "key") a member (nil when it is not there),
+    yyjson_arr_get(arr, index) / yyjson_arr_size an array's items;
+    yyjson_is_obj / _is_arr / _is_str ... test a value's kind and
+    yyjson_get_str / _sint / _int / _real / _num / _bool read it (0, false
+    or nil for a value of another kind). The strings yyjson_get_str gives
+    belong to the document: they live until yyjson_doc_free.
+  - Building: yyjson_mut_doc_new(nil) makes a mutable document,
+    yyjson_mut_obj / yyjson_mut_arr its containers, yyjson_mut_doc_set_root
+    its root; yyjson_mut_obj_add_str / _int / _real / _bool / _val and
+    yyjson_mut_arr_add_* add members and items. yyjson_mut_obj_add_str and
+    every other add that takes a `ptr to const char` keep the POINTER, not a
+    copy: a string literal is fine, the text of a PaskalCPP string that
+    changes or ends before the document does is not; yyjson_mut_obj_add_strcpy
+    (and yyjson_mut_strcpy for a value) copy the text into the document.
+    yyjson_mut_doc_free frees the document.
+  - Writing: yyjson_mut_write(doc, flags, nil) / yyjson_write give the text
+    (YYJSON_WRITE_PRETTY for indented output); the text is malloc'd by
+    yyjson and is freed with free(). yyjson_mut_write_file(path, doc, flags,
+    nil, err) writes a file through the C runtime (and so through HookIO).
+==============================================================================*/
+
+module unit yyjson;
+
+// Self-describing vendor module: it owns every path it needs.
+
+@addincludepath "$P:res/libs/vendor/yyjson/include";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/yyjson/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/yyjson/lib/x86_64-linux-gnu";
+@else
+  @message error "yyjson: unsupported target";
+@endif
+
+@linklibrary "yyjson";
+
+// The header goes to this unit's header, so every importer sees yyjson's API
+cpp header;
+
+#include "yyjson.h"
+
+end.

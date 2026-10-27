@@ -1,0 +1,131 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_yyjson_io.pcpp - Std library compliance: the yyjson vendor unit's file
+  reading and writing through HookIO (res\libs\std\yyjson.pcpp,
+  res\libs\std\HookIO.pcpp)
+
+  yyjson's own file code (the C runtime's fopen, fwrite, fread, ftell,
+  fseek, ferror, fclose) reaches a registered IO by its io:// path, with no
+  yyjson_ext: yyjson_mut_write_file writes a pretty-printed document into a
+  memory IO and yyjson_read_file reads it back, every value as built. The
+  entry res/assets/data/config.json of bin\assets.zip (password PaskalCPP)
+  is read straight from the zip and walked: nested objects, a real, a bool,
+  an array of strings. A path nothing answers is nil with
+  YYJSON_READ_ERROR_FILE_OPEN (12); yyjson 0.13.0's reader gives that code
+  the text "failed to read file" (yyjson.c, yyjson_read_file: its writer
+  uses "failed to open file"), so the code is what tells an open failure.
+*******************************************************************************/
+
+module exe std_yyjson_io;
+
+/*
+  @@test
+    kind run
+    expect
+    | written true
+    | read back true name pcpp lives 3 speed 2.5 sound true
+    | zip ok true title PaskalCPP JSON config
+    | zip window 800 x 450 fullscreen false volume 0.8
+    | zip players 3 Ada Niklaus Anders
+    | missing nil true code 12 failed to read file
+    | [Heap] Allocs: 6, Frees: 6, Leaked: 0
+  @@end
+*/
+
+import
+  yyjson,
+  CustomIO,
+  HookIO;
+
+// The value of member AKey of member AGroup of the root object
+routine Member(const ADoc: ptr to yyjson_doc; const AGroup: string;
+  const AKey: string): ptr to yyjson_val;
+begin
+  return yyjson_obj_get(yyjson_obj_get(yyjson_doc_get_root(ADoc), AGroup.c_str()),
+    AKey.c_str());
+end;
+
+var
+  LMemory: IO;
+  LMemoryPrefix: string;
+  LPath: string;
+  LMut: ptr to yyjson_mut_doc;
+  LRoot: ptr to yyjson_mut_val;
+  LWriteErr: yyjson_write_err;
+  LReadErr: yyjson_read_err;
+  LDoc: ptr to yyjson_doc;
+  LTop: ptr to yyjson_val;
+  LPlayers: ptr to yyjson_val;
+  LZip: IO;
+  LZipPrefix: string;
+  LWritten: bool;
+
+begin
+  LMemory := CreateMemoryIO();
+  LMemoryPrefix := RegisterIO(LMemory);
+  LPath := LMemoryPrefix + "/save.json";
+
+  // yyjson writes the file itself, through the hooks
+  LMut := yyjson_mut_doc_new(nil);
+  LRoot := yyjson_mut_obj(LMut);
+  yyjson_mut_doc_set_root(LMut, LRoot);
+  yyjson_mut_obj_add_str(LMut, LRoot, "name", "pcpp");
+  yyjson_mut_obj_add_int(LMut, LRoot, "lives", 3);
+  yyjson_mut_obj_add_real(LMut, LRoot, "speed", 2.5);
+  yyjson_mut_obj_add_bool(LMut, LRoot, "sound", true);
+  LWritten := yyjson_mut_write_file(LPath.c_str(), LMut, YYJSON_WRITE_PRETTY, nil,
+    address of LWriteErr);
+  yyjson_mut_doc_free(LMut);
+  println("written {}", LWritten);
+
+  // ... and reads it back
+  LDoc := yyjson_read_file(LPath.c_str(), YYJSON_READ_NOFLAG, nil, address of LReadErr);
+  LTop := yyjson_doc_get_root(LDoc);
+  println("read back {} name {} lives {} speed {} sound {}", LDoc <> nil,
+    yyjson_get_str(yyjson_obj_get(LTop, "name")),
+    yyjson_get_sint(yyjson_obj_get(LTop, "lives")),
+    yyjson_get_real(yyjson_obj_get(LTop, "speed")),
+    yyjson_get_bool(yyjson_obj_get(LTop, "sound")));
+  yyjson_doc_free(LDoc);
+
+  // A config shipped in bin\assets.zip, read straight from its entry
+  LZip := CreateZipFileIO("$P:../../assets.zip", "res/assets/data/config.json", "PaskalCPP");
+  LZipPrefix := RegisterIO(LZip);
+  LDoc := yyjson_read_file((LZipPrefix + "/config.json").c_str(), YYJSON_READ_NOFLAG, nil,
+    address of LReadErr);
+  LTop := yyjson_doc_get_root(LDoc);
+  println("zip ok {} title {}", LDoc <> nil, yyjson_get_str(yyjson_obj_get(LTop, "title")));
+  println("zip window {} x {} fullscreen {} volume {}",
+    yyjson_get_sint(Member(LDoc, "window", "width")),
+    yyjson_get_sint(Member(LDoc, "window", "height")),
+    yyjson_get_bool(Member(LDoc, "window", "fullscreen")),
+    yyjson_get_real(Member(LDoc, "audio", "volume")));
+  LPlayers := yyjson_obj_get(LTop, "players");
+  println("zip players {} {} {} {}", yyjson_arr_size(LPlayers),
+    yyjson_get_str(yyjson_arr_get(LPlayers, 0)), yyjson_get_str(yyjson_arr_get(LPlayers, 1)),
+    yyjson_get_str(yyjson_arr_get(LPlayers, 2)));
+  yyjson_doc_free(LDoc);
+  UnregisterIO(LZipPrefix);
+  IOClose(LZip);
+
+  // A path nothing answers: nil, FILE_OPEN and yyjson's text for it
+  LDoc := yyjson_read_file("io://999999/missing.json", YYJSON_READ_NOFLAG, nil,
+    address of LReadErr);
+  println("missing nil {} code {} {}", LDoc = nil, LReadErr.code, LReadErr.msg);
+
+  UnregisterIO(LMemoryPrefix);
+  IOClose(LMemory);
+end.

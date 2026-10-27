@@ -1,0 +1,158 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_lua.pcpp - Std library compliance: the lua vendor unit
+  (res\libs\std\lua.pcpp)
+
+  Lua's C API called straight from PaskalCPP: a state with the standard
+  libraries runs a chunk and its global is read back; two PaskalCPP
+  `routine clink` functions registered with lua_register are called from
+  Lua (one adds two integers, one builds a string with lua_pushfstring); a
+  Lua function is called from PaskalCPP with lua_pcall; a table's fields
+  are read with lua_getfield. The error paths come back as codes with the
+  message on the stack: a runtime error() is LUA_ERRRUN, a chunk with a
+  syntax error is LUA_ERRSYNTAX from luaL_loadstring, and a registered
+  routine whose luaL_checkinteger fails raises through lua_pcall as
+  LUA_ERRRUN, the state usable after each. The stack ends empty.
+*******************************************************************************/
+
+module exe std_lua;
+
+/*
+  @@test
+    kind run
+    expect
+    | version true
+    | chunk ok true x 42
+    | callback y 42
+    | lua function square 81
+    | table name pcpp size 3
+    | string callback Hello, Lua!
+    | runtime error 2 [string "error('boom')"]:1: boom
+    | syntax error 3 [string "x = = 1"]:1: unexpected symbol near '='
+    | bad argument 2 [string "pcpp_add('a', 1)"]:1: bad argument #1 to 'pcpp_add' (number expected, got string)
+    | still works 7
+    | stack 0
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  lua;
+
+// pcpp_add(a, b): the sum of two integers. luaL_checkinteger raises a Lua
+// error (a longjmp) for a wrong argument, before this routine holds anything
+routine clink std_lua_add(AL: ptr to lua_State): int32;
+var
+  LA: lua_Integer;
+  LB: lua_Integer;
+begin
+  LA := luaL_checkinteger(AL, 1);
+  LB := luaL_checkinteger(AL, 2);
+  lua_pushinteger(AL, LA + LB);
+  return 1;
+end;
+
+// pcpp_greet(name): "Hello, <name>!", formatted by Lua itself
+routine clink std_lua_greet(AL: ptr to lua_State): int32;
+begin
+  lua_pushfstring(AL, "Hello, %s!", luaL_checkstring(AL, 1));
+  return 1;
+end;
+
+// Compiles and runs one chunk; the code of whichever step failed, the
+// message then on top of the stack
+routine Run(const AL: ptr to lua_State; const ASource: string): int32;
+var
+  LResult: int32;
+begin
+  LResult := luaL_loadstring(AL, ASource.c_str());
+  if LResult = LUA_OK then
+    LResult := lua_pcall(AL, 0, 0, 0);
+  end;
+  return LResult;
+end;
+
+// Runs a chunk that should fail; prints its code and message, pops the message
+routine ShowError(const AL: ptr to lua_State; const ALabel: string;
+  const ASource: string);
+var
+  LResult: int32;
+begin
+  LResult := Run(AL, ASource);
+  println("{} {} {}", ALabel, LResult, lua_tostring(AL, -1));
+  lua_pop(AL, 1);
+end;
+
+var
+  LL: ptr to lua_State;
+  LResult: int32;
+
+begin
+  LL := luaL_newstate();
+  luaL_openlibs(LL);
+  println("version {}", lua_version(LL) = LUA_VERSION_NUM);
+
+  // A chunk sets a global; PaskalCPP reads it back
+  LResult := Run(LL, "x = 6 * 7");
+  lua_getglobal(LL, "x");
+  println("chunk ok {} x {}", LResult = LUA_OK, lua_tointeger(LL, -1));
+  lua_pop(LL, 1);
+
+  // Lua calls a PaskalCPP routine
+  lua_register(LL, "pcpp_add", std_lua_add);
+  Run(LL, "y = pcpp_add(40, 2)");
+  lua_getglobal(LL, "y");
+  println("callback y {}", lua_tointeger(LL, -1));
+  lua_pop(LL, 1);
+
+  // PaskalCPP calls a Lua function: the function, its argument, one result
+  Run(LL, "function square(n) return n * n end");
+  lua_getglobal(LL, "square");
+  lua_pushinteger(LL, 9);
+  LResult := lua_pcall(LL, 1, 1, 0);
+  if LResult = LUA_OK then
+    println("lua function square {}", lua_tointeger(LL, -1));
+  end;
+  lua_pop(LL, 1);
+
+  // A table's fields
+  Run(LL, "config = { name = 'pcpp', size = 3 }");
+  lua_getglobal(LL, "config");
+  lua_getfield(LL, -1, "name");
+  lua_getfield(LL, -2, "size");
+  println("table name {} size {}", lua_tostring(LL, -2), lua_tointeger(LL, -1));
+  lua_pop(LL, 3);
+
+  // A string built on the Lua side, read as a C string
+  lua_register(LL, "pcpp_greet", std_lua_greet);
+  Run(LL, "greeting = pcpp_greet('Lua')");
+  lua_getglobal(LL, "greeting");
+  println("string callback {}", lua_tostring(LL, -1));
+  lua_pop(LL, 1);
+
+  // The errors come back as codes, the message on the stack
+  ShowError(LL, "runtime error", "error('boom')");
+  ShowError(LL, "syntax error", "x = = 1");
+  ShowError(LL, "bad argument", "pcpp_add('a', 1)");
+
+  Run(LL, "z = pcpp_add(3, 4)");
+  lua_getglobal(LL, "z");
+  println("still works {}", lua_tointeger(LL, -1));
+  lua_pop(LL, 1);
+
+  println("stack {}", lua_gettop(LL));
+  lua_close(LL);
+end.

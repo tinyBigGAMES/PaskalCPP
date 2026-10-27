@@ -1,0 +1,130 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  JsonConfig.pcpp - yyjson example (import yyjson): a program's settings
+  file. The first run writes settings.json beside the executable with the
+  defaults (a mutable document, pretty-printed by yyjson_mut_write_file);
+  every run reads it back with yyjson_read_file (YYJSON_READ_ALLOW_COMMENTS:
+  a file edited by hand may hold line and block comments), prints what it
+  holds, counts the launch in a copy made mutable with yyjson_doc_mut_copy
+  and writes it back. A document keeps no comments, so the write-back drops
+  any the file had. A file that is not valid JSON is reported with the
+  reader's code, message and byte position, and left as it is.
+==============================================================================*/
+
+module exe JsonConfig;
+
+import
+  yyjson,
+  SysUtils;
+
+// Writes the default settings to APath; false when the file is not written
+routine WriteDefaults(const APath: string): bool;
+var
+  LDoc: ptr to yyjson_mut_doc;
+  LRoot: ptr to yyjson_mut_val;
+  LWindow: ptr to yyjson_mut_val;
+  LPlayers: ptr to yyjson_mut_val;
+  LErr: yyjson_write_err;
+  LDone: bool;
+begin
+  LDoc := yyjson_mut_doc_new(nil);
+  LRoot := yyjson_mut_obj(LDoc);
+  yyjson_mut_doc_set_root(LDoc, LRoot);
+  // Literal keys and values: yyjson keeps the pointer, a literal lives on
+  yyjson_mut_obj_add_str(LDoc, LRoot, "title", "JsonConfig");
+  LWindow := yyjson_mut_obj(LDoc);
+  yyjson_mut_obj_add_int(LDoc, LWindow, "width", 1280);
+  yyjson_mut_obj_add_int(LDoc, LWindow, "height", 720);
+  yyjson_mut_obj_add_bool(LDoc, LWindow, "fullscreen", false);
+  yyjson_mut_obj_add_val(LDoc, LRoot, "window", LWindow);
+  LPlayers := yyjson_mut_arr(LDoc);
+  yyjson_mut_arr_add_str(LDoc, LPlayers, "Ada");
+  yyjson_mut_arr_add_str(LDoc, LPlayers, "Niklaus");
+  yyjson_mut_obj_add_val(LDoc, LRoot, "players", LPlayers);
+  yyjson_mut_obj_add_int(LDoc, LRoot, "launches", 0);
+  LDone := yyjson_mut_write_file(APath.c_str(), LDoc, YYJSON_WRITE_PRETTY, nil, address of LErr);
+  if not LDone then
+    println("cannot write {}: {}", APath, LErr.msg);
+  end;
+  yyjson_mut_doc_free(LDoc);
+  return LDone;
+end;
+
+// Prints the settings a read document holds
+routine ShowSettings(const ADoc: ptr to yyjson_doc);
+var
+  LRoot: ptr to yyjson_val;
+  LWindow: ptr to yyjson_val;
+  LPlayers: ptr to yyjson_val;
+  LIndex: size_t;
+begin
+  LRoot := yyjson_doc_get_root(ADoc);
+  LWindow := yyjson_obj_get(LRoot, "window");
+  println("title:      {}", yyjson_get_str(yyjson_obj_get(LRoot, "title")));
+  println("window:     {} x {}, fullscreen {}", yyjson_get_sint(yyjson_obj_get(LWindow, "width")),
+    yyjson_get_sint(yyjson_obj_get(LWindow, "height")),
+    yyjson_get_bool(yyjson_obj_get(LWindow, "fullscreen")));
+  LPlayers := yyjson_obj_get(LRoot, "players");
+  LIndex := 0;
+  while LIndex < yyjson_arr_size(LPlayers) do
+    println("player {}:   {}", LIndex + 1, yyjson_get_str(yyjson_arr_get(LPlayers, LIndex)));
+    LIndex := LIndex + 1;
+  end;
+end;
+
+// Counts one more launch in ADoc and writes it to APath
+routine CountLaunch(const ADoc: ptr to yyjson_doc; const APath: string);
+var
+  LMut: ptr to yyjson_mut_doc;
+  LLaunches: ptr to yyjson_mut_val;
+  LErr: yyjson_write_err;
+begin
+  // A read document is read-only: the change goes into a mutable copy
+  LMut := yyjson_doc_mut_copy(ADoc, nil);
+  LLaunches := yyjson_mut_obj_get(yyjson_mut_doc_get_root(LMut), "launches");
+  yyjson_mut_set_sint(LLaunches, yyjson_mut_get_sint(LLaunches) + 1);
+  if yyjson_mut_write_file(APath.c_str(), LMut, YYJSON_WRITE_PRETTY, nil, address of LErr) then
+    println("launch:     {} (written to {})", yyjson_mut_get_sint(LLaunches), APath);
+  else
+    println("cannot write {}: {}", APath, LErr.msg);
+  end;
+  yyjson_mut_doc_free(LMut);
+end;
+
+var
+  LPath: string;
+  LDoc: ptr to yyjson_doc;
+  LErr: yyjson_read_err;
+
+begin
+  // $P: = the executable's folder, wherever the program was started from
+  LPath := ResolvePath("$P:settings.json");
+  if not FileExists(LPath) then
+    if not WriteDefaults(LPath) then
+      return;
+    end;
+    println("wrote the defaults to {}", LPath);
+  end;
+
+  LDoc := yyjson_read_file(LPath.c_str(), YYJSON_READ_ALLOW_COMMENTS, nil, address of LErr);
+  if LDoc = nil then
+    println("{} is not valid JSON: {} (code {}, byte {})", LPath, LErr.msg, LErr.code, LErr.pos);
+    return;
+  end;
+  ShowSettings(LDoc);
+  CountLaunch(LDoc, LPath);
+  yyjson_doc_free(LDoc);
+end.

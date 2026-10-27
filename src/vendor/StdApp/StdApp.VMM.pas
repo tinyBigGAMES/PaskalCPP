@@ -59,7 +59,7 @@ interface
 
 implementation
 
-// *** NO USES CLAUSE — fully self-contained ***
+// *** NO USES CLAUSE - fully self-contained ***
 
 const
   //==========================================================================
@@ -179,7 +179,7 @@ type
   end;
 
 var
-  // Free lists — one per size class, plus oversized
+  // Free lists - one per size class, plus oversized
   GFreeLists: array[0..MM_CLASS_COUNT - 1] of PFreeBlock;
   GOversizedFreeList: PFreeBlock;
 
@@ -406,7 +406,7 @@ begin
 
   Inc(GAllocCount);
 
-  // Oversized — multi-slice allocation using 64K slices
+  // Oversized - multi-slice allocation using 64K slices
   if NativeUInt(Size) > MM_MAX_POOL_SIZE then
   begin
     LClass := MM_CLASS_COUNT - 1; // class 25 = 65536
@@ -442,7 +442,7 @@ begin
       LBlock := LBlock^.Next;
     end;
 
-    // No match in free list — bump-allocate contiguous slices
+    // No match in free list - bump-allocate contiguous slices
     LBlockStart := (GBumpPos + 15) and not NativeUInt(15);
     LUserStart := LBlockStart + MM_HEADER_SIZE;
     LNextPos := LBlockStart + LTotalSize;
@@ -453,7 +453,7 @@ begin
     EnsureCommitted(LNextPos);
 
     // Write header on first slice only: size, class, slice count
-    // (user data spans across remaining slices — no intermediate headers)
+    // (user data spans across remaining slices - no intermediate headers)
     PNativeUInt(GPoolBase + LBlockStart)^ := NativeUInt(Size);
     PByte(GPoolBase + LBlockStart + SizeOf(NativeUInt))^ := Byte(LClass);
     PUInt32(GPoolBase + LBlockStart + SizeOf(NativeUInt) + 4)^ := UInt32(LSliceCount);
@@ -480,7 +480,7 @@ begin
     Inc(GCurrentUsed, LClassSize);
     if GCurrentUsed > GPeakUsed then
       GPeakUsed := GCurrentUsed;
-    // Write full header — block may be a recycled multi-slice sub-block
+    // Write full header - block may be a recycled multi-slice sub-block
     PNativeUInt(PByte(LBlock) - MM_HEADER_SIZE)^ := NativeUInt(Size);
     PByte(PByte(LBlock) - MM_HEADER_SIZE + SizeOf(NativeUInt))^ := Byte(LClass);
     PUInt32(PByte(LBlock) - MM_HEADER_SIZE + SizeOf(NativeUInt) + 4)^ := 1;
@@ -493,7 +493,7 @@ begin
   LUserStart := LBlockStart + MM_HEADER_SIZE;
   LNextPos := LUserStart + LClassSize;
 
-  // Pool exhausted — halt
+  // Pool exhausted - halt
   if LNextPos > GPoolSize then
     PoolExhausted(NativeUInt(Size));
 
@@ -527,7 +527,7 @@ begin
 
   Inc(GFreeCount);
 
-  // Pre-VMM allocation — forward to original MM
+  // Pre-VMM allocation - forward to original MM
   if not IsPoolPointer(P) then
   begin
     Inc(GOldMMFreeCount);
@@ -540,7 +540,7 @@ begin
 
   if LSliceCount = 1 then
   begin
-    // Single slice — push onto free list
+    // Single slice - push onto free list
     LBlock := PFreeBlock(P);
     LBlock^.Next := GFreeLists[LClass];
     GFreeLists[LClass] := LBlock;
@@ -549,7 +549,7 @@ begin
   end
   else
   begin
-    // Multi-slice — push whole block onto oversized free list
+    // Multi-slice - push whole block onto oversized free list
     LBlock := PFreeBlock(P);
     LBlock^.Next := GOversizedFreeList;
     GOversizedFreeList := LBlock;
@@ -585,7 +585,7 @@ begin
     Exit;
   end;
 
-  // Pre-VMM allocation — forward to original MM
+  // Pre-VMM allocation - forward to original MM
   if not IsPoolPointer(P) then
   begin
     Result := GOldMM.ReallocMem(P, Size);
@@ -597,7 +597,7 @@ begin
   LOldSize := PNativeUInt(PByte(P) - MM_HEADER_SIZE)^;
   LOldCapacity := LOldSliceCount * MM_SIZES[LOldClass];
 
-  // Fast path: new size fits in current capacity — update stored size only
+  // Fast path: new size fits in current capacity - update stored size only
   if NativeUInt(Size) <= LOldCapacity then
   begin
     // For single-slice, also check if class changes (downsize frees memory)
@@ -620,7 +620,7 @@ begin
     end;
   end;
 
-  // Different class or capacity — alloc, copy, free
+  // Different class or capacity - alloc, copy, free
   Result := VMGetMem(Size);
   if Result <> nil then
   begin
@@ -888,7 +888,7 @@ begin
   begin
     RawWriteLn();
     RawWriteStr('  Press ENTER to continue...');
-    // Use raw ReadFile on stdin — Delphi I/O is finalized at this point
+    // Use raw ReadFile on stdin - Delphi I/O is finalized at this point
     ReadFile(GetStdHandle(WIN_STD_INPUT), LReadBuf, 1, LBytesRead, nil);
   end;
 end;
@@ -987,7 +987,7 @@ begin
   // Switch
   SetMemoryManager(GNewMM);
 
-  // Register exit handler — runs after all unit finalization
+  // Register exit handler - runs after all unit finalization
   GOldExitProcessProc := ExitProcessProc;
   ExitProcessProc := VMMExitHandler;
 end;

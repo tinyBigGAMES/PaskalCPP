@@ -1,0 +1,128 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  RavenRaylibZip.pcpp - a Raven user interface loaded from bin\assets.zip
+  over a raylib window (import raven_raylib). The theme
+  (res/assets/ui/raven_theme.xml) and the window
+  (res/assets/ui/raven_demo.xml, with the PaskalCPP logo and a title font
+  it names relative to itself) are read by Raven's own calls from the zip:
+  HookIO gives the zip an io:// prefix (RegisterIOSource) and Raven opens
+  "<prefix>/res/assets/ui/..." as it would a file, the XML's images and
+  fonts included. The program finds the XML's widgets by name and gives
+  the buttons their callbacks. The window is raylib_ext's frame window
+  (800 x 450 units, sized for the monitor's DPI, scaled and letterboxed on
+  resize): raylib's drawing and Raven's UI work in the same units and scale
+  together. F11 toggles fullscreen; Escape, the close button or "Quit" ends
+  it.
+==============================================================================*/
+
+module exe RavenRaylibZip;
+
+@exeicon "$P:res/assets/icons/paskalcpp.ico";
+
+import
+  raylib,
+  raylib_ext,
+  raven,
+  raven_raylib,
+  CustomIO,
+  HookIO;
+
+const
+  CScreenWidth: int32 = 800;
+  CScreenHeight: int32 = 450;
+
+var
+  GStatus: Rid;
+  GName: Rid;
+  GQuit: bool;
+
+routine clink OnError(ACode: RError; ASeverity: RSeverity; ADetail: ptr to const char);
+begin
+  println("[Raven] {} ({}): {}", Rerror_to_string(ACode), Rseverity_to_string(ASeverity), ADetail);
+end;
+
+routine clink OnHello(AButton: Rid; AUserData: ptr);
+begin
+  Rlabel_set_text(GStatus, TextFormat("Hello, %s!", Rtext_input_get_text(GName)));
+end;
+
+routine clink OnQuit(AButton: Rid; AUserData: ptr);
+begin
+  GQuit := true;
+end;
+
+var
+  LZip: IOSource;
+  LPrefix: string;
+  LUi: Rid;
+  LTheme: ptr to const char;
+
+begin
+  SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
+  if not InitFrameWindow(CScreenWidth, CScreenHeight, "PaskalCPP - Raven from a zip") then
+    println("the window did not open");
+    return;
+  end;
+  SetTargetFPS(60);
+  SetFrameColor(DARKBLUE);
+  Rerror_set_callback(OnError);
+  if not InitRaven("RavenRaylibZip") then
+    println("Raven did not start");
+    CloseWindow();
+    return;
+  end;
+
+  // The shared assets archive, as io://<n>/<entry> for every C runtime open
+  LZip := CreateZipIOSource("$P:../../assets.zip", "PaskalCPP");
+  LPrefix := RegisterIOSource(LZip);
+  LTheme := Rtheme_load((LPrefix + "/res/assets/ui/raven_theme.xml").c_str());
+  if LTheme <> nil then
+    Rtheme_use(LTheme);
+  end;
+  LUi := Rwindow_create_from_xml_file((LPrefix + "/res/assets/ui/raven_demo.xml").c_str());
+
+  if LUi = R_INVALID_ID then
+    println("the UI did not load");
+  else
+    GStatus := Rwidget_find(LUi, "status");
+    GName := Rwidget_find(LUi, "name");
+    Rbutton_set_clicked_callback(Rwidget_find(LUi, "hello"), OnHello, nil);
+    Rbutton_set_clicked_callback(Rwidget_find(LUi, "quit"), OnQuit, nil);
+    GQuit := false;
+
+    while not WindowShouldClose() and not GQuit do
+      if IsKeyPressed(KEY_F11) then
+        ToggleFrameFullscreen();
+      end;
+      // Raven's frame before raylib's: its input, layout and callbacks
+      if not UpdateRaven(LUi) then
+        leave;
+      end;
+      BeginDrawing();
+      BeginFrame();
+      DrawText("raylib's frame, Raven's UI from assets.zip", 12, CScreenHeight - 30, 20, RAYWHITE);
+      // Over the frame, in its units
+      DrawRaven(LUi);
+      EndFrame();
+      EndDrawing();
+    end;
+  end;
+
+  CloseRaven();
+  UnregisterIO(LPrefix);
+  IOSourceClose(LZip);
+  CloseWindow();
+end.

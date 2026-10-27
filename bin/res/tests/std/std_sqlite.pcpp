@@ -1,0 +1,201 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_sqlite.pcpp - Std library compliance: the sqlite vendor unit
+  (res\libs\std\sqlite.pcpp)
+
+  SQLite's C API called straight from PaskalCPP over a private in-memory
+  database: the linked library is the one its header names, built
+  serialized (threadsafe 1). A table is made, three rows go in through one
+  prepared INSERT each with a bound text (SQLITE_TRANSIENT: SQLite copies
+  it) and a bound double, a prepared SELECT with a bound ? limit steps
+  SQLITE_ROW per row and SQLITE_DONE at the end, sqlite3_reset with a new
+  binding runs it again, and finalize / close return SQLITE_OK. Aggregates,
+  then one row per build option: FTS5 full-text search, an R*Tree index, the
+  math functions and the built-in JSON. A statement that is wrong returns
+  SQLite's own result code and sqlite3_errmsg its reason: a syntax error (1),
+  a NOT NULL constraint (19), a missing table (1); the database works on
+  after each.
+*******************************************************************************/
+
+module exe std_sqlite;
+
+/*
+  @@test
+    kind run
+    expect
+    | header matches lib true
+    | threadsafe 1
+    | open true
+    | create true
+    | insert apple true
+    | insert bread true
+    | insert cheese true
+    | last rowid 3
+    | row 2 bread 2.25
+    | row 3 cheese 4.75
+    | rows 2 done true
+    | reset rebind row true 3
+    | finalize true
+    | count 3 sum 8.5
+    | fts5 match 1
+    | rtree hits 1
+    | math sqrt 4 pi 3.14159
+    | json length 3
+    | bad sql rc 1 near "SELEC": syntax error
+    | constraint rc 19 NOT NULL constraint failed: items.name
+    | missing table rc 1 no such table: absent
+    | still works 3
+    | close true
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  sqlite;
+
+const
+  CMemory: ptr to const char = ":memory:";
+
+// Runs SQL that returns no rows; the result code of sqlite3_exec
+routine Exec(const ADb: ptr to sqlite3; const ASql: string): int32;
+begin
+  return sqlite3_exec(ADb, ASql.c_str(), nil, nil, nil);
+end;
+
+// Compiles one statement into AStmt (nil when it fails)
+routine Prepare(const ADb: ptr to sqlite3; const ASql: string;
+  var AStmt: ptr to sqlite3_stmt): int32;
+begin
+  AStmt := nil;
+  return sqlite3_prepare_v2(ADb, ASql.c_str(), -1, address of AStmt, nil);
+end;
+
+// The first column of a one-row query as int64 (-1 when it does not run)
+routine QueryInt(const ADb: ptr to sqlite3; const ASql: string): int64;
+var
+  LStmt: ptr to sqlite3_stmt;
+  LResult: int64;
+begin
+  LResult := -1;
+  if Prepare(ADb, ASql, LStmt) = SQLITE_OK then
+    if sqlite3_step(LStmt) = SQLITE_ROW then
+      LResult := sqlite3_column_int64(LStmt, 0);
+    end;
+  end;
+  sqlite3_finalize(LStmt);
+  return LResult;
+end;
+
+// One INSERT through a prepared statement with two bound values
+routine AddItem(const ADb: ptr to sqlite3; const AName: string;
+  const APrice: float64): bool;
+var
+  LStmt: ptr to sqlite3_stmt;
+  LDone: bool;
+begin
+  LDone := false;
+  if Prepare(ADb, "INSERT INTO items(name, price) VALUES (?, ?)", LStmt) = SQLITE_OK then
+    sqlite3_bind_text(LStmt, 1, AName.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(LStmt, 2, APrice);
+    LDone := sqlite3_step(LStmt) = SQLITE_DONE;
+  end;
+  sqlite3_finalize(LStmt);
+  return LDone;
+end;
+
+// The first column of a one-row query as float64 (-1 when it does not run)
+routine QueryFloat(const ADb: ptr to sqlite3; const ASql: string): float64;
+var
+  LStmt: ptr to sqlite3_stmt;
+  LResult: float64;
+begin
+  LResult := -1.0;
+  if Prepare(ADb, ASql, LStmt) = SQLITE_OK then
+    if sqlite3_step(LStmt) = SQLITE_ROW then
+      LResult := sqlite3_column_double(LStmt, 0);
+    end;
+  end;
+  sqlite3_finalize(LStmt);
+  return LResult;
+end;
+
+var
+  LDb: ptr to sqlite3;
+  LStmt: ptr to sqlite3_stmt;
+  LRc: int32;
+  LRows: int32;
+
+begin
+  println("header matches lib {}", sqlite3_libversion_number() = SQLITE_VERSION_NUMBER);
+  println("threadsafe {}", sqlite3_threadsafe());
+
+  LDb := nil;
+  LRc := sqlite3_open(CMemory, address of LDb);
+  println("open {}", LRc = SQLITE_OK);
+
+  LRc := Exec(LDb, "CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT NOT NULL, price REAL)");
+  println("create {}", LRc = SQLITE_OK);
+  println("insert apple {}", AddItem(LDb, "apple", 1.5));
+  println("insert bread {}", AddItem(LDb, "bread", 2.25));
+  println("insert cheese {}", AddItem(LDb, "cheese", 4.75));
+  println("last rowid {}", sqlite3_last_insert_rowid(LDb));
+
+  // A bound ? limit, the rows in price order
+  LRows := 0;
+  LRc := Prepare(LDb, "SELECT id, name, price FROM items WHERE price > ? ORDER BY price", LStmt);
+  sqlite3_bind_double(LStmt, 1, 2.0);
+  LRc := sqlite3_step(LStmt);
+  while LRc = SQLITE_ROW do
+    println("row {} {} {}", sqlite3_column_int64(LStmt, 0),
+      ptr to const char(sqlite3_column_text(LStmt, 1)), sqlite3_column_double(LStmt, 2));
+    LRows := LRows + 1;
+    LRc := sqlite3_step(LStmt);
+  end;
+  println("rows {} done {}", LRows, LRc = SQLITE_DONE);
+  // A statement is run again by reset: its bindings stay until rebound
+  sqlite3_reset(LStmt);
+  sqlite3_bind_double(LStmt, 1, 4.0);
+  LRc := sqlite3_step(LStmt);
+  println("reset rebind row {} {}", LRc = SQLITE_ROW, sqlite3_column_int64(LStmt, 0));
+  println("finalize {}", sqlite3_finalize(LStmt) = SQLITE_OK);
+
+  println("count {} sum {}", QueryInt(LDb, "SELECT count(*) FROM items"),
+    QueryFloat(LDb, "SELECT sum(price) FROM items"));
+
+  // The build options: FTS5, R*Tree, math functions, JSON
+  Exec(LDb, "CREATE VIRTUAL TABLE docs USING fts5(body)");
+  Exec(LDb, "INSERT INTO docs(body) VALUES ('PaskalCPP mixes with C'), ('SQLite in memory')");
+  println("fts5 match {}", QueryInt(LDb, "SELECT count(*) FROM docs WHERE docs MATCH 'paskalcpp'"));
+  Exec(LDb, "CREATE VIRTUAL TABLE boxes USING rtree(id, minx, maxx)");
+  Exec(LDb, "INSERT INTO boxes VALUES (1, 0, 10), (2, 20, 30)");
+  println("rtree hits {}", QueryInt(LDb, "SELECT count(*) FROM boxes WHERE minx <= 5 AND maxx >= 5"));
+  println("math sqrt {} pi {:.5f}", QueryFloat(LDb, "SELECT sqrt(16.0)"),
+    QueryFloat(LDb, "SELECT pi()"));
+  println("json length {}", QueryInt(LDb, "SELECT json_array_length('[1, 2, 3]')"));
+
+  // Wrong statements: SQLite's own code and reason, the database works on
+  LRc := Prepare(LDb, "SELEC 1", LStmt);
+  println("bad sql rc {} {}", LRc, sqlite3_errmsg(LDb));
+  sqlite3_finalize(LStmt);
+  LRc := Exec(LDb, "INSERT INTO items(name) VALUES (NULL)");
+  println("constraint rc {} {}", LRc, sqlite3_errmsg(LDb));
+  LRc := Prepare(LDb, "SELECT * FROM absent", LStmt);
+  println("missing table rc {} {}", LRc, sqlite3_errmsg(LDb));
+  sqlite3_finalize(LStmt);
+  println("still works {}", QueryInt(LDb, "SELECT count(*) FROM items"));
+
+  println("close {}", sqlite3_close(LDb) = SQLITE_OK);
+end.

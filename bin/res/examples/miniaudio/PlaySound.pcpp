@@ -25,9 +25,6 @@ import
   SysUtils,
   miniaudio;
 
-#include <chrono>
-#include <thread>
-
 const
   CSeconds: int32 = 5;
   CVolume: float32 = 0.5;
@@ -57,7 +54,7 @@ begin
   ma_sound_start(address of LSound);
   println("playing song01.ogg for {} seconds", CSeconds);
   for LSecond := 1 to CSeconds do
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+    Delay(1000);
     LCursor := 0.0;
     ma_sound_get_cursor_in_seconds(address of LSound, address of LCursor);
     println("  {} s: at {:.1f} s", LSecond, LCursor);

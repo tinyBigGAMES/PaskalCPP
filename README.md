@@ -102,7 +102,7 @@ With no `@optimize` a build is `debug`, and a debug build prints the runtime's h
 - **C++ is the surface.** `#include` a header and call it. A C++ type (`std::string`, `std::vector<int>`) can be the type of a PaskalCPP variable, and C++ declarations (a struct, a function, a template) stand at module level.
 - **Errors speak PaskalCPP.** A mistake on a PaskalCPP construct is reported in PaskalCPP's words and types. What only C++ can judge is clang's or the linker's own message, mapped back to the `.pcpp` file, line and column.
 - **The toolchain is in the box.** Zig and clang ship in the `res` folder beside `pcpp.exe`: one `pcpp` command turns a source file into a native binary.
-- **Libraries in the box.** The standard library holds PaskalCPP's own units (`SysUtils`, `Math`, `Console`, `ResData`, `CustomIO`, `HookIO`, `HookABI`, `raylib_ext`, `sfml_ext`) and vendor units for `box2d`, `cgltf`, `glfw`, `miniaudio`, `minizip`, `pl_mpeg`, `raylib`, `rlimgui`, `sdl3`, `sdl_gp`, `sfml`, `zlib` and fifteen stb libraries: `import sfml;` and the library is ready on both targets. The bundled examples (`res\examples`) build on both.
+- **Libraries in the box.** The standard library holds PaskalCPP's own units (`SysUtils`, `Math`, `Console`, `ResData`, `CustomIO`, `HookIO`, `HookABI`, `raylib_ext`, `rlimgui_ext`, `raven_raylib`, `sfml_ext`, `mojoal_ext`, `sqlite_ext`, `tmxlite_ext`, `ldtk_ext`) and vendor units for `box2d`, `cgltf`, `enet`, `flecs`, `glfw`, `ldtkloader`, `lua`, `miniaudio`, `minizip`, `mojoal`, `pl_mpeg`, `pugixml`, `raven`, `raylib`, `rlimgui`, `sdl3`, `sdl_gp`, `sfml`, `sqlite`, `tmxlite`, `yyjson`, `zlib`, `zstd` and fifteen stb libraries: `import sfml;` and the library is ready on both targets. The bundled examples (`res\examples`) build on both.
 - **Two targets, one source.** `@target` or `pcpp -t` picks x86_64-windows-gnu or x86_64-linux-gnu; `pcpp <file> -r` runs a Linux build through WSL.
 
 ## 🛠️ Tools
@@ -156,6 +156,41 @@ To fix it:
 The first build for a target also compiles the libraries every program links (the C runtime, libc++, libc++abi, libunwind, compiler_rt and the system import libraries) and keeps them in zig's cache, `bin\res\zig\.zig-cache`. That build can take a few minutes.
 
 Later builds for that target reuse them, at another optimize level too, and take seconds. The first build for the other target (x86_64-linux-gnu) compiles its own libraries once in the same way. Deleting `bin\res\zig\.zig-cache` makes the next build of each target slow again. How a build works is in [Building](https://paskalcpp.org/docs/build.html).
+
+</details>
+
+<details>
+<summary><b>How do I load a library's files from <code>assets.zip</code>?</b></summary>
+
+Mostly through `HookIO` (see [Standard library](https://paskalcpp.org/docs/stdlib.html)), which hands C's `fopen` a zip entry (an IO from `CreateZipFileIO`). Which way depends on the library:
+
+- mojoAL, SQLite, tmxlite and LDtkLoader: their `_ext` unit has a `...Zip` load form that takes the archive, the entry and the password (`LoadSoundZip`, `OpenDatabaseZip`, `LoadTiledMapZip`, `LoadLdtkProjectZip`), and an IO form beside it. See [Vendor libraries](https://paskalcpp.org/docs/vendor.html).
+- raylib: `raylib_ext`'s IO forms (`LoadTextureIO` and the rest) over `CreateZipFileIO`, or `SetRaylibIOSource` to make the zip raylib's file system. SFML: `sfml_ext`'s `sfx::ZipStream`.
+- Lua and yyjson: register the entry with `RegisterIO` and pass its `io://` path to `luaL_loadfile` or `yyjson_read_file`; they open files with `fopen`, so no extension unit is needed.
+- A SQLite database from a zip is read-only: SQLite opens files through its own layer, which HookIO does not reach, so `sqlite_ext` reads the entry into memory and hands it to `sqlite3_deserialize`.
+
+The `...Zip` examples in `res\examples` each load from the shared `assets.zip`.
+
+</details>
+
+<details>
+<summary><b>A Lua error skips my C++ destructors</b></summary>
+
+Lua's errors are C `longjmp`s: `lua_error`, `luaL_error` and a failing `luaL_check*` jump out of the routine that calls them, past every C++ destructor between there and the `lua_pcall`. A routine Lua calls therefore checks its arguments first, before it makes anything that needs freeing (a `string`, a container, an object).
+
+</details>
+
+<details>
+<summary><b>flecs' <code>ECS_COMPONENT</code> and <code>ecs_set</code> do not compile</b></summary>
+
+They are flecs' C macros, built on C compound literals, which C++ rejects. Use flecs' C++ API instead (`flecs::world`, `world.entity().set<T>(...)`, `world.system<...>().each(...)`), with PaskalCPP records as components; `std\flecs.pcpp` documents how a routine is written as an `.each` callback.
+
+</details>
+
+<details>
+<summary><b>An ENet server does not reach a client that just connected</b></summary>
+
+Each side gets its own CONNECT event when it services its host, and the client's often comes first. The server reaches (and broadcasts to) only the peers whose CONNECT it has seen, so wait for that event on the server before sending to the new peer.
 
 </details>
 
