@@ -89,3 +89,6 @@ bin/warmup.cmd
 /projects/pcppdev
 /bin/res/assets
 /bin/assets.zip
+
+# Test inputs (zips, maps, levels, sources, data): shipped in the release, never in git (user 2026-10-28)
+/bin/res/tests/**/fixtures/
