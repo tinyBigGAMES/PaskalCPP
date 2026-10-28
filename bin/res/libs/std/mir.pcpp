@@ -1,0 +1,73 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  mir.pcpp - the mir unit: `import mir;` uses MIR
+  (https://github.com/vnmakarov/mir: a lightweight JIT compiler) from
+  PaskalCPP: build functions through MIR's C API (mir.h), or compile C
+  source with c2mir (c2mir/c2mir.h), then link them for lazy or eager
+  native generation (mir-gen.h) and call them through their addresses.
+  A self-describing vendor module: it owns every include path, library path
+  and link library it needs, per official target. The libraries are
+  libmir.a (MIR's core, interpreter and generator) and libc2mir.a (the C11
+  frontend), one per target, built by PaskalCPP-Libs' build-mir.cmd with
+  its src\mir\win64-lazy-wrapper.patch (the lazy interface on Win64; see
+  that folder's FIXES.md), shipped under MIR's MIT license.
+
+  Rules learned on both targets (research\mir\findings.md): no C++
+  exception may unwind through a JIT'd frame (catch it in the host routine
+  the JIT'd code calls); a longjmp over JIT'd frames on Win64 needs
+  _setjmp(buf, NULL); MIR's error callback must not return; every import
+  JIT'd code makes is resolved by the host (MIR_load_external), c2mir's
+  memcpy / memset / memmove included.
+
+  It loads no files (c2mir reads its source through a callback, MIR text
+  and binary come from memory), so it has no _ext unit.
+==============================================================================*/
+
+module unit mir;
+
+// Self-describing vendor module: it owns every path it needs.
+
+@addincludepath "$P:res/libs/vendor/mir/include";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/mir/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/mir/lib/x86_64-linux-gnu";
+@else
+  @message error "mir: unsupported target";
+@endif
+
+// c2mir first: it calls into MIR's core
+@linklibrary "c2mir";
+@linklibrary "mir";
+
+// The headers go to this unit's header, so every importer sees MIR's API
+cpp header;
+
+#include "mir.h"
+#include "mir-gen.h"
+
+// c2mir.h has no extern "C" guard of its own (mir.h and mir-gen.h do):
+// without one its routines get C++ linkage and do not link against the C
+// library (PaskalCPP-Libs src\mir\FIXES.md, C)
+extern "C" {
+#include "c2mir/c2mir.h"
+}
+
+end.

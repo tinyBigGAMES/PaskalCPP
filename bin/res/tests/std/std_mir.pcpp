@@ -1,0 +1,189 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_mir.pcpp - Std library compliance: the mir vendor unit
+  (res\libs\std\mir.pcpp)
+
+  MIR used from PaskalCPP: a module written in MIR's text form
+  (MIR_scan_string) with a loop (sum), recursion (fib) and a call to a
+  `routine clink` of this program (std_mir_mul, registered with
+  MIR_load_external), JIT'd lazily and then eagerly; and c2mir compiling a
+  C function fed through a `routine clink` reader (std_mir_getc), JIT'd.
+  Hand-computed: sum(1000) = 499500, callmul(7) = 7 * 6 = 42,
+  fib(25) = 75025, square(9) = 81.
+
+  MIR's C boundary is mixed C++ where no PaskalCPP form expresses it: a
+  routine handed over as a void *, MIR's DLIST list macros (the last
+  module, a function by name: mir.h's MIR_get_global_item is declared but
+  not defined in v1.0.0), and a call through a raw code address.
+*******************************************************************************/
+
+module exe std_mir;
+
+/*
+  @@test
+    kind run
+    expect
+    | lazy sum 499500 mul 42 fib 75025
+    | eager sum 499500 mul 42 fib 75025
+    | c2mir compiled true square 81
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  mir;
+
+const
+  // MIR's text form: one module exporting sum, fib and callmul
+  CSource: string = R"(
+m_std:   module
+         export sum, fib, callmul
+p_mul:   proto i64, i64:a, i64:b
+p_fib:   proto i64, i64:n
+         import std_mir_mul
+sum:     func i64, i64:n
+         local i64:i, i64:s
+         mov i, 0; mov s, 0
+loop:    bge done, i, n
+         add s, s, i; add i, i, 1
+         jmp loop
+done:    ret s
+         endfunc
+fib:     func i64, i64:n
+         local i64:a, i64:b, i64:t
+         bge rec, n, 2
+         ret n
+rec:     sub t, n, 1
+         call p_fib, fib, a, t
+         sub t, n, 2
+         call p_fib, fib, b, t
+         add a, a, b
+         ret a
+         endfunc
+callmul: func i64, i64:x
+         local i64:r
+         call p_mul, std_mir_mul, r, x, 6
+         ret r
+         endfunc
+         endmodule
+)";
+
+  // C for c2mir (long is 32-bit on Win64: long long throughout)
+  CSquare: string = "long long square (long long x) { return x * x; }";
+
+var
+  GSource: string;
+  GPos: int64;
+  GOptions: c2mir_options;
+
+// The host routine the MIR module imports
+routine clink std_mir_mul(AA: int64; AB: int64): int64;
+begin
+  return AA * AB;
+end;
+
+// c2mir's reader: the next byte of GSource, -1 at the end (EOF)
+routine clink std_mir_getc(AData: ptr): int32;
+begin
+  if GPos >= int64(GSource.size()) then
+    return -1;
+  end;
+  GPos := GPos + 1;
+  return int32(GSource.at(GPos - 1));
+end;
+
+// MIR's C boundary: a routine as a void *, a list macro, a call by address
+static void std_mir_load_host(MIR_context_t ACtx)
+{
+  MIR_load_external(ACtx, "std_mir_mul", (void *) &std_mir_mul);
+}
+
+static MIR_module_t std_mir_last_module(MIR_context_t ACtx)
+{
+  return DLIST_TAIL(MIR_module_t, *MIR_get_module_list(ACtx));
+}
+
+static int64_t std_mir_call(void *AAddr, int64_t AArg)
+{
+  return ((int64_t (*)(int64_t)) AAddr)(AArg);
+}
+
+// A function's code address by name in a loaded module (mir.h declares
+// MIR_get_global_item, but v1.0.0 defines it nowhere: PaskalCPP-Libs
+// src\mir\FIXES.md, B)
+static void *std_mir_func_addr(MIR_context_t ACtx, MIR_module_t AModule, const char *AName)
+{
+  for (MIR_item_t LItem = DLIST_HEAD(MIR_item_t, AModule->items); LItem != nullptr;
+       LItem = DLIST_NEXT(MIR_item_t, LItem))
+    if (LItem->item_type == MIR_func_item && std::strcmp(MIR_item_name(ACtx, LItem), AName) == 0)
+      return LItem->addr;
+  return nullptr;
+}
+
+// Scans the MIR module into a fresh context, loads and links it (ALazy:
+// generated on first call, else at link) and prints the three results
+routine RunText(const ALabel: string; const ALazy: bool);
+var
+  LCtx: MIR_context_t;
+  LModule: MIR_module_t;
+begin
+  LCtx := MIR_init();
+  MIR_scan_string(LCtx, CSource.c_str());
+  LModule := std_mir_last_module(LCtx);
+  MIR_load_module(LCtx, LModule);
+  std_mir_load_host(LCtx);
+  MIR_gen_init(LCtx);
+  if ALazy then
+    MIR_link(LCtx, MIR_set_lazy_gen_interface, nil);
+  else
+    MIR_link(LCtx, MIR_set_gen_interface, nil);
+  end;
+  println("{} sum {} mul {} fib {}", ALabel,
+    std_mir_call(std_mir_func_addr(LCtx, LModule, "sum"), 1000),
+    std_mir_call(std_mir_func_addr(LCtx, LModule, "callmul"), 7),
+    std_mir_call(std_mir_func_addr(LCtx, LModule, "fib"), 25));
+  MIR_gen_finish(LCtx);
+  MIR_finish(LCtx);
+end;
+
+// c2mir compiles CSquare; square is JIT'd lazily and called
+routine RunC();
+var
+  LCtx: MIR_context_t;
+  LModule: MIR_module_t;
+  LOk: int32;
+begin
+  LCtx := MIR_init();
+  GSource := CSquare;
+  GPos := 0;
+  c2mir_init(LCtx);
+  LOk := c2mir_compile(LCtx, address of GOptions, std_mir_getc, nil, "square.c", nil);
+  c2mir_finish(LCtx);
+  LModule := std_mir_last_module(LCtx);
+  MIR_load_module(LCtx, LModule);
+  MIR_gen_init(LCtx);
+  MIR_link(LCtx, MIR_set_lazy_gen_interface, nil);
+  println("c2mir compiled {} square {}", LOk <> 0,
+    std_mir_call(std_mir_func_addr(LCtx, LModule, "square"), 9));
+  MIR_gen_finish(LCtx);
+  MIR_finish(LCtx);
+end;
+
+begin
+  RunText("lazy", true);
+  RunText("eager", false);
+  RunC();
+end.
