@@ -19,7 +19,9 @@
   MIR used from PaskalCPP: a module written in MIR's text form
   (MIR_scan_string) with a loop (sum), recursion (fib) and a call to a
   `routine clink` of this program (std_mir_mul, registered with
-  MIR_load_external), JIT'd lazily and then eagerly; and c2mir compiling a
+  MIR_load_external), JIT'd lazily, eagerly and lazily per basic block
+  (MIR_set_lazy_bb_gen_interface, its Win64 fixes: PaskalCPP-Libs
+  src\mir\FIXES.md, 3 + 4); and c2mir compiling a
   C function fed through a `routine clink` reader (std_mir_getc), JIT'd.
   Hand-computed: sum(1000) = 499500, callmul(7) = 7 * 6 = 42,
   fib(25) = 75025, square(9) = 81.
@@ -38,6 +40,7 @@ module exe std_mir;
     expect
     | lazy sum 499500 mul 42 fib 75025
     | eager sum 499500 mul 42 fib 75025
+    | lazybb sum 499500 mul 42 fib 75025
     | c2mir compiled true square 81
     | [Heap] Allocs: 0, Frees: 0, Leaked: 0
   @@end
@@ -45,6 +48,10 @@ module exe std_mir;
 
 import
   mir;
+
+type
+  // How RunText links its module: generated on first call, at link, or per basic block
+  TJitMode = choices(jmLazy, jmEager, jmLazyBB);
 
 const
   // MIR's text form: one module exporting sum, fib and callmul
@@ -133,9 +140,9 @@ static void *std_mir_func_addr(MIR_context_t ACtx, MIR_module_t AModule, const c
   return nullptr;
 }
 
-// Scans the MIR module into a fresh context, loads and links it (ALazy:
-// generated on first call, else at link) and prints the three results
-routine RunText(const ALabel: string; const ALazy: bool);
+// Scans the MIR module into a fresh context, loads and links it the way
+// AMode names and prints the three results
+routine RunText(const ALabel: string; const AMode: TJitMode);
 var
   LCtx: MIR_context_t;
   LModule: MIR_module_t;
@@ -146,10 +153,14 @@ begin
   MIR_load_module(LCtx, LModule);
   std_mir_load_host(LCtx);
   MIR_gen_init(LCtx);
-  if ALazy then
+  if AMode = TJitMode.jmLazy then
     MIR_link(LCtx, MIR_set_lazy_gen_interface, nil);
   else
-    MIR_link(LCtx, MIR_set_gen_interface, nil);
+    if AMode = TJitMode.jmEager then
+      MIR_link(LCtx, MIR_set_gen_interface, nil);
+    else
+      MIR_link(LCtx, MIR_set_lazy_bb_gen_interface, nil);
+    end;
   end;
   println("{} sum {} mul {} fib {}", ALabel,
     std_mir_call(std_mir_func_addr(LCtx, LModule, "sum"), 1000),
@@ -183,7 +194,8 @@ begin
 end;
 
 begin
-  RunText("lazy", true);
-  RunText("eager", false);
+  RunText("lazy", TJitMode.jmLazy);
+  RunText("eager", TJitMode.jmEager);
+  RunText("lazybb", TJitMode.jmLazyBB);
   RunC();
 end.

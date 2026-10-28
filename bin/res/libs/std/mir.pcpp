@@ -19,13 +19,14 @@
   mir.pcpp - the mir unit: `import mir;` uses MIR
   (https://github.com/vnmakarov/mir: a lightweight JIT compiler) from
   PaskalCPP: build functions through MIR's C API (mir.h), or compile C
-  source with c2mir (c2mir/c2mir.h), then link them for lazy or eager
-  native generation (mir-gen.h) and call them through their addresses.
+  source with c2mir (c2mir/c2mir.h), then link them for lazy, lazy
+  basic-block or eager native generation (mir-gen.h) and call them through
+  their addresses.
   A self-describing vendor module: it owns every include path, library path
   and link library it needs, per official target. The libraries are
   libmir.a (MIR's core, interpreter and generator) and libc2mir.a (the C11
   frontend), one per target, built by PaskalCPP-Libs' build-mir.cmd with
-  its src\mir\win64-lazy-wrapper.patch (the lazy interface on Win64; see
+  its src\mir\win64-lazy-wrapper.patch (both lazy interfaces on Win64; see
   that folder's FIXES.md), shipped under MIR's MIT license.
 
   Rules learned on both targets (research\mir\findings.md): no C++
