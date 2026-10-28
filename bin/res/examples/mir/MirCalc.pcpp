@@ -1,0 +1,233 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  MirCalc.pcpp - MIR example (import mir, mir_ext): a tiny compiler. An
+  expression in x (the first argument, or a default) is parsed by recursive
+  descent and compiled, as it is parsed, into a MIR function calc(x)
+  through mir_ext's builder routines; the generated MIR is printed, JIT'd
+  and called for x = 1 to 5. The expression takes integers, x, + - * / %,
+  unary minus and parentheses, with the usual precedence. A syntax error is
+  reported at its column and nothing is compiled.
+    MirCalc "(x + 3) * (x - 1) / 2 + x % 4"
+==============================================================================*/
+
+module exe MirCalc;
+
+import
+  mir,
+  mir_ext,
+  SysUtils;
+
+const
+  CDefault: string = "(x + 3) * (x - 1) / 2 + x % 4";
+
+var
+  // The parser's text, its position (0-based) and the first error
+  GText: string;
+  GPos: int64;
+  GError: string;
+  // The function being built: its item, body, parameter and temp count
+  GCtx: MIR_context_t;
+  GFunc: MIR_item_t;
+  GBody: MIR_func_t;
+  GX: MIR_reg_t;
+  GTemps: int32;
+
+// Records the first error, at the current column (1-based)
+routine Fail(const AMessage: string);
+begin
+  if GError = "" then
+    GError := FormatStr("column {}: {}", GPos + 1, AMessage);
+  end;
+end;
+
+// The next character after any blanks, char(0) at the end
+routine Peek(): char;
+begin
+  while (GPos < int64(GText.size())) and (GText[GPos] = ' ') do
+    GPos := GPos + 1;
+  end;
+  if GPos >= int64(GText.size()) then
+    return char(0);
+  end;
+  return GText[GPos];
+end;
+
+// A fresh temporary register of the function
+routine NewTemp(): MIR_reg_t;
+begin
+  GTemps := GTemps + 1;
+  return MIR_new_func_reg(GCtx, GBody, MIR_T_I64, FormatStr("t{}", GTemps).c_str());
+end;
+
+// Emits ACode into a new temporary over two operands; the temporary
+routine Binary(const ACode: MIR_insn_code_t; const ALeft: MIR_op_t; const ARight: MIR_op_t): MIR_op_t;
+var
+  LTemp: MIR_reg_t;
+begin
+  LTemp := NewTemp();
+  MirEmit(GCtx, GFunc, ACode, MIR_new_reg_op(GCtx, LTemp), ALeft, ARight);
+  return MIR_new_reg_op(GCtx, LTemp);
+end;
+
+// ParsePrimary parses a parenthesized expression: declared ahead
+forward routine ParseExpr(): MIR_op_t;
+
+// primary := integer | "x" | "(" expr ")"
+routine ParsePrimary(): MIR_op_t;
+var
+  LC: char;
+  LValue: int64;
+  LInner: MIR_op_t;
+begin
+  LC := Peek();
+  if (LC >= '0') and (LC <= '9') then
+    LValue := 0;
+    while (GPos < int64(GText.size())) and (GText[GPos] >= '0') and (GText[GPos] <= '9') do
+      LValue := LValue * 10 + int64(GText[GPos]) - int64('0');
+      GPos := GPos + 1;
+    end;
+    return MIR_new_int_op(GCtx, LValue);
+  end;
+  if LC = 'x' then
+    GPos := GPos + 1;
+    return MIR_new_reg_op(GCtx, GX);
+  end;
+  if LC = '(' then
+    GPos := GPos + 1;
+    LInner := ParseExpr();
+    if Peek() <> ')' then
+      Fail("')' expected");
+    else
+      GPos := GPos + 1;
+    end;
+    return LInner;
+  end;
+  if LC = char(0) then
+    Fail("the expression ends too soon");
+  else
+    Fail(FormatStr("unexpected '{}'", LC));
+  end;
+  return MIR_new_int_op(GCtx, 0);
+end;
+
+// unary := "-" unary | primary
+routine ParseUnary(): MIR_op_t;
+var
+  LTemp: MIR_reg_t;
+  LOperand: MIR_op_t;
+begin
+  if Peek() = '-' then
+    GPos := GPos + 1;
+    LOperand := ParseUnary();
+    LTemp := NewTemp();
+    MirEmit(GCtx, GFunc, MIR_NEG, MIR_new_reg_op(GCtx, LTemp), LOperand);
+    return MIR_new_reg_op(GCtx, LTemp);
+  end;
+  return ParsePrimary();
+end;
+
+// term := unary { ("*" | "/" | "%") unary }
+routine ParseTerm(): MIR_op_t;
+var
+  LLeft: MIR_op_t;
+  LC: char;
+begin
+  LLeft := ParseUnary();
+  LC := Peek();
+  while (LC = '*') or (LC = '/') or (LC = '%') do
+    GPos := GPos + 1;
+    if LC = '*' then
+      LLeft := Binary(MIR_MUL, LLeft, ParseUnary());
+    else
+      if LC = '/' then
+        LLeft := Binary(MIR_DIV, LLeft, ParseUnary());
+      else
+        LLeft := Binary(MIR_MOD, LLeft, ParseUnary());
+      end;
+    end;
+    LC := Peek();
+  end;
+  return LLeft;
+end;
+
+// expr := term { ("+" | "-") term }
+routine ParseExpr(): MIR_op_t;
+var
+  LLeft: MIR_op_t;
+  LC: char;
+begin
+  LLeft := ParseTerm();
+  LC := Peek();
+  while (LC = '+') or (LC = '-') do
+    GPos := GPos + 1;
+    if LC = '+' then
+      LLeft := Binary(MIR_ADD, LLeft, ParseTerm());
+    else
+      LLeft := Binary(MIR_SUB, LLeft, ParseTerm());
+    end;
+    LC := Peek();
+  end;
+  return LLeft;
+end;
+
+var
+  LModule: MIR_module_t;
+  LResult: MIR_op_t;
+  LCalc: ptr;
+  LX: int64;
+
+begin
+  GText := CDefault;
+  if paramcount() >= 1 then
+    GText := paramstr(1);
+  end;
+  GPos := 0;
+  GError := "";
+  GTemps := 0;
+  println("calc(x) = {}", GText);
+
+  GCtx := MirNew();
+  MIR_new_module(GCtx, "m_calc");
+  GFunc := MirNewFunc(GCtx, "calc", "x");
+  GBody := MIR_get_item_func(GCtx, GFunc);
+  GX := MIR_reg(GCtx, "x", GBody);
+  LResult := ParseExpr();
+  if (GError = "") and (Peek() <> char(0)) then
+    Fail("operator expected");
+  end;
+  if GError <> "" then
+    println("syntax error, {}", GError);
+    Halt(1);
+  end;
+  MirEmitRet(GCtx, GFunc, LResult);
+  if not MirFinishFunc(GCtx) then
+    println("MIR refused calc: {}", MirLastError());
+    Halt(1);
+  end;
+  LModule := MirFinishModule(GCtx);
+  if (LModule = nil) or not MirLink(GCtx, MirLinkMode.Eager) then
+    println("calc does not load: {}", MirLastError());
+    Halt(1);
+  end;
+
+  println("compiled to:");
+  MirPrintModule(GCtx, LModule);
+  LCalc := MirFuncAddr(GCtx, LModule, "calc");
+  for LX := 1 to 5 do
+    println("calc({}) = {}", LX, MirCall(LCalc, LX));
+  end;
+  MirFree(GCtx);
+end.

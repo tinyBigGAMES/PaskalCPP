@@ -19,9 +19,12 @@
   SysUtils.pcpp - the SysUtils unit: `import SysUtils;` turns any spelling of
   a path into one full, normalized path (ResolvePath), with the same prefixes
   the compiler's own directives take ($P: $D: $S:), and tells where the
-  running program lives (ExeDir), formats values into a string as println
-  prints them (FormatStr) and waits a given time (Delay). A name is read bare
-  when no other imported unit exports it (ResolvePath), or qualified
+  running program lives (ExeDir), checks for and deletes a file
+  (FileExists, DeleteFile), creates and removes a folder (CreateDir,
+  RemoveDir), formats values into a string
+  as println prints them (FormatStr), waits a given time (Delay) and ends
+  the program with an exit code (Halt). A name is read bare when no other
+  imported unit exports it (ResolvePath), or qualified
   (SysUtils.ResolvePath).
 ==============================================================================*/
 
@@ -34,12 +37,16 @@ module unit SysUtils;
 cpp source;
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <system_error>
 #include <thread>
 #ifdef _WIN32
 #include <windows.h>
+// windows.h maps DeleteFile to DeleteFileA / DeleteFileW: this unit's own
+// DeleteFile must keep its name in its definition
+#undef DeleteFile
 #else
 #include <unistd.h>
 #endif
@@ -325,6 +332,71 @@ bool PathFileExists(const std::string& APath)
   return std::filesystem::is_regular_file(LPath, LError);
 }
 
+// A file only (Delphi's DeleteFile): false for a folder, a missing path or
+// one the OS refuses. std::filesystem, the UTF-8 text in as char8_t.
+bool PathDeleteFile(const std::string& APath)
+{
+  std::error_code LError;
+  if (APath.empty())
+    return false;
+  try
+  {
+    const std::filesystem::path LPath(std::u8string(APath.begin(), APath.end()));
+    if (!std::filesystem::is_regular_file(LPath, LError))
+      return false;
+    return std::filesystem::remove(LPath, LError);
+  }
+  catch (...)
+  {
+    return false;
+  }
+}
+
+// One folder, its parent already there (Delphi's CreateDir, not
+// ForceDirectories); false when it exists already or cannot be made.
+// std::filesystem on both targets, the UTF-8 text in as char8_t
+// (PathFileExists's rule).
+bool PathCreateDir(const std::string& APath)
+{
+  std::error_code LError;
+  if (APath.empty())
+    return false;
+  // The path conversion allocates: out of memory is a failure, never an escape
+  try
+  {
+    const std::filesystem::path LPath(std::u8string(APath.begin(), APath.end()));
+    if (!std::filesystem::is_directory(LPath.parent_path(), LError))
+      return false;
+    return std::filesystem::create_directory(LPath, LError);
+  }
+  catch (...)
+  {
+    return false;
+  }
+}
+
+// An empty folder only (Delphi's RemoveDir); false for a folder with
+// anything in it, a file, or a missing path
+bool PathRemoveDir(const std::string& APath)
+{
+  std::error_code LError;
+  if (APath.empty())
+    return false;
+  try
+  {
+    const std::filesystem::path LPath(std::u8string(APath.begin(), APath.end()));
+    if (!std::filesystem::is_directory(LPath, LError))
+      return false;
+    if (!std::filesystem::is_empty(LPath, LError) || LError)
+      return false;
+    return std::filesystem::remove(LPath, LError);
+  }
+  catch (...)
+  {
+    return false;
+  }
+}
+
 // std::this_thread on both targets (at least the time asked: the OS may wake
 // the thread a little later); a wait of 0 or less returns at once
 void TimeDelay(const int AMilliseconds)
@@ -442,6 +514,59 @@ begin
     return false;
   end;
   return PathFileExists(ResolvePath(APath));
+end;
+
+/// Deletes a file, as Delphi's DeleteFile: a folder is never removed by it.
+/// The path is UTF-8 and goes through `ResolvePath` first.
+/// @param APath the file to delete
+/// @returns true when the file was deleted; false when it is a folder, is
+///   missing, or the OS refuses it (a file open elsewhere on Windows)
+/// @example `DeleteFile("$P:old_save.dat");`
+/// @since 0.3
+/// @see FileExists
+exported routine DeleteFile(const APath: string): bool;
+begin
+  return PathDeleteFile(ResolvePath(APath));
+end;
+
+/// Creates one folder, as Delphi's CreateDir: its parent must exist already
+/// (nothing above it is made). The path is UTF-8 and goes through
+/// `ResolvePath` first.
+/// @param APath the folder to create
+/// @returns true when the folder was made; false when it exists already
+///   (as a folder or a file), its parent is missing, or the OS refuses it
+/// @example `CreateDir("$P:saves");`
+/// @since 0.3
+/// @see RemoveDir
+exported routine CreateDir(const APath: string): bool;
+begin
+  return PathCreateDir(ResolvePath(APath));
+end;
+
+/// Removes an empty folder, as Delphi's RemoveDir: a folder that holds
+/// anything is left as it is. The path is UTF-8 and goes through
+/// `ResolvePath` first.
+/// @param APath the folder to remove
+/// @returns true when the folder was removed; false when it is not empty,
+///   is a file, is missing, or the OS refuses it
+/// @example `RemoveDir("$P:saves");`
+/// @since 0.3
+/// @see CreateDir
+exported routine RemoveDir(const APath: string): bool;
+begin
+  return PathRemoveDir(ResolvePath(APath));
+end;
+
+/// Ends the program at once with the given exit code (Delphi's Halt):
+/// std::exit, so the program's exit work still runs (output is flushed,
+/// files closed, the debug heap report printed); the caller's locals are
+/// not destroyed.
+/// @param AExitCode the code the program ends with (0 is success)
+/// @example `if not LOk then Halt(1); end;`
+/// @since 0.3
+exported routine Halt(const AExitCode: int32);
+begin
+  std::exit(AExitCode);
 end;
 
 /// Waits the given number of milliseconds, then returns: at least that long

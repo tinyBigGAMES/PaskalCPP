@@ -1,0 +1,476 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_customio_zipwrite.pcpp - Std: CustomIO ZipDirectoryContents
+
+  IOReadFull reads a whole count, a short count at the end (state Eof),
+  nothing for size 0 or nil; IOSameContent finds equal streams equal (one
+  block and more), a difference past the first 4096-byte block, a length
+  difference, and nil. IOWriteFull writes a whole count to an owned memory
+  IO, nothing to a read-only one (state ReadOnly) or nil; IOReadAll reads a
+  whole stream, the rest from a position, nothing at the end, a stream with
+  no size in chunks, and fails on nil. ZipDirectoryContents packs
+  res\tests\std\fixtures\std_customio_zipwrite\ (written by
+  scripts\customio\gen_zipwrite.py, never edited by hand: a small text
+  file, a 150000-byte file of more than two 64 KiB chunks, an empty file, a
+  file two folders down, a file whose name is not ASCII) into
+  archives in repo\bin\output, and every one is read back through
+  CreateZipFileIO / CreateZipIOSource, each entry compared byte for byte
+  with its file. Each overload is used: no password and the folder as the
+  root, a password (read back with it; no password and a wrong one give no
+  IO), a root above the folder (entries named std_customio_zipwrite/...,
+  the plain names not found), and the full form with a progress routine
+  (its user pointer, each entry's calls in name order: 0 first, rising,
+  100 last, the large file's steps between). An existing archive is
+  replaced. An empty folder the test makes in output (CreateDir) packs into
+  a valid archive with no entries; an archive written into the folder it
+  packs leaves itself out when written again. A folder outside its root,
+  a missing folder and a file given as the folder fail and write no
+  archive, ZipLastError naming the step; an archive in a missing folder
+  fails and leaves no file; a success clears the reason. The archives are
+  removed at the end (a folder IOSource over output, DeleteFile), so
+  nothing is left behind. Each row prints ok or FAIL with its name.
+*******************************************************************************/
+
+module exe std_customio_zipwrite;
+
+/*
+  @@test
+    kind run
+    expect
+    | ok readfull whole
+    | ok readfull bytes
+    | ok readfull at end
+    | ok readfull at end eof
+    | ok readfull short
+    | ok readfull zero size
+    | ok readfull nil
+    | ok same equal
+    | ok same differs past a block
+    | ok same differs in length
+    | ok same equal one block
+    | ok same nil
+    | ok writefull whole
+    | ok writefull size
+    | ok writefull zero size
+    | ok writefull read only
+    | ok writefull read only state
+    | ok writefull nil
+    | ok readall whole
+    | ok readall bytes
+    | ok readall rest
+    | ok readall at end
+    | ok readall unsized
+    | ok readall nil
+    | ok plain written
+    | ok plain readme
+    | ok plain big
+    | ok plain empty
+    | ok plain nested
+    | ok plain unicode
+    | ok plain size big
+    | ok plain no root prefix
+    | ok plain missing entry
+    | ok plain replaced
+    | ok plain replaced readme
+    | ok pass written
+    | ok pass readme
+    | ok pass big
+    | ok pass unicode
+    | ok pass no password
+    | ok pass wrong password
+    | ok root written
+    | ok root readme
+    | ok root nested
+    | ok root plain name not found
+    | ok progress written
+    | ok progress user data
+    | ok progress calls
+    | ok progress new files
+    | ok progress sequence
+    | ok progress readme
+    | ok empty folder made
+    | ok empty written
+    | ok empty opens
+    | ok empty has no entry
+    | ok inside written
+    | ok inside written again
+    | ok inside leaves itself out
+    | ok cleanup empty
+    | ok cleanup inside
+    | ok cleanup empty folder
+    | ok outside root fails
+    | ok outside root no archive
+    | ok outside root reason
+    | ok missing folder fails
+    | ok missing folder no archive
+    | ok missing folder reason
+    | ok file as folder fails
+    | ok file as folder no archive
+    | ok archive in missing folder fails
+    | ok archive in missing folder reason
+    | ok archive in missing folder no file
+    | ok success clears reason
+    | ok success archive removed
+    | ok cleanup plain
+    | ok cleanup pass
+    | ok cleanup root
+    | ok cleanup progress
+    | ok cleanup gone
+    | done 0
+    | [Heap] Allocs: 88, Frees: 88, Leaked: 0
+  @@end
+*/
+
+import
+  CustomIO,
+  SysUtils;
+
+const
+  CFolder: string = "$P:../../res/tests/std/fixtures/std_customio_zipwrite";
+  CFixtures: string = "$P:../../res/tests/std/fixtures";
+  CPlain: string = "$P:../std_customio_zipwrite_plain.zip";
+  CPass: string = "$P:../std_customio_zipwrite_pass.zip";
+  CRoot: string = "$P:../std_customio_zipwrite_root.zip";
+  CProgress: string = "$P:../std_customio_zipwrite_progress.zip";
+  CNever: string = "$P:../std_customio_zipwrite_never.zip";
+  // The one folder this test makes in repo\bin\output (an empty folder
+  // cannot ship in git; user 2026-10-28), removed at the end
+  CEmpty: string = "$P:../std_customio_zipwrite_empty";
+  CEmptyZip: string = "$P:../std_customio_zipwrite_empty.zip";
+  CPassword: string = "PaskalCPP";
+  // The progress routine's calls for the fixture, in name order (UTF-8
+  // byte order puts the non-ASCII name last): big.bin is 150000 bytes, so
+  // its 64 KiB chunks report 43 and 87 before 100
+  CSequence: string = "data/big.bin:0 43 87 100 data/deep/nested.txt:0 100 data/empty.txt:0 100 readme.txt:0 100 ünïcode €.txt:0 100 ";
+
+type
+  // What the progress routine records
+  ProgressLog = record
+    Calls: int32;
+    NewFiles: int32;
+    Sequence: string;
+    WrongUserData: bool;
+  end;
+
+var
+  GFails: int32;
+  GLog: ProgressLog;
+
+routine Check(const AName: string; const AOk: bool);
+begin
+  if AOk then
+    println("ok {}", AName);
+  else
+    println("FAIL {}", AName);
+    GFails := GFails + 1;
+  end;
+end;
+
+// True when AEntry of AArchive (opened with APassword) holds the bytes of
+// the fixture file AFile (relative to the fixture folder)
+routine SameAsFile(const AArchive: string; const AEntry: string; const APassword: string; const AFile: string): bool;
+var
+  LFile: IO;
+  LEntry: IO;
+  LSame: bool;
+begin
+  LFile := CreateFileIO(CFolder + "/" + AFile, FileMode.Read);
+  LEntry := CreateZipFileIO(AArchive, AEntry, APassword);
+  LSame := IOSameContent(LFile, LEntry);
+  if LFile <> nil then
+    IOClose(LFile);
+  end;
+  if LEntry <> nil then
+    IOClose(LEntry);
+  end;
+  return LSame;
+end;
+
+// True when AArchive opens and has an entry AEntry
+routine HasEntry(const AArchive: string; const AEntry: string): bool;
+var
+  LSource: IOSource;
+  LFound: bool;
+begin
+  LSource := CreateZipIOSource(AArchive);
+  if LSource = nil then
+    return false;
+  end;
+  LFound := IOSourceExists(LSource, AEntry);
+  IOSourceClose(LSource);
+  return LFound;
+end;
+
+// The progress routine: records every call into the log its user pointer
+// names, and that the pointer was the one handed in
+routine LogProgress(const AUserData: ptr; const AEntry: string; const APercent: int32; const ANewFile: bool);
+var
+  LLog: ptr to ProgressLog;
+begin
+  if AUserData <> address of GLog then
+    GLog.WrongUserData := true;
+    return;
+  end;
+  LLog := ptr to ProgressLog(AUserData);
+  LLog->Calls := LLog->Calls + 1;
+  if ANewFile then
+    LLog->NewFiles := LLog->NewFiles + 1;
+    LLog->Sequence := LLog->Sequence + AEntry + ":";
+  end;
+  LLog->Sequence := LLog->Sequence + FormatStr("{} ", APercent);
+end;
+
+// A stream with no size, no seek, no tell: reads through to another IO (the
+// user pointer points at it)
+routine UnsizedRead(const AUserData: ptr; const ABuffer: ptr; const ASize: int64; var AState: IOState): int64;
+var
+  LInner: IO;
+  LGot: int64;
+begin
+  LInner := ptr to IO(AUserData)^;
+  LGot := IORead(LInner, ABuffer, ASize);
+  if LGot < ASize then
+    AState := IOStatus(LInner);
+  end;
+  return LGot;
+end;
+
+// IOReadFull, IOWriteFull, IOReadAll and IOSameContent over memory IOs:
+// 5000 bytes cross the compare's 4096-byte block
+routine TestHelpers();
+var
+  LLeft: array[0..4999] of uint8;
+  LRight: array[0..4999] of uint8;
+  LBuffer: array[0..4999] of uint8;
+  LA: IO;
+  LB: IO;
+  LI: int32;
+  LData: string;
+  LInner: IO;
+  LInterface: IOInterface;
+begin
+  for LI := 0 to 4999 do
+    LLeft[LI] := uint8(LI mod 251);
+    LRight[LI] := uint8(LI mod 251);
+  end;
+  LA := CreateMemoryIO(address of LLeft[0], 5000, true);
+  Check("readfull whole", IOReadFull(LA, address of LBuffer[0], 5000) = 5000);
+  Check("readfull bytes", LBuffer[4999] = LLeft[4999]);
+  Check("readfull at end", IOReadFull(LA, address of LBuffer[0], 5) = 0);
+  Check("readfull at end eof", IOStatus(LA) = IOState.Eof);
+  IOSeek(LA, 4990, SeekOrigin.FromStart);
+  Check("readfull short", IOReadFull(LA, address of LBuffer[0], 20) = 10);
+  Check("readfull zero size", IOReadFull(LA, address of LBuffer[0], 0) = 0);
+  Check("readfull nil", IOReadFull(nil, address of LBuffer[0], 5) = 0);
+  IOClose(LA);
+
+  LA := CreateMemoryIO(address of LLeft[0], 5000, true);
+  LB := CreateMemoryIO(address of LRight[0], 5000, true);
+  Check("same equal", IOSameContent(LA, LB));
+  IOClose(LA);
+  IOClose(LB);
+  LRight[4500] := uint8(LRight[4500] + 1);
+  LA := CreateMemoryIO(address of LLeft[0], 5000, true);
+  LB := CreateMemoryIO(address of LRight[0], 5000, true);
+  Check("same differs past a block", not IOSameContent(LA, LB));
+  IOClose(LA);
+  IOClose(LB);
+  LRight[4500] := LLeft[4500];
+  LA := CreateMemoryIO(address of LLeft[0], 5000, true);
+  LB := CreateMemoryIO(address of LRight[0], 4999, true);
+  Check("same differs in length", not IOSameContent(LA, LB));
+  IOClose(LA);
+  IOClose(LB);
+  LA := CreateMemoryIO(address of LLeft[0], 4096, true);
+  LB := CreateMemoryIO(address of LRight[0], 4096, true);
+  Check("same equal one block", IOSameContent(LA, LB));
+  IOClose(LB);
+  Check("same nil", not IOSameContent(LA, nil));
+  IOClose(LA);
+
+  // IOWriteFull: an owned memory IO takes it all; read-only and nil take none
+  LA := CreateMemoryIO();
+  Check("writefull whole", IOWriteFull(LA, address of LLeft[0], 5000) = 5000);
+  Check("writefull size", IOSize(LA) = 5000);
+  Check("writefull zero size", IOWriteFull(LA, address of LLeft[0], 0) = 0);
+  IOClose(LA);
+  LA := CreateMemoryIO(address of LRight[0], 5000, true);
+  Check("writefull read only", IOWriteFull(LA, address of LLeft[0], 10) = 0);
+  Check("writefull read only state", IOStatus(LA) = IOState.ReadOnly);
+  IOClose(LA);
+  Check("writefull nil", IOWriteFull(nil, address of LLeft[0], 5) = 0);
+
+  // IOReadAll: whole, from the middle, an IO with no size (chunks), nil
+  LA := CreateMemoryIO(address of LLeft[0], 5000, true);
+  Check("readall whole", IOReadAll(LA, LData) and (int64(LData.size()) = 5000));
+  Check("readall bytes", (uint8(LData[4999]) = LLeft[4999]) and (uint8(LData[0]) = LLeft[0]));
+  IOSeek(LA, 4000, SeekOrigin.FromStart);
+  Check("readall rest", IOReadAll(LA, LData) and (int64(LData.size()) = 1000) and (uint8(LData[0]) = LLeft[4000]));
+  Check("readall at end", IOReadAll(LA, LData) and (LData = ""));
+  LInner := LA;
+  LInterface.Read := UnsizedRead;
+  LInterface.Write := nil;
+  LInterface.Seek := nil;
+  LInterface.Tell := nil;
+  LInterface.Size := nil;
+  LInterface.Flush := nil;
+  LInterface.Close := nil;
+  LInterface.Truncate := nil;
+  IOSeek(LA, 0, SeekOrigin.FromStart);
+  LB := CreateIO(LInterface, address of LInner);
+  Check("readall unsized", IOReadAll(LB, LData) and (int64(LData.size()) = 5000) and (uint8(LData[4999]) = LLeft[4999]));
+  IOClose(LB);
+  IOClose(LA);
+  Check("readall nil", not IOReadAll(nil, LData) and (LData = ""));
+end;
+
+// No password, the folder as the root; then written again over itself
+routine TestPlain();
+var
+  LSource: IOSource;
+begin
+  Check("plain written", ZipDirectoryContents(CPlain, CFolder));
+  Check("plain readme", SameAsFile(CPlain, "readme.txt", "", "readme.txt"));
+  Check("plain big", SameAsFile(CPlain, "data/big.bin", "", "data/big.bin"));
+  Check("plain empty", SameAsFile(CPlain, "data/empty.txt", "", "data/empty.txt"));
+  Check("plain nested", SameAsFile(CPlain, "data/deep/nested.txt", "", "data/deep/nested.txt"));
+  Check("plain unicode", SameAsFile(CPlain, "ünïcode €.txt", "", "ünïcode €.txt"));
+  LSource := CreateZipIOSource(CPlain);
+  Check("plain size big", IOSourceSize(LSource, "data/big.bin") = 150000);
+  Check("plain no root prefix", not IOSourceExists(LSource, "std_customio_zipwrite/readme.txt"));
+  Check("plain missing entry", IOSourceOpen(LSource, "nope.txt") = nil);
+  IOSourceClose(LSource);
+  Check("plain replaced", ZipDirectoryContents(CPlain, CFolder));
+  Check("plain replaced readme", SameAsFile(CPlain, "readme.txt", "", "readme.txt"));
+end;
+
+// Every entry encrypted: it reads back with the password only
+routine TestPassword();
+var
+  LEntry: IO;
+begin
+  Check("pass written", ZipDirectoryContents(CPass, CFolder, CPassword));
+  Check("pass readme", SameAsFile(CPass, "readme.txt", CPassword, "readme.txt"));
+  Check("pass big", SameAsFile(CPass, "data/big.bin", CPassword, "data/big.bin"));
+  Check("pass unicode", SameAsFile(CPass, "ünïcode €.txt", CPassword, "ünïcode €.txt"));
+  LEntry := CreateZipFileIO(CPass, "readme.txt");
+  Check("pass no password", LEntry = nil);
+  if LEntry <> nil then
+    IOClose(LEntry);
+  end;
+  LEntry := CreateZipFileIO(CPass, "readme.txt", "paskalcpp");
+  Check("pass wrong password", LEntry = nil);
+  if LEntry <> nil then
+    IOClose(LEntry);
+  end;
+end;
+
+// Entries named below a root above the folder
+routine TestRoot();
+begin
+  Check("root written", ZipDirectoryContents(CRoot, CFolder, "", CFixtures));
+  Check("root readme", SameAsFile(CRoot, "std_customio_zipwrite/readme.txt", "", "readme.txt"));
+  Check("root nested", SameAsFile(CRoot, "std_customio_zipwrite/data/deep/nested.txt", "", "data/deep/nested.txt"));
+  Check("root plain name not found", not HasEntry(CRoot, "readme.txt"));
+end;
+
+// The full form: the progress routine and its user pointer
+routine TestProgress();
+begin
+  GLog.Calls := 0;
+  GLog.NewFiles := 0;
+  GLog.Sequence := "";
+  GLog.WrongUserData := false;
+  Check("progress written", ZipDirectoryContents(CProgress, CFolder, "", "", LogProgress, address of GLog));
+  Check("progress user data", not GLog.WrongUserData);
+  Check("progress calls", GLog.Calls = 12);
+  Check("progress new files", GLog.NewFiles = 5);
+  Check("progress sequence", GLog.Sequence = CSequence);
+  if GLog.Sequence <> CSequence then
+    println("  got: {}", GLog.Sequence);
+  end;
+  Check("progress readme", SameAsFile(CProgress, "readme.txt", "", "readme.txt"));
+end;
+
+// A folder made here, empty: it packs into a valid archive with no entries.
+// Then an archive written inside the folder it packs: written twice, the
+// second listing sees the first archive and leaves it out. Removed again.
+routine TestEmptyFolder();
+var
+  LOutput: IOSource;
+  LSource: IOSource;
+begin
+  Check("empty folder made", CreateDir(CEmpty));
+  Check("empty written", ZipDirectoryContents(CEmptyZip, CEmpty));
+  LSource := CreateZipIOSource(CEmptyZip);
+  Check("empty opens", LSource <> nil);
+  Check("empty has no entry", not IOSourceExists(LSource, "readme.txt"));
+  IOSourceClose(LSource);
+  Check("inside written", ZipDirectoryContents(CEmpty + "/self.zip", CEmpty));
+  Check("inside written again", ZipDirectoryContents(CEmpty + "/self.zip", CEmpty));
+  Check("inside leaves itself out", not HasEntry(CEmpty + "/self.zip", "self.zip"));
+  LOutput := CreateFolderIOSource("$P:..");
+  Check("cleanup empty", IOSourceRemove(LOutput, "std_customio_zipwrite_empty.zip"));
+  Check("cleanup inside", IOSourceRemove(LOutput, "std_customio_zipwrite_empty/self.zip"));
+  IOSourceClose(LOutput);
+  Check("cleanup empty folder", RemoveDir(CEmpty));
+end;
+
+// What fails writes no archive
+routine TestFailures();
+begin
+  Check("outside root fails", not ZipDirectoryContents(CNever, CFolder, "", "$P:../../res/tests/lex"));
+  Check("outside root no archive", not FileExists(CNever));
+  Check("outside root reason", ZipLastError().contains("is not inside the root"));
+  Check("missing folder fails", not ZipDirectoryContents(CNever, CFolder + "_none"));
+  Check("missing folder no archive", not FileExists(CNever));
+  Check("missing folder reason", ZipLastError().contains("is not a folder"));
+  Check("file as folder fails", not ZipDirectoryContents(CNever, CFolder + "/readme.txt"));
+  Check("file as folder no archive", not FileExists(CNever));
+  Check("archive in missing folder fails", not ZipDirectoryContents("$P:../std_customio_zipwrite_none/x.zip", CFolder));
+  Check("archive in missing folder reason", ZipLastError().contains("cannot create the archive"));
+  Check("archive in missing folder no file", not FileExists("$P:../std_customio_zipwrite_none/x.zip"));
+  Check("success clears reason", ZipDirectoryContents(CNever, CFolder) and (ZipLastError() = ""));
+  Check("success archive removed", DeleteFile(CNever));
+end;
+
+// The archives this program wrote are removed through a folder source over
+// repo\bin\output, and checked gone
+routine TestCleanup();
+var
+  LOutput: IOSource;
+begin
+  LOutput := CreateFolderIOSource("$P:..");
+  Check("cleanup plain", IOSourceRemove(LOutput, "std_customio_zipwrite_plain.zip"));
+  Check("cleanup pass", IOSourceRemove(LOutput, "std_customio_zipwrite_pass.zip"));
+  Check("cleanup root", IOSourceRemove(LOutput, "std_customio_zipwrite_root.zip"));
+  Check("cleanup progress", IOSourceRemove(LOutput, "std_customio_zipwrite_progress.zip"));
+  IOSourceClose(LOutput);
+  Check("cleanup gone", not FileExists(CPlain) and not FileExists(CPass) and not FileExists(CRoot) and not FileExists(CProgress));
+end;
+
+begin
+  GFails := 0;
+  TestHelpers();
+  TestPlain();
+  TestPassword();
+  TestRoot();
+  TestProgress();
+  TestEmptyFolder();
+  TestFailures();
+  TestCleanup();
+  println("done {}", GFails);
+end.

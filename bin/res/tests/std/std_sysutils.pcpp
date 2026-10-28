@@ -28,7 +28,11 @@
   path gives "". ExeDir is the executable's folder, no trailing separator.
   FileExists is true for an existing file only (not a folder, a missing
   path, "" or nil), the string and the ptr to const char overload alike; it
-  resolves its path itself, so "$P:..." works as written. Delay(N) waits at
+  resolves its path itself, so "$P:..." works as written. CreateDir
+  makes one folder (not one that exists, not below a missing parent, not
+  ""); RemoveDir removes an empty folder only (not one holding a folder,
+  not a file, not a missing one, not ""). DeleteFile deletes a file the
+  program wrote (not twice, not a folder, not ""). Delay(N) waits at
   least N milliseconds (steady clock, whole milliseconds); 0 or less returns
   at once (well under a second).
   The names are called bare (only SysUtils exports them); the "qualified"
@@ -81,6 +85,23 @@ module exe std_sysutils;
     | ok   empty path
     | ok   ptr file
     | ok   ptr nil file
+    | ok   mkdir
+    | ok   mkdir again
+    | ok   mkdir is no file
+    | ok   mkdir missing parent
+    | ok   mkdir empty
+    | ok   rmdir not empty
+    | ok   rmdir sub
+    | ok   rmdir
+    | ok   rmdir gone
+    | ok   rmdir file
+    | ok   rmdir empty
+    | ok   delete made
+    | ok   delete
+    | ok   delete gone
+    | ok   delete again
+    | ok   delete folder
+    | ok   delete empty
     | ok   utf8
     | ok   at 247
     | ok   past 247
@@ -89,11 +110,13 @@ module exe std_sysutils;
     | ok   unc
     | ok   unc long
     | ok   long slashes
-    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+    | [Heap] Allocs: 1, Frees: 1, Leaked: 0
   @@end
 */
 
-import SysUtils;
+import
+  SysUtils,
+  CustomIO;
 
 // The steady clock in whole milliseconds, for the Delay rows
 #include <chrono>
@@ -133,6 +156,22 @@ begin
   end;
 end;
 
+// A one-line file at APath (CustomIO), for the DeleteFile rows
+routine WriteMark(const APath: string): bool;
+var
+  LIO: IO;
+  LOk: bool;
+  LText: string;
+begin
+  LIO := CreateFileIO(APath, FileMode.Write);
+  if LIO = nil then
+    return false;
+  end;
+  LText := "mark";
+  LOk := IOWriteFull(LIO, LText.data(), 4) = 4;
+  return IOClose(LIO) and LOk;
+end;
+
 var
   LExe: string;
   LBase: string;
@@ -141,6 +180,7 @@ var
   LLong: string;
   LFile: string;
   LStart: int64;
+  LDir: string;
 
 begin
   LExe := ExeDir();
@@ -229,6 +269,37 @@ begin
   CheckBool("ptr file", FileExists(LCPath), true);
   LCPath := nil;
   CheckBool("ptr nil file", FileExists(LCPath), false);
+
+  // CreateDir / RemoveDir on a folder in repo\bin\output (each program its
+  // own name), removed again: one level only, an empty folder only
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  LDir := "$P:../std_sysutils_dir";
+@else
+  LDir := "$P:../std_sysutils_linux_dir";
+@endif
+  CheckBool("mkdir", CreateDir(LDir), true);
+  CheckBool("mkdir again", CreateDir(LDir), false);
+  CheckBool("mkdir is no file", FileExists(LDir), false);
+  CheckBool("mkdir missing parent", CreateDir(LDir + "/a/b"), false);
+  CheckBool("mkdir empty", CreateDir(""), false);
+  CreateDir(LDir + "/sub");
+  CheckBool("rmdir not empty", RemoveDir(LDir), false);
+  CheckBool("rmdir sub", RemoveDir(LDir + "/sub"), true);
+  CheckBool("rmdir", RemoveDir(LDir), true);
+  CheckBool("rmdir gone", RemoveDir(LDir), false);
+  CheckBool("rmdir file", RemoveDir(LFile), false);
+  CheckBool("rmdir empty", RemoveDir(""), false);
+
+  // DeleteFile: a file this program wrote in repo\bin\output, deleted; a
+  // folder (the program's own) is never deleted by it
+  LDir := LDir + ".txt";
+  LCPath := nil;
+  CheckBool("delete made", WriteMark(LDir), true);
+  CheckBool("delete", DeleteFile(LDir), true);
+  CheckBool("delete gone", FileExists(LDir), false);
+  CheckBool("delete again", DeleteFile(LDir), false);
+  CheckBool("delete folder", DeleteFile(LExe), false);
+  CheckBool("delete empty", DeleteFile(""), false);
 
 @ifdef TARGET_X86_64_WINDOWS_GNU
   Check("utf8", ResolvePath("C:\\ünï\\..\\ö.txt"), "C:/ö.txt");

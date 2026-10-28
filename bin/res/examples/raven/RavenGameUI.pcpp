@@ -82,7 +82,7 @@ const
   // Kenney Tiny Town's sheet: 12 x 11 tiles of 16 pixels
   CTileColumns: int32 = 12;
   CTileRows: int32 = 11;
-  CCoinTile: int32 = 93;
+  CCoinTile: int32 =  93;
 
 type
   // What a slot holds

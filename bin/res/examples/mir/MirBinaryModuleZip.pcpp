@@ -1,0 +1,45 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  MirBinaryModuleZip.pcpp - MIR example (import mir, mir_ext): a
+  ready-made module shipped in bin\assets.zip. MirReadZip reads
+  res/assets/data/mir/demo.bmir (password PaskalCPP; written by
+  scripts\mir\gen_bmir.py) through CustomIO with nothing unpacked to disk,
+  loads it with no compiler step at all, and its three functions (fib, sum,
+  gcd) are JIT'd and called.
+==============================================================================*/
+
+module exe MirBinaryModuleZip;
+
+import
+  mir,
+  mir_ext;
+
+var
+  LCtx: MIR_context_t;
+  LModule: MIR_module_t;
+
+begin
+  LCtx := MirNew();
+  LModule := MirReadZip(LCtx, "$P:../../assets.zip", "res/assets/data/mir/demo.bmir", "PaskalCPP");
+  if (LModule = nil) or not MirLink(LCtx, MirLinkMode.Lazy) then
+    println("demo.bmir does not load from assets.zip: {}", MirLastError());
+    return;
+  end;
+  println("fib(30) = {}", MirCall(MirFuncAddr(LCtx, LModule, "fib"), 30));
+  println("sum(100000) = {}", MirCall(MirFuncAddr(LCtx, LModule, "sum"), 100000));
+  println("gcd(1071, 462) = {}", MirCall(MirFuncAddr(LCtx, LModule, "gcd"), 1071, 462));
+  MirFree(LCtx);
+end.

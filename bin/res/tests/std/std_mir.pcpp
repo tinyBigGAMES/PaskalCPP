@@ -19,17 +19,18 @@
   MIR used from PaskalCPP: a module written in MIR's text form
   (MIR_scan_string) with a loop (sum), recursion (fib) and a call to a
   `routine clink` of this program (std_mir_mul, registered with
-  MIR_load_external), JIT'd lazily, eagerly and lazily per basic block
-  (MIR_set_lazy_bb_gen_interface, its Win64 fixes: PaskalCPP-Libs
+  MirLoadHost), JIT'd lazily, eagerly and lazily per basic block
+  (MirLinkMode.LazyBB, its Win64 fixes: PaskalCPP-Libs
   src\mir\FIXES.md, 3 + 4); and c2mir compiling a
   C function fed through a `routine clink` reader (std_mir_getc), JIT'd.
   Hand-computed: sum(1000) = 499500, callmul(7) = 7 * 6 = 42,
   fib(25) = 75025, square(9) = 81.
 
-  MIR's C boundary is mixed C++ where no PaskalCPP form expresses it: a
-  routine handed over as a void *, MIR's DLIST list macros (the last
-  module, a function by name: mir.h's MIR_get_global_item is declared but
-  not defined in v1.0.0), and a call through a raw code address.
+  MIR's C boundary (a routine handed over as a void *, the last module, a
+  function by name, a call through a code address, the link modes) is the
+  mir_ext unit's (MirLoadHost, MirLoadModuleText, MirFuncAddr, MirCall,
+  MirLink): the program holds no C++ of its own. c2mir's reader is used
+  directly here (the mir unit's own API); C2MirCompileString wraps it.
 *******************************************************************************/
 
 module exe std_mir;
@@ -47,11 +48,8 @@ module exe std_mir;
 */
 
 import
-  mir;
-
-type
-  // How RunText links its module: generated on first call, at link, or per basic block
-  TJitMode = choices(jmLazy, jmEager, jmLazyBB);
+  mir,
+  mir_ext;
 
 const
   // MIR's text form: one module exporting sum, fib and callmul
@@ -112,90 +110,48 @@ begin
   return int32(GSource.at(GPos - 1));
 end;
 
-// MIR's C boundary: a routine as a void *, a list macro, a call by address
-static void std_mir_load_host(MIR_context_t ACtx)
-{
-  MIR_load_external(ACtx, "std_mir_mul", (void *) &std_mir_mul);
-}
-
-static MIR_module_t std_mir_last_module(MIR_context_t ACtx)
-{
-  return DLIST_TAIL(MIR_module_t, *MIR_get_module_list(ACtx));
-}
-
-static int64_t std_mir_call(void *AAddr, int64_t AArg)
-{
-  return ((int64_t (*)(int64_t)) AAddr)(AArg);
-}
-
-// A function's code address by name in a loaded module (mir.h declares
-// MIR_get_global_item, but v1.0.0 defines it nowhere: PaskalCPP-Libs
-// src\mir\FIXES.md, B)
-static void *std_mir_func_addr(MIR_context_t ACtx, MIR_module_t AModule, const char *AName)
-{
-  for (MIR_item_t LItem = DLIST_HEAD(MIR_item_t, AModule->items); LItem != nullptr;
-       LItem = DLIST_NEXT(MIR_item_t, LItem))
-    if (LItem->item_type == MIR_func_item && std::strcmp(MIR_item_name(ACtx, LItem), AName) == 0)
-      return LItem->addr;
-  return nullptr;
-}
-
-// Scans the MIR module into a fresh context, loads and links it the way
-// AMode names and prints the three results
-routine RunText(const ALabel: string; const AMode: TJitMode);
+// Scans the MIR module into a fresh context, links it the way AMode names
+// and prints the three results
+routine RunText(const ALabel: string; const AMode: MirLinkMode);
 var
   LCtx: MIR_context_t;
   LModule: MIR_module_t;
 begin
-  LCtx := MIR_init();
-  MIR_scan_string(LCtx, CSource.c_str());
-  LModule := std_mir_last_module(LCtx);
-  MIR_load_module(LCtx, LModule);
-  std_mir_load_host(LCtx);
-  MIR_gen_init(LCtx);
-  if AMode = TJitMode.jmLazy then
-    MIR_link(LCtx, MIR_set_lazy_gen_interface, nil);
-  else
-    if AMode = TJitMode.jmEager then
-      MIR_link(LCtx, MIR_set_gen_interface, nil);
-    else
-      MIR_link(LCtx, MIR_set_lazy_bb_gen_interface, nil);
-    end;
-  end;
+  LCtx := MirNew();
+  LModule := MirLoadModuleText(LCtx, CSource);
+  MirLoadHost(LCtx, "std_mir_mul", std_mir_mul);
+  MirLink(LCtx, AMode);
   println("{} sum {} mul {} fib {}", ALabel,
-    std_mir_call(std_mir_func_addr(LCtx, LModule, "sum"), 1000),
-    std_mir_call(std_mir_func_addr(LCtx, LModule, "callmul"), 7),
-    std_mir_call(std_mir_func_addr(LCtx, LModule, "fib"), 25));
-  MIR_gen_finish(LCtx);
-  MIR_finish(LCtx);
+    MirCall(MirFuncAddr(LCtx, LModule, "sum"), 1000),
+    MirCall(MirFuncAddr(LCtx, LModule, "callmul"), 7),
+    MirCall(MirFuncAddr(LCtx, LModule, "fib"), 25));
+  MirFree(LCtx);
 end;
 
-// c2mir compiles CSquare; square is JIT'd lazily and called
+// c2mir compiles CSquare through its own reader; square is JIT'd lazily and called
 routine RunC();
 var
   LCtx: MIR_context_t;
   LModule: MIR_module_t;
   LOk: int32;
 begin
-  LCtx := MIR_init();
+  LCtx := MirNew();
   GSource := CSquare;
   GPos := 0;
   c2mir_init(LCtx);
   LOk := c2mir_compile(LCtx, address of GOptions, std_mir_getc, nil, "square.c", nil);
   c2mir_finish(LCtx);
-  LModule := std_mir_last_module(LCtx);
+  LModule := MirLastModule(LCtx);
   MIR_load_module(LCtx, LModule);
-  MIR_gen_init(LCtx);
-  MIR_link(LCtx, MIR_set_lazy_gen_interface, nil);
+  MirLink(LCtx, MirLinkMode.Lazy);
   println("c2mir compiled {} square {}", LOk <> 0,
-    std_mir_call(std_mir_func_addr(LCtx, LModule, "square"), 9));
-  MIR_gen_finish(LCtx);
-  MIR_finish(LCtx);
+    MirCall(MirFuncAddr(LCtx, LModule, "square"), 9));
+  MirFree(LCtx);
 end;
 
 begin
-  RunText("lazy", TJitMode.jmLazy);
-  RunText("eager", TJitMode.jmEager);
-  RunText("lazybb", TJitMode.jmLazyBB);
+  RunText("lazy", MirLinkMode.Lazy);
+  RunText("eager", MirLinkMode.Eager);
+  RunText("lazybb", MirLinkMode.LazyBB);
   RunC();
 end.

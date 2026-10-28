@@ -24,7 +24,9 @@
   IO from any interface. The IO routines (IORead, IOWrite, IOSeek, IOTell,
   IOSize, IOFlush, IOTruncate, IOClose, IOStatus) call through the table
   and keep the stream's state: a callback left nil is a clean failure, never
-  a crash.
+  a crash. IOReadFull / IOWriteFull move a count through any short reads
+  or writes a stream gives; IOReadAll reads a stream to its end into a
+  string; IOSameContent compares two streams to their ends.
   CreateMemoryIO makes an IO over the caller's memory (read-only, or read /
   write within its size) or over a buffer of its own that grows as it is
   written. CreateFileIO makes an IO over a file, opened in one of C's fopen
@@ -40,6 +42,11 @@
   file, memory, an entry of another source), ZIP64 included, its entries
   (stored, deflated, ZipCrypto) read-only IOs that seek without starting
   over. CreateZipFileIO opens one entry of an archive directly.
+  ZipDirectoryContents is the write side: every file under a folder into a
+  new archive (deflated, optionally ZipCrypto encrypted, entry names below
+  a root of the caller's choice, a ZipProgress routine per entry), the
+  archive that CreateZipIOSource / CreateZipFileIO read back; ZipLastError
+  says why one failed.
 ==============================================================================*/
 
 module unit CustomIO;
@@ -56,10 +63,14 @@ import
 cpp source;
 
 #include <algorithm>
+#include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <new>
 #include <string>
 #include <system_error>
@@ -1667,6 +1678,312 @@ bool ZipDoEntryClose(void* AIO)
   return ZipDoEntryFree(static_cast<ZipEntryIOData*>(AIO));
 }
 
+// The zip writer (ZipDirectoryContents) runs on minizip's zip side. Its
+// progress goes out through a plain routine value the PaskalCPP side hands
+// in (ZipWriteProgress, a bridge to the caller's ZipProgress): the context
+// first, then the entry's name (UTF-8), the percent of its bytes written and
+// whether this is the entry's first call. No C++ here names the unit's
+// routines.
+using ZipDoProgressFn = void (*)(void*, const char*, std::int32_t, bool);
+
+// The writer reads its source files in chunks of this size
+constexpr std::size_t ZipDoWriteChunk = 64 * 1024;
+
+// Why the last ZipDirectoryContents on this thread failed ("" when it
+// succeeded): its step, the path and the OS's own words where there are any
+thread_local std::string GZipDoWriteError;
+
+// Records AText as the failure's reason (never throws); false, for
+// `return ZipDoFail(...)`
+bool ZipDoFail(const std::string& AText) noexcept
+{
+  try
+  {
+    GZipDoWriteError = AText;
+  }
+  catch (...)
+  {
+  }
+  return false;
+}
+
+// The OS's words for the last C runtime error (errno), for a reason
+std::string ZipDoErrno()
+{
+  return std::generic_category().message(errno);
+}
+
+// UTF-8 text as a path, never through the ANSI code page (Windows)
+std::filesystem::path ZipDoUtf8Path(const std::string& AText)
+{
+  return std::filesystem::path(std::u8string(AText.begin(), AText.end()));
+}
+
+// A path as UTF-8 text with '/' between folders
+std::string ZipDoPathText(const std::filesystem::path& APath)
+{
+  const std::u8string LText = APath.generic_u8string();
+  return std::string(LText.begin(), LText.end());
+}
+
+// True when AText holds no byte of 0x80 or above
+bool ZipDoIsAscii(const std::string& AText)
+{
+  for (const char LChar : AText)
+  {
+    if (static_cast<unsigned char>(LChar) >= 0x80)
+      return false;
+  }
+  return true;
+}
+
+// AFile's modification time in minizip's local date form; 1980-01-01 (the
+// earliest date an entry holds) when it cannot be read or lies before it
+tm_zip ZipDoFileTime(const std::filesystem::path& AFile)
+{
+  tm_zip LResult{};
+  LResult.tm_mday = 1;
+  LResult.tm_year = 1980;
+  std::error_code LError;
+  const std::filesystem::file_time_type LWritten = std::filesystem::last_write_time(AFile, LError);
+  if (LError)
+    return LResult;
+  // zig's libc++ has no std::chrono::clock_cast: the file clock's time is
+  // moved to the system clock by the two clocks' offset now (microseconds
+  // off; a zip entry's date holds 2-second steps)
+  const auto LSystem = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+    LWritten - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
+  const std::time_t LTime = std::chrono::system_clock::to_time_t(LSystem);
+  std::tm LLocal{};
+#ifdef _WIN32
+  if (localtime_s(&LLocal, &LTime) != 0)
+    return LResult;
+#else
+  if (localtime_r(&LTime, &LLocal) == nullptr)
+    return LResult;
+#endif
+  if (LLocal.tm_year + 1900 < 1980)
+    return LResult;
+  LResult.tm_sec = LLocal.tm_sec;
+  LResult.tm_min = LLocal.tm_min;
+  LResult.tm_hour = LLocal.tm_hour;
+  LResult.tm_mday = LLocal.tm_mday;
+  LResult.tm_mon = LLocal.tm_mon;
+  LResult.tm_year = LLocal.tm_year + 1900;
+  return LResult;
+}
+
+// Reports one step of an entry's progress, when a routine was handed in
+void ZipDoReport(const ZipDoProgressFn AProgress, void* AContext, const std::string& AName,
+  const std::int32_t APercent, const bool ANewFile)
+{
+  if (AProgress != nullptr)
+    AProgress(AContext, AName.c_str(), APercent, ANewFile);
+}
+
+// Writes AFile as the entry AName: its CRC read in a first pass (the
+// password header needs it before the data), then its bytes. False when the
+// file cannot be read, changed between the passes, or the entry cannot be
+// written.
+bool ZipDoAddFile(zipFile AZip, const std::filesystem::path& AFile, const std::string& AName,
+  const std::string& APassword, const ZipDoProgressFn AProgress, void* AContext)
+{
+  std::ifstream LIn(AFile, std::ios::binary);
+  std::vector<char> LBuffer(ZipDoWriteChunk);
+  uLong LCrc = crc32(0L, Z_NULL, 0);
+  std::uint64_t LSize = 0;
+  if (!LIn)
+    return ZipDoFail("cannot open " + ZipDoPathText(AFile) + ": " + ZipDoErrno());
+  while (LIn)
+  {
+    LIn.read(LBuffer.data(), static_cast<std::streamsize>(LBuffer.size()));
+    const std::streamsize LGot = LIn.gcount();
+    if (LGot > 0)
+    {
+      LCrc = crc32(LCrc, reinterpret_cast<const Bytef*>(LBuffer.data()), static_cast<uInt>(LGot));
+      LSize += static_cast<std::uint64_t>(LGot);
+    }
+  }
+  // The end of the file sets failbit too; badbit is a read error
+  if (LIn.bad())
+    return ZipDoFail("cannot read " + ZipDoPathText(AFile) + ": " + ZipDoErrno());
+  LIn.clear();
+  LIn.seekg(0);
+  if (!LIn)
+    return ZipDoFail("cannot read " + ZipDoPathText(AFile) + " again: " + ZipDoErrno());
+
+  zip_fileinfo LInfo{};
+  LInfo.tmz_date = ZipDoFileTime(AFile);
+  const char* LPassword = nullptr;
+  if (!APassword.empty())
+    LPassword = APassword.c_str();
+  // General purpose bit 11: the name is UTF-8 (set when it holds a non-ASCII byte)
+  uLong LFlags = 0;
+  if (!ZipDoIsAscii(AName))
+    LFlags = 1u << 11;
+  int LZip64 = 0;
+  if (LSize >= 0xffffffffull)
+    LZip64 = 1;
+  if (zipOpenNewFileInZip4_64(AZip, AName.c_str(), &LInfo, nullptr, 0, nullptr, 0, nullptr,
+    Z_DEFLATED, Z_BEST_COMPRESSION, 0, -MAX_WBITS, DEF_MEM_LEVEL, Z_DEFAULT_STRATEGY,
+    LPassword, LCrc, 0, LFlags, LZip64) != ZIP_OK)
+    return ZipDoFail("cannot start the entry " + AName + " in the archive");
+
+  ZipDoReport(AProgress, AContext, AName, 0, true);
+  bool LOk = true;
+  std::uint64_t LDone = 0;
+  while (LOk && LIn)
+  {
+    LIn.read(LBuffer.data(), static_cast<std::streamsize>(LBuffer.size()));
+    const std::streamsize LGot = LIn.gcount();
+    if (LGot <= 0)
+      continue;
+    if (zipWriteInFileInZip(AZip, LBuffer.data(), static_cast<unsigned int>(LGot)) != ZIP_OK)
+    {
+      LOk = ZipDoFail("cannot write the entry " + AName + " into the archive: " + ZipDoErrno());
+      continue;
+    }
+    LDone += static_cast<std::uint64_t>(LGot);
+    // LSize > 0 here: bytes were read
+    ZipDoReport(AProgress, AContext, AName, static_cast<std::int32_t>(LDone * 100 / LSize), false);
+  }
+  // A read error, or a file whose size changed since its CRC was taken
+  if (LOk && LIn.bad())
+    LOk = ZipDoFail("cannot read " + ZipDoPathText(AFile) + ": " + ZipDoErrno());
+  if (LOk && (LDone != LSize))
+    LOk = ZipDoFail(ZipDoPathText(AFile) + " changed while it was packed");
+  if (LOk && (LSize == 0))
+    ZipDoReport(AProgress, AContext, AName, 100, false);
+  // Called whatever the writes gave: the entry is always closed
+  if ((zipCloseFileInZip(AZip) != ZIP_OK) && LOk)
+    LOk = ZipDoFail("cannot finish the entry " + AName + " in the archive");
+  return LOk;
+}
+
+// Every regular file below AFolder into AFiles as (entry name below ARoot
+// with '/', file), in byte order of the names, AArchive left out. False when
+// AFolder is not inside ARoot or cannot be listed.
+bool ZipDoListFiles(const std::filesystem::path& AFolder, const std::filesystem::path& ARoot,
+  const std::filesystem::path& AArchive,
+  std::vector<std::pair<std::string, std::filesystem::path>>& AFiles)
+{
+  std::error_code LError;
+  // The folder must lie inside the root: its path below the root holds no ".."
+  const std::filesystem::path LBelow = AFolder.lexically_relative(ARoot);
+  if (LBelow.empty() || (*LBelow.begin() == ".."))
+    return ZipDoFail(ZipDoPathText(AFolder) + " is not inside the root " + ZipDoPathText(ARoot));
+  // A missing folder or a file is no folder to pack
+  if (!std::filesystem::is_directory(AFolder, LError))
+    return ZipDoFail(ZipDoPathText(AFolder) + " is not a folder");
+  // ResolvePath gives full, normalized paths: the entries' paths compare as text
+  const std::filesystem::path LSkip = AArchive.lexically_normal();
+  std::filesystem::recursive_directory_iterator LEntry(AFolder, LError);
+  for (; !LError && (LEntry != std::filesystem::recursive_directory_iterator()); LEntry.increment(LError))
+  {
+    const bool LRegular = LEntry->is_regular_file(LError);
+    if (LError)
+      break;
+    if (!LRegular)
+      continue;
+    const std::filesystem::path LFile = LEntry->path().lexically_normal();
+    if (LFile == LSkip)
+      continue;
+    AFiles.emplace_back(ZipDoPathText(LFile.lexically_relative(ARoot)), LEntry->path());
+  }
+  if (LError)
+    return ZipDoFail("cannot list " + ZipDoPathText(AFolder) + ": " + LError.message());
+  // The same archive whatever order the OS lists the files in
+  std::sort(AFiles.begin(), AFiles.end(),
+    [](const auto& ALeft, const auto& ARight) { return ALeft.first < ARight.first; });
+  return true;
+}
+
+// Why AArchive cannot be opened for writing, in the C runtime's words:
+// minizip's Windows file functions leave errno alone, so the archive is
+// opened once more in append mode (which never empties it) to ask the C
+// runtime; the handle is closed at once, and a file that open made (none
+// was there) is removed again
+std::string ZipDoWhyNoWrite(const std::filesystem::path& AArchive)
+{
+  std::error_code LError;
+  const bool LExisted = std::filesystem::exists(AArchive, LError);
+  errno = 0;
+  std::FILE* const LProbe = FileDoOpenHandle(AArchive, 3);
+  if (LProbe != nullptr)
+  {
+    std::fclose(LProbe);
+    if (!LExisted)
+      std::filesystem::remove(AArchive, LError);
+    return "minizip refused it (the file itself opens for writing)";
+  }
+  return ZipDoErrno();
+}
+
+const std::string& ZipDoLastError()
+{
+  return GZipDoWriteError;
+}
+
+// Writes every file under AFolder (its subfolders too) into a new AArchive
+// (all three paths resolved, UTF-8; ARoot empty = AFolder itself), deflated
+// at the best level, each entry ZipCrypto encrypted with APassword unless it
+// is empty. The archive write and every file read are the disk's, never a
+// path HookIO would redirect. False when AFolder is not a folder inside
+// ARoot or cannot be listed (no archive written then), a file cannot be read
+// or the archive cannot be written (an archive begun is then incomplete).
+bool ZipDoWrite(const std::string& AArchive, const std::string& AFolder,
+  const std::string& APassword, const std::string& ARoot, const ZipDoProgressFn AProgress,
+  void* AContext)
+{
+  const pcpp_customio_internal::FileSystemScope LScope;
+  GZipDoWriteError.clear();
+  // The path conversions and the list allocate: out of memory is a failed
+  // write, never an escape (a progress routine raising is the same)
+  try
+  {
+    const std::filesystem::path LFolder = ZipDoUtf8Path(AFolder);
+    const std::filesystem::path LArchive = ZipDoUtf8Path(AArchive);
+    std::filesystem::path LRoot = LFolder;
+    if (!ARoot.empty())
+      LRoot = ZipDoUtf8Path(ARoot);
+    std::vector<std::pair<std::string, std::filesystem::path>> LFiles;
+    if (!ZipDoListFiles(LFolder, LRoot, LArchive, LFiles))
+      return false;
+
+    // The UTF-8 file functions: zipOpen64's own read the path in the ANSI
+    // code page on Windows
+    zlib_filefunc64_def LFuncs;
+    fill_utf8_filefunc64(&LFuncs);
+    zipFile LZip = zipOpen2_64(AArchive.c_str(), APPEND_STATUS_CREATE, nullptr, &LFuncs);
+    if (LZip == nullptr)
+      return ZipDoFail("cannot create the archive " + AArchive + ": " + ZipDoWhyNoWrite(LArchive));
+    bool LOk = true;
+    try
+    {
+      for (const auto& LFile : LFiles)
+      {
+        if (!ZipDoAddFile(LZip, LFile.second, LFile.first, APassword, AProgress, AContext))
+        {
+          LOk = false;
+          break;
+        }
+      }
+    }
+    catch (...)
+    {
+      LOk = ZipDoFail("the progress routine raised, or memory ran out, while packing");
+    }
+    // Called whatever the entries gave: the archive is always closed
+    if ((zipClose(LZip, nullptr) != ZIP_OK) && LOk)
+      LOk = ZipDoFail("cannot finish the archive " + AArchive + " (its directory)");
+    return LOk;
+  }
+  catch (...)
+  {
+    return ZipDoFail("out of memory");
+  }
+}
+
 } // namespace
 
 exported type
@@ -2030,6 +2347,161 @@ begin
     return IOState.Error;
   end;
   return AIO->State;
+end;
+
+/// Reads ASize bytes into ABuffer, calling IORead until they are all in or
+/// a read gives nothing (the end, an error, a non-blocking source with
+/// nothing yet): a stream may answer one IORead with fewer bytes than it
+/// has. IOStatus says why a short count stopped.
+/// @param AIO the stream
+/// @param ABuffer where the bytes go (at least ASize bytes)
+/// @param ASize how many bytes to read (0 or more)
+/// @returns the count read: ASize, or fewer when the stream stopped first
+///   (0 for a nil IO or ASize <= 0)
+/// @example `if IOReadFull(LIO, address of LHeader[0], 16) <> 16 then ... end;`
+/// @since 0.3
+/// @see IORead
+/// @see IOStatus
+exported routine IOReadFull(const AIO: IO; const ABuffer: ptr; const ASize: int64): int64;
+var
+  LBytes: ptr to uint8;
+  LDone: int64;
+  LGot: int64;
+begin
+  if (AIO = nil) or (ASize <= 0) then
+    return 0;
+  end;
+  LBytes := ptr to uint8(ABuffer);
+  LDone := 0;
+  while LDone < ASize do
+    LGot := IORead(AIO, LBytes + LDone, ASize - LDone);
+    if LGot <= 0 then
+      return LDone;
+    end;
+    LDone := LDone + LGot;
+  end;
+  return LDone;
+end;
+
+/// Writes ASize bytes from ABuffer, calling IOWrite until they are all out
+/// or a write takes nothing (an error, a full or non-blocking stream): a
+/// stream may take fewer bytes than one IOWrite offers. IOStatus says why a
+/// short count stopped.
+/// @param AIO the stream
+/// @param ABuffer the bytes (at least ASize)
+/// @param ASize how many bytes to write (0 or more)
+/// @returns the count written: ASize, or fewer when the stream stopped first
+///   (0 for a nil IO or ASize <= 0)
+/// @example `if IOWriteFull(LIO, LData.data(), int64(LData.size())) <> int64(LData.size()) then ... end;`
+/// @since 0.3
+/// @see IOWrite
+/// @see IOReadFull
+exported routine IOWriteFull(const AIO: IO; const ABuffer: ptr; const ASize: int64): int64;
+var
+  LBytes: ptr to uint8;
+  LDone: int64;
+  LPut: int64;
+begin
+  if (AIO = nil) or (ASize <= 0) then
+    return 0;
+  end;
+  LBytes := ptr to uint8(ABuffer);
+  LDone := 0;
+  while LDone < ASize do
+    LPut := IOWrite(AIO, LBytes + LDone, ASize - LDone);
+    if LPut <= 0 then
+      return LDone;
+    end;
+    LDone := LDone + LPut;
+  end;
+  return LDone;
+end;
+
+/// Reads a stream from where it stands to its end into AData, as bytes (a
+/// string holds any bytes, zeros included). A stream with a size reads in
+/// one pass; one without (IOSize -1) reads in chunks until its end.
+/// @param AIO the stream
+/// @param AData the bytes read (empty on failure)
+/// @returns true when the stream was read to its end; false for a nil IO or
+///   a read that failed (state Error) or stopped short of the end
+/// @example `if IOReadAll(CreateZipFileIO("$P:assets.zip", "intro.txt"), LText) then ... end;`
+/// @since 0.3
+/// @see IOReadFull
+exported routine IOReadAll(const AIO: IO; var AData: string): bool;
+var
+  LSize: int64;
+  LPosition: int64;
+  LChunk: array[0..65535] of uint8;
+  LGot: int64;
+begin
+  AData := "";
+  if AIO = nil then
+    return false;
+  end;
+  LSize := IOSize(AIO);
+  LPosition := IOTell(AIO);
+  if (LSize >= 0) and (LPosition >= 0) and (LSize >= LPosition) then
+    // The rest of a sized stream in one read
+    AData.resize(uint64(LSize - LPosition));
+    if IOReadFull(AIO, AData.data(), LSize - LPosition) <> LSize - LPosition then
+      AData := "";
+      return false;
+    end;
+    return true;
+  end;
+  // No size: chunks until the stream says it ended
+  while true do
+    LGot := IOReadFull(AIO, address of LChunk[0], 65536);
+    AData.append(ptr to const char(address of LChunk[0]), uint64(LGot));
+    if LGot < 65536 then
+      if IOStatus(AIO) = IOState.Eof then
+        return true;
+      end;
+      AData := "";
+      return false;
+    end;
+  end;
+  return false;
+end;
+
+/// True when two streams hold the same bytes from where each stands to its
+/// end (both are read to the end; their positions move). A stream that
+/// fails a read before its end counts as different.
+/// @param ALeft one stream
+/// @param ARight the other
+/// @returns true when both give the same bytes and end together; false when
+///   they differ or either is nil
+/// @example `Check("entry intact", IOSameContent(LFile, LEntry));`
+/// @since 0.3
+/// @see IOReadFull
+exported routine IOSameContent(const ALeft: IO; const ARight: IO): bool;
+var
+  LLeft: array[0..4095] of uint8;
+  LRight: array[0..4095] of uint8;
+  LGotLeft: int64;
+  LGotRight: int64;
+begin
+  if (ALeft = nil) or (ARight = nil) then
+    return false;
+  end;
+  while true do
+    LGotLeft := IOReadFull(ALeft, address of LLeft[0], 4096);
+    LGotRight := IOReadFull(ARight, address of LRight[0], 4096);
+    if LGotLeft <> LGotRight then
+      return false;
+    end;
+    if LGotLeft < 4096 then
+      // The end of both, or a failed read on both: only the end is the same
+      if (IOStatus(ALeft) = IOState.Error) or (IOStatus(ARight) = IOState.Error) then
+        return false;
+      end;
+      return std::memcmp(address of LLeft[0], address of LRight[0], LGotLeft) = 0;
+    end;
+    if std::memcmp(address of LLeft[0], address of LRight[0], 4096) <> 0 then
+      return false;
+    end;
+  end;
+  return false;
 end;
 
 type
@@ -3015,6 +3487,141 @@ end;
 exported routine CreateZipFileIO(const APath: string; const AEntry: string): IO;
 begin
   return ZipEntryOf(ZipCreate(CreateFileIO(APath, FileMode.Read), true, ""), AEntry);
+end;
+
+exported type
+  /// Called by ZipDirectoryContents for each entry it writes: once with
+  /// APercent 0 and ANewFile true before the entry's first byte, then with
+  /// the percent of its bytes written and ANewFile false (100 last; an empty
+  /// file gets 0 then 100).
+  /// @param AUserData the pointer given to ZipDirectoryContents
+  /// @param AEntry the entry's name in the archive (UTF-8, `/` separated)
+  /// @param APercent 0 to 100
+  /// @param ANewFile true on the entry's first call
+  /// @example `routine Show(const AUserData: ptr; const AEntry: string; const APercent: int32; const ANewFile: bool); begin if ANewFile then println("{}", AEntry); end; end;`
+  /// @since 0.3
+  /// @see ZipDirectoryContents
+  ZipProgress = routine(const AUserData: ptr; const AEntry: string; const APercent: int32; const ANewFile: bool);
+
+type
+  // What the C++ writer hands back to ZipWriteProgress: the caller's routine
+  // and its user pointer
+  ZipWriteContext = record
+    Progress: ZipProgress;
+    UserData: ptr;
+  end;
+
+// The writer's progress, bridged to the caller's ZipProgress (the C++ side
+// passes plain C types only, as ZipDoCreate's routines take)
+routine ZipWriteProgress(const AContext: ptr; const AEntry: ptr to const char; const APercent: int32; const ANewFile: bool);
+var
+  LContext: ptr to ZipWriteContext;
+begin
+  LContext := ptr to ZipWriteContext(AContext);
+  LContext->Progress(LContext->UserData, string(AEntry), APercent, ANewFile);
+end;
+
+/// Writes every file under a folder (its subfolders too) into a new zip
+/// archive (Delphi's TZipFile.ZipDirectoryContents, archive first): deflated
+/// at the best level, each entry ZipCrypto encrypted with APassword unless
+/// it is "", with its file's modification time, the entries in byte order
+/// of their names (the same archive whatever order the system lists the
+/// files in). An entry is named by its file's path below ARoot with `/`
+/// (ARoot "" = AFolder itself): ZipDirectoryContents("$P:assets.zip",
+/// "$P:res/assets", "secret", "$P:") names them res/assets/... A name that
+/// is not ASCII is stored as UTF-8 (general purpose bit 11); a file of 4 GB
+/// or more is stored as ZIP64. Every path is UTF-8 and resolved as
+/// ResolvePath resolves it (`$P:`, `$D:`). An archive inside AFolder is left
+/// out; an existing archive is replaced. The archive and the files are
+/// always the disk's: a path source HookIO has set never redirects them.
+/// The result reads back with CreateZipIOSource / CreateZipFileIO.
+/// @param AArchive the zip file to write
+/// @param AFolder the folder to pack
+/// @param APassword the entries' password ("" for none)
+/// @param ARoot the folder entry names are relative to ("" for AFolder)
+/// @param AProgress called for each entry's progress (nil for none)
+/// @param AUserData the pointer AProgress receives
+/// @returns true when every file is in the archive; false when AFolder is
+///   not an existing folder inside ARoot (no archive is written then), a
+///   file cannot be read or the archive cannot be written (an archive begun
+///   is then incomplete)
+/// @example `ZipDirectoryContents("$P:assets.zip", "$P:res/assets", "secret", "$P:", ShowProgress, nil);`
+/// @since 0.3
+/// @see ZipProgress
+/// @see CreateZipIOSource
+exported routine ZipDirectoryContents(const AArchive: string; const AFolder: string; const APassword: string; const ARoot: string; const AProgress: ZipProgress; const AUserData: ptr): bool;
+var
+  LContext: ZipWriteContext;
+  LRoot: string;
+begin
+  LRoot := "";
+  if ARoot <> "" then
+    LRoot := ResolvePath(ARoot);
+  end;
+  if AProgress = nil then
+    return ZipDoWrite(ResolvePath(AArchive), ResolvePath(AFolder), APassword, LRoot, nil, nil);
+  end;
+  LContext.Progress := AProgress;
+  LContext.UserData := AUserData;
+  return ZipDoWrite(ResolvePath(AArchive), ResolvePath(AFolder), APassword, LRoot, ZipWriteProgress, address of LContext);
+end;
+
+/// Writes every file under a folder into a new zip archive, its entries
+/// named below ARoot, with no progress routine
+/// (ZipDirectoryContents(AArchive, AFolder, APassword, ARoot, nil, nil)).
+/// @param AArchive the zip file to write
+/// @param AFolder the folder to pack
+/// @param APassword the entries' password ("" for none)
+/// @param ARoot the folder entry names are relative to ("" for AFolder)
+/// @returns true when every file is in the archive
+/// @example `ZipDirectoryContents("$P:assets.zip", "$P:res/assets", "secret", "$P:");`
+/// @since 0.3
+/// @see ZipDirectoryContents
+exported routine ZipDirectoryContents(const AArchive: string; const AFolder: string; const APassword: string; const ARoot: string): bool;
+begin
+  return ZipDirectoryContents(AArchive, AFolder, APassword, ARoot, nil, nil);
+end;
+
+/// Writes every file under a folder into a new zip archive, its entries
+/// named below the folder itself, with no progress routine
+/// (ZipDirectoryContents(AArchive, AFolder, APassword, "", nil, nil)).
+/// @param AArchive the zip file to write
+/// @param AFolder the folder to pack
+/// @param APassword the entries' password ("" for none)
+/// @returns true when every file is in the archive
+/// @example `ZipDirectoryContents("$P:save.zip", "$P:save", "secret");`
+/// @since 0.3
+/// @see ZipDirectoryContents
+exported routine ZipDirectoryContents(const AArchive: string; const AFolder: string; const APassword: string): bool;
+begin
+  return ZipDirectoryContents(AArchive, AFolder, APassword, "", nil, nil);
+end;
+
+/// Writes every file under a folder into a new zip archive with no
+/// password, its entries named below the folder itself, with no progress
+/// routine (ZipDirectoryContents(AArchive, AFolder, "", "", nil, nil)).
+/// @param AArchive the zip file to write
+/// @param AFolder the folder to pack
+/// @returns true when every file is in the archive
+/// @example `ZipDirectoryContents("$P:logs.zip", "$P:logs");`
+/// @since 0.3
+/// @see ZipDirectoryContents
+exported routine ZipDirectoryContents(const AArchive: string; const AFolder: string): bool;
+begin
+  return ZipDirectoryContents(AArchive, AFolder, "", "", nil, nil);
+end;
+
+/// Why the last ZipDirectoryContents on this thread failed: the step, the
+/// path and the system's own words where it gave any ("cannot create the
+/// archive ...: Permission denied", "... is not a folder", "... changed
+/// while it was packed"); "" when it succeeded.
+/// @returns the reason, or ""
+/// @example `if not ZipDirectoryContents(LZip, LFolder) then println("{}", ZipLastError()); end;`
+/// @since 0.3
+/// @see ZipDirectoryContents
+exported routine ZipLastError(): string;
+begin
+  return ZipDoLastError();
 end;
 
 end.

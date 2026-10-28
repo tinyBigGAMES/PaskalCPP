@@ -1,0 +1,86 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  MirInterpVsJit.pcpp - MIR example (import mir, mir_ext): one function,
+  two ways to run it. The same recursive fib, from the same MIR text, is
+  linked once for MIR's interpreter (MirLinkMode.Interp: no native code,
+  the fallback where JIT is not allowed) and once for native code
+  (MirLinkMode.Eager). Both are called through the same function address
+  with MirCall; the results match, and a Stopwatch (Diagnostics) shows what
+  the native code buys.
+==============================================================================*/
+
+module exe MirInterpVsJit;
+
+import
+  mir,
+  mir_ext,
+  Diagnostics;
+
+const
+  CFib: string = R"(
+m_fib:   module
+         export fib
+p_fib:   proto i64, i64:n
+fib:     func i64, i64:n
+         local i64:a, i64:b, i64:t
+         bge rec, n, 2
+         ret n
+rec:     sub t, n, 1
+         call p_fib, fib, a, t
+         sub t, n, 2
+         call p_fib, fib, b, t
+         add a, a, b
+         ret a
+         endfunc
+         endmodule
+)";
+
+  CN: int64 = 27;
+
+// fib(CN) linked in AMode: prints the result and the time; the milliseconds
+routine Run(const ALabel: string; const AMode: MirLinkMode): int64;
+var
+  LCtx: MIR_context_t;
+  LModule: MIR_module_t;
+  LWatch: Stopwatch;
+  LValue: int64;
+  LMs: int64;
+begin
+  LCtx := MirNew();
+  LModule := MirLoadModuleText(LCtx, CFib);
+  if (LModule = nil) or not MirLink(LCtx, AMode) then
+    println("{}: {}", ALabel, MirLastError());
+    return -1;
+  end;
+  LWatch := StartNew();
+  LValue := MirCall(MirFuncAddr(LCtx, LModule, "fib"), CN);
+  LMs := LWatch.ElapsedMilliseconds();
+  println("{:<12} fib({}) = {}  in {} ms", ALabel, CN, LValue, LMs);
+  MirFree(LCtx);
+  return LMs;
+end;
+
+var
+  LInterp: int64;
+  LNative: int64;
+
+begin
+  LInterp := Run("interpreter", MirLinkMode.Interp);
+  LNative := Run("native", MirLinkMode.Eager);
+  if (LInterp >= 0) and (LNative > 0) then
+    println("native code ran {}x faster", LInterp div LNative);
+  end;
+end.

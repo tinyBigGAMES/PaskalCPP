@@ -1,0 +1,99 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  MirBuilder.pcpp - MIR example (import mir, mir_ext): a function built in
+  code instead of text. MIR_new_module opens a module, MirNewFunc starts
+  pow(base, exp) with two int64 parameters, MIR_new_func_reg makes its
+  locals, MIR_new_label its labels, and MirEmit / MirEmitLabel / MirEmitRet
+  append the instructions of a square-and-multiply loop. MirFinishFunc
+  checks the function, MirFinishModule loads the module, MirPrintModule
+  shows what was built in MIR's text form, and the module is JIT'd and
+  called.
+==============================================================================*/
+
+module exe MirBuilder;
+
+import
+  mir,
+  mir_ext;
+
+var
+  LCtx: MIR_context_t;
+  LModule: MIR_module_t;
+  LFunc: MIR_item_t;
+  LBody: MIR_func_t;
+  LBase: MIR_reg_t;
+  LExp: MIR_reg_t;
+  LResult: MIR_reg_t;
+  LBit: MIR_reg_t;
+  LLoop: MIR_label_t;
+  LSkip: MIR_label_t;
+  LDone: MIR_label_t;
+  LPow: ptr;
+
+begin
+  LCtx := MirNew();
+  MIR_new_module(LCtx, "m_pow");
+  LFunc := MirNewFunc(LCtx, "pow", "base", "exp");
+  LBody := MIR_get_item_func(LCtx, LFunc);
+  LBase := MIR_reg(LCtx, "base", LBody);
+  LExp := MIR_reg(LCtx, "exp", LBody);
+  LResult := MIR_new_func_reg(LCtx, LBody, MIR_T_I64, "result");
+  LBit := MIR_new_func_reg(LCtx, LBody, MIR_T_I64, "bit");
+  LLoop := MIR_new_label(LCtx);
+  LSkip := MIR_new_label(LCtx);
+  LDone := MIR_new_label(LCtx);
+
+  // result := 1
+  MirEmit(LCtx, LFunc, MIR_MOV, MIR_new_reg_op(LCtx, LResult), MIR_new_int_op(LCtx, 1));
+  // loop: while exp > 0
+  MirEmitLabel(LCtx, LFunc, LLoop);
+  MirEmit(LCtx, LFunc, MIR_BLE, MIR_new_label_op(LCtx, LDone), MIR_new_reg_op(LCtx, LExp), MIR_new_int_op(LCtx, 0));
+  //   if exp and 1 then result := result * base
+  MirEmit(LCtx, LFunc, MIR_AND, MIR_new_reg_op(LCtx, LBit), MIR_new_reg_op(LCtx, LExp), MIR_new_int_op(LCtx, 1));
+  MirEmit(LCtx, LFunc, MIR_BF, MIR_new_label_op(LCtx, LSkip), MIR_new_reg_op(LCtx, LBit));
+  MirEmit(LCtx, LFunc, MIR_MUL, MIR_new_reg_op(LCtx, LResult), MIR_new_reg_op(LCtx, LResult), MIR_new_reg_op(LCtx, LBase));
+  MirEmitLabel(LCtx, LFunc, LSkip);
+  //   base := base * base; exp := exp shr 1
+  MirEmit(LCtx, LFunc, MIR_MUL, MIR_new_reg_op(LCtx, LBase), MIR_new_reg_op(LCtx, LBase), MIR_new_reg_op(LCtx, LBase));
+  MirEmit(LCtx, LFunc, MIR_RSH, MIR_new_reg_op(LCtx, LExp), MIR_new_reg_op(LCtx, LExp), MIR_new_int_op(LCtx, 1));
+  MirEmit(LCtx, LFunc, MIR_JMP, MIR_new_label_op(LCtx, LLoop));
+  // done: return result
+  MirEmitLabel(LCtx, LFunc, LDone);
+  MirEmitRet(LCtx, LFunc, MIR_new_reg_op(LCtx, LResult));
+
+  if not MirFinishFunc(LCtx) then
+    println("pow is not sound: {}", MirLastError());
+    return;
+  end;
+  LModule := MirFinishModule(LCtx);
+  if LModule = nil then
+    println("the module does not load: {}", MirLastError());
+    return;
+  end;
+
+  println("built:");
+  MirPrintModule(LCtx, LModule);
+
+  if not MirLink(LCtx, MirLinkMode.Eager) then
+    println("the link failed: {}", MirLastError());
+    return;
+  end;
+  LPow := MirFuncAddr(LCtx, LModule, "pow");
+  println("pow(2, 10) = {}", MirCall(LPow, 2, 10));
+  println("pow(3, 13) = {}", MirCall(LPow, 3, 13));
+  println("pow(7, 0) = {}", MirCall(LPow, 7, 0));
+  MirFree(LCtx);
+end.

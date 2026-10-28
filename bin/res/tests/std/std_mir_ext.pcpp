@@ -1,0 +1,436 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_mir_ext.pcpp - Std: the mir_ext unit
+
+  MIR used with no C++ in the program. A text module (a loop, recursion, a
+  call to a host routine registered with MirLoadHost, functions of 0 and 3
+  arguments) linked in each MirLinkMode (lazy, eager, per basic block, the
+  interpreter) and called with MirCall; MirFuncAddr of a missing name and of
+  a nil module is nil. c2mir from a string, from a file
+  (res\tests\std\fixtures\std_mir_ext_square.c) and from bin\assets.zip
+  (res/assets/scripts/mir/square.c, password PaskalCPP); a struct copy
+  links with MirLoadStdC and not without it. The binary form written to a
+  file in repo\bin\output, read back into a fresh context and run (then
+  removed), and demo.bmir read from bin\assets.zip and run. A function
+  built with MirNewFunc / MirEmit / MirEmitLabel / MirEmitRet (a loop),
+  finished, linked and called (sum_to(100) = 5050); one with a constant as
+  an add's destination is refused by MirFinishFunc.
+  Failures, each in a fresh context (a MIR error spends its context): MIR
+  text with a syntax error, text with no module, an import nobody
+  registered (the link fails), C that does not compile, a missing C file,
+  a zip entry with a wrong password (C and binary), a missing .bmir,
+  bytes that are not MIR's binary form and a cut one; each gives nil /
+  false and a message from MirLastError (c2mir's own, with the file and
+  place, for C that does not compile: nothing reaches stderr).
+  Hand-computed: sum(1000) = 499500, callmul(7) = 7 * 6 = 42,
+  fib(25) = 75025, seven() = 7,
+  add3(1, 20, 300) = 321, square(9) = 81, copy(5) = 12, gcd(1071, 462) = 21.
+*******************************************************************************/
+
+module exe std_mir_ext;
+
+/*
+  @@test
+    kind run
+    expect
+    | lazy sum 499500 mul 42 fib 75025 seven 7 add3 321
+    | eager sum 499500 mul 42 fib 75025 seven 7 add3 321
+    | lazybb sum 499500 mul 42 fib 75025 seven 7 add3 321
+    | interp sum 499500 mul 42 fib 75025 seven 7 add3 321
+    | ok last module
+    | ok missing function
+    | ok nil module
+    | ok c string 81
+    | ok c file 81
+    | ok c zip 81
+    | ok c struct copy 12
+    | ok c struct copy needs stdc
+    | ok write file
+    | ok read file sum 499500 mul 42
+    | ok bmir removed
+    | ok zip bmir fib 75025 sum 499500 gcd 21
+    | ok builder finish func
+    | ok builder finish module
+    | ok builder sum_to 100
+    | ok builder bad operand
+    | ok text syntax error
+    | ok text no module
+    | ok unregistered import
+    | ok c syntax error
+    | ok c syntax error message
+    | ok c missing file
+    | ok c zip wrong password
+    | ok zip bmir wrong password
+    | ok missing bmir
+    | ok not a binary
+    | ok cut binary
+    | ok fresh after errors
+    | done 0
+    | [Heap] Allocs: 21, Frees: 21, Leaked: 0
+  @@end
+*/
+
+import
+  mir,
+  mir_ext,
+  CustomIO,
+  SysUtils;
+
+const
+  // MIR's text form: a loop, recursion, a host import, 0 and 3 arguments
+  CSource: string = R"(
+m_ext:   module
+         export sum, fib, callmul, seven, add3
+p_mul:   proto i64, i64:a, i64:b
+p_fib:   proto i64, i64:n
+         import std_mir_ext_mul
+sum:     func i64, i64:n
+         local i64:i, i64:s
+         mov i, 0; mov s, 0
+loop:    bge done, i, n
+         add s, s, i; add i, i, 1
+         jmp loop
+done:    ret s
+         endfunc
+fib:     func i64, i64:n
+         local i64:a, i64:b, i64:t
+         bge rec, n, 2
+         ret n
+rec:     sub t, n, 1
+         call p_fib, fib, a, t
+         sub t, n, 2
+         call p_fib, fib, b, t
+         add a, a, b
+         ret a
+         endfunc
+callmul: func i64, i64:x
+         local i64:r
+         call p_mul, std_mir_ext_mul, r, x, 6
+         ret r
+         endfunc
+seven:   func i64
+         ret 7
+         endfunc
+add3:    func i64, i64:a, i64:b, i64:c
+         local i64:s
+         add s, a, b
+         add s, s, c
+         ret s
+         endfunc
+         endmodule
+)";
+
+  // A module importing a routine no host registers
+  CUnresolved: string = R"(
+m_bad:   module
+         export f
+p_none:  proto i64
+         import std_mir_ext_nohost
+f:       func i64
+         local i64:r
+         call p_none, std_mir_ext_nohost, r
+         ret r
+         endfunc
+         endmodule
+)";
+
+  // A syntax error: an opcode MIR does not have
+  CBadText: string = R"(
+m_err:   module
+f:       func i64
+         frobnicate 1
+         endfunc
+         endmodule
+)";
+
+  CSquare: string = "long long square (long long x) { return x * x; }\n";
+
+  // A struct copy, which c2mir lowers to a memcpy import
+  CCopy: string = R"(
+struct big { long long v[16]; };
+long long copy (long long x) {
+  struct big a, b;
+  for (int i = 0; i < 16; i++) a.v[i] = x + i;
+  b = a;
+  return b.v[7];
+}
+)";
+
+  CBadC: string = "long long broken (long long x) { return x * ; }\n";
+
+  CArchive: string = "$P:../../assets.zip";
+  CPassword: string = "PaskalCPP";
+  CBmir: string = "$P:../std_mir_ext.bmir";
+
+var
+  GFails: int32;
+
+routine Check(const AName: string; const AOk: bool);
+begin
+  if AOk then
+    println("ok {}", AName);
+  else
+    println("FAIL {}", AName);
+    GFails := GFails + 1;
+  end;
+end;
+
+// The host routine the text module imports
+routine clink std_mir_ext_mul(AA: int64; AB: int64): int64;
+begin
+  return AA * AB;
+end;
+
+// The text module in a fresh context, linked in AMode; prints its results
+routine RunText(const ALabel: string; const AMode: MirLinkMode);
+var
+  LCtx: MIR_context_t;
+  LModule: MIR_module_t;
+begin
+  LCtx := MirNew();
+  LModule := MirLoadModuleText(LCtx, CSource);
+  MirLoadHost(LCtx, "std_mir_ext_mul", std_mir_ext_mul);
+  if (LModule = nil) or not MirLink(LCtx, AMode) then
+    println("{} FAIL {}", ALabel, MirLastError());
+    GFails := GFails + 1;
+    return;
+  end;
+  println("{} sum {} mul {} fib {} seven {} add3 {}", ALabel,
+    MirCall(MirFuncAddr(LCtx, LModule, "sum"), 1000),
+    MirCall(MirFuncAddr(LCtx, LModule, "callmul"), 7),
+    MirCall(MirFuncAddr(LCtx, LModule, "fib"), 25),
+    MirCall(MirFuncAddr(LCtx, LModule, "seven")),
+    MirCall(MirFuncAddr(LCtx, LModule, "add3"), 1, 20, 300));
+  MirFree(LCtx);
+end;
+
+routine TestLookups();
+var
+  LCtx: MIR_context_t;
+  LModule: MIR_module_t;
+begin
+  LCtx := MirNew();
+  LModule := MirLoadModuleText(LCtx, CSource);
+  Check("last module", (LModule <> nil) and (MirLastModule(LCtx) = LModule));
+  Check("missing function", MirFuncAddr(LCtx, LModule, "nope") = nil);
+  Check("nil module", MirFuncAddr(LCtx, nil, "sum") = nil);
+  MirFree(LCtx);
+end;
+
+// One C function from a module: linked lazily, called with AArg
+routine RunC(const AName: string; const ACtx: MIR_context_t; const AModule: MIR_module_t; const AFunc: string; const AArg: int64; const AWant: int64);
+begin
+  if AModule = nil then
+    Check(AName, false);
+    println("  {}", MirLastError());
+    return;
+  end;
+  MirLoadStdC(ACtx);
+  if not MirLink(ACtx, MirLinkMode.Lazy) then
+    Check(AName, false);
+    println("  {}", MirLastError());
+    return;
+  end;
+  Check(AName, MirCall(MirFuncAddr(ACtx, AModule, AFunc), AArg) = AWant);
+end;
+
+routine TestC2Mir();
+var
+  LCtx: MIR_context_t;
+  LModule: MIR_module_t;
+begin
+  LCtx := MirNew();
+  RunC("c string 81", LCtx, C2MirCompileString(LCtx, CSquare, "square.c"), "square", 9, 81);
+  MirFree(LCtx);
+  LCtx := MirNew();
+  RunC("c file 81", LCtx, C2MirCompileFile(LCtx, "$P:../../res/tests/std/fixtures/std_mir_ext_square.c"), "square", 9, 81);
+  MirFree(LCtx);
+  LCtx := MirNew();
+  RunC("c zip 81", LCtx, C2MirCompileZip(LCtx, CArchive, "res/assets/scripts/mir/square.c", CPassword), "square", 9, 81);
+  MirFree(LCtx);
+  LCtx := MirNew();
+  RunC("c struct copy 12", LCtx, C2MirCompileString(LCtx, CCopy, "copy.c"), "copy", 5, 12);
+  MirFree(LCtx);
+  // Without the C runtime routines the memcpy import has no host
+  LCtx := MirNew();
+  LModule := C2MirCompileString(LCtx, CCopy, "copy.c");
+  Check("c struct copy needs stdc", (LModule <> nil) and not MirLink(LCtx, MirLinkMode.Lazy) and (MirLastError() <> ""));
+end;
+
+routine TestBinary();
+var
+  LCtx: MIR_context_t;
+  LModule: MIR_module_t;
+  LOutput: IOSource;
+begin
+  LCtx := MirNew();
+  LModule := MirLoadModuleText(LCtx, CSource);
+  Check("write file", (LModule <> nil) and MirWriteFile(LCtx, CBmir));
+  MirFree(LCtx);
+
+  LCtx := MirNew();
+  LModule := MirReadFile(LCtx, CBmir);
+  MirLoadHost(LCtx, "std_mir_ext_mul", std_mir_ext_mul);
+  if (LModule <> nil) and MirLink(LCtx, MirLinkMode.Eager) then
+    Check(FormatStr("read file sum {} mul {}", MirCall(MirFuncAddr(LCtx, LModule, "sum"), 1000),
+      MirCall(MirFuncAddr(LCtx, LModule, "callmul"), 7)), true);
+  else
+    Check("read file", false);
+    println("  {}", MirLastError());
+  end;
+  MirFree(LCtx);
+  LOutput := CreateFolderIOSource("$P:..");
+  Check("bmir removed", IOSourceRemove(LOutput, "std_mir_ext.bmir") and not FileExists(CBmir));
+  IOSourceClose(LOutput);
+
+  LCtx := MirNew();
+  LModule := MirReadZip(LCtx, CArchive, "res/assets/data/mir/demo.bmir", CPassword);
+  if (LModule <> nil) and MirLink(LCtx, MirLinkMode.Lazy) then
+    Check(FormatStr("zip bmir fib {} sum {} gcd {}", MirCall(MirFuncAddr(LCtx, LModule, "fib"), 25),
+      MirCall(MirFuncAddr(LCtx, LModule, "sum"), 1000),
+      MirCall(MirFuncAddr(LCtx, LModule, "gcd"), 1071, 462)), true);
+  else
+    Check("zip bmir", false);
+    println("  {}", MirLastError());
+  end;
+  MirFree(LCtx);
+end;
+
+// sum_to(n) = 0 + 1 + ... + n built through the builder routines:
+//   i := 0; s := 0; loop: bgt done, i, n; s := s + i; i := i + 1; jmp loop
+//   done: ret s
+routine TestBuilder();
+var
+  LCtx: MIR_context_t;
+  LModule: MIR_module_t;
+  LFunc: MIR_item_t;
+  LBody: MIR_func_t;
+  LN: MIR_reg_t;
+  LI: MIR_reg_t;
+  LS: MIR_reg_t;
+  LLoop: MIR_label_t;
+  LDone: MIR_label_t;
+begin
+  LCtx := MirNew();
+  MIR_new_module(LCtx, "m_built");
+  LFunc := MirNewFunc(LCtx, "sum_to", "n");
+  LBody := MIR_get_item_func(LCtx, LFunc);
+  LN := MIR_reg(LCtx, "n", LBody);
+  LI := MIR_new_func_reg(LCtx, LBody, MIR_T_I64, "i");
+  LS := MIR_new_func_reg(LCtx, LBody, MIR_T_I64, "s");
+  LLoop := MIR_new_label(LCtx);
+  LDone := MIR_new_label(LCtx);
+  MirEmit(LCtx, LFunc, MIR_MOV, MIR_new_reg_op(LCtx, LI), MIR_new_int_op(LCtx, 0));
+  MirEmit(LCtx, LFunc, MIR_MOV, MIR_new_reg_op(LCtx, LS), MIR_new_int_op(LCtx, 0));
+  MirEmitLabel(LCtx, LFunc, LLoop);
+  MirEmit(LCtx, LFunc, MIR_BGT, MIR_new_label_op(LCtx, LDone), MIR_new_reg_op(LCtx, LI), MIR_new_reg_op(LCtx, LN));
+  MirEmit(LCtx, LFunc, MIR_ADD, MIR_new_reg_op(LCtx, LS), MIR_new_reg_op(LCtx, LS), MIR_new_reg_op(LCtx, LI));
+  MirEmit(LCtx, LFunc, MIR_ADD, MIR_new_reg_op(LCtx, LI), MIR_new_reg_op(LCtx, LI), MIR_new_int_op(LCtx, 1));
+  MirEmit(LCtx, LFunc, MIR_JMP, MIR_new_label_op(LCtx, LLoop));
+  MirEmitLabel(LCtx, LFunc, LDone);
+  MirEmitRet(LCtx, LFunc, MIR_new_reg_op(LCtx, LS));
+  Check("builder finish func", MirFinishFunc(LCtx));
+  LModule := MirFinishModule(LCtx);
+  Check("builder finish module", LModule <> nil);
+  Check("builder sum_to 100", MirLink(LCtx, MirLinkMode.Eager) and (MirCall(MirFuncAddr(LCtx, LModule, "sum_to"), 100) = 5050));
+  MirFree(LCtx);
+
+  // A constant as an add's destination: MIR's check refuses the function
+  LCtx := MirNew();
+  MIR_new_module(LCtx, "m_wrong");
+  LFunc := MirNewFunc(LCtx, "wrong", "n");
+  LBody := MIR_get_item_func(LCtx, LFunc);
+  LN := MIR_reg(LCtx, "n", LBody);
+  MirEmit(LCtx, LFunc, MIR_ADD, MIR_new_int_op(LCtx, 1), MIR_new_reg_op(LCtx, LN), MIR_new_reg_op(LCtx, LN));
+  MirEmitRet(LCtx, LFunc, MIR_new_reg_op(LCtx, LN));
+  Check("builder bad operand", not MirFinishFunc(LCtx) and (MirLastError() <> ""));
+end;
+
+// Each failure in a fresh context; a spent context is left as MIR left it
+routine TestFailures();
+var
+  LCtx: MIR_context_t;
+  LModule: MIR_module_t;
+  LJunk: array[0..63] of uint8;
+  LIO: IO;
+  LGood: string;
+  LI: int32;
+begin
+  Check("text syntax error", (MirLoadModuleText(MirNew(), CBadText) = nil) and (MirLastError() <> ""));
+  Check("text no module", (MirLoadModuleText(MirNew(), "") = nil) and (MirLastError() <> ""));
+
+  LCtx := MirNew();
+  LModule := MirLoadModuleText(LCtx, CUnresolved);
+  Check("unregistered import", (LModule <> nil) and not MirLink(LCtx, MirLinkMode.Eager) and (MirLastError() <> ""));
+
+  Check("c syntax error", C2MirCompileString(MirNew(), CBadC, "broken.c") = nil);
+  // c2mir's own message, with the source's name and place, not on stderr
+  Check("c syntax error message", MirLastError().contains("broken.c:1:") and MirLastError().contains("syntax error"));
+  LCtx := MirNew();
+  Check("c missing file", (C2MirCompileFile(LCtx, "$P:../std_mir_ext_none.c") = nil) and (MirLastError() <> ""));
+  MirFree(LCtx);
+  LCtx := MirNew();
+  Check("c zip wrong password", (C2MirCompileZip(LCtx, CArchive, "res/assets/scripts/mir/square.c", "paskalcpp") = nil) and (MirLastError() <> ""));
+  MirFree(LCtx);
+  LCtx := MirNew();
+  Check("zip bmir wrong password", (MirReadZip(LCtx, CArchive, "res/assets/data/mir/demo.bmir", "paskalcpp") = nil) and (MirLastError() <> ""));
+  MirFree(LCtx);
+  LCtx := MirNew();
+  Check("missing bmir", (MirReadFile(LCtx, "$P:../std_mir_ext_none.bmir") = nil) and (MirLastError() <> ""));
+  MirFree(LCtx);
+
+  for LI := 0 to 63 do
+    LJunk[LI] := uint8(LI * 37 + 11);
+  end;
+  LIO := CreateMemoryIO(address of LJunk[0], 64, true);
+  Check("not a binary", (MirReadIO(MirNew(), LIO) = nil) and (MirLastError() <> ""));
+  IOClose(LIO);
+
+  // The first half of a good binary form
+  LCtx := MirNew();
+  MirLoadModuleText(LCtx, CSource);
+  LIO := CreateMemoryIO();
+  MirWriteIO(LCtx, LIO);
+  MirFree(LCtx);
+  IOSeek(LIO, 0, SeekOrigin.FromStart);
+  IOReadAll(LIO, LGood);
+  IOClose(LIO);
+  LIO := CreateMemoryIO(LGood.data(), int64(LGood.size()) div 2, true);
+  Check("cut binary", (MirReadIO(MirNew(), LIO) = nil) and (MirLastError() <> ""));
+  IOClose(LIO);
+
+  // A fresh context works after all of that
+  LCtx := MirNew();
+  LModule := MirLoadModuleText(LCtx, CSource);
+  MirLoadHost(LCtx, "std_mir_ext_mul", std_mir_ext_mul);
+  Check("fresh after errors", (LModule <> nil) and MirLink(LCtx, MirLinkMode.Lazy) and
+    (MirCall(MirFuncAddr(LCtx, LModule, "fib"), 25) = 75025) and (MirLastError() = ""));
+  MirFree(LCtx);
+end;
+
+begin
+  GFails := 0;
+  RunText("lazy", MirLinkMode.Lazy);
+  RunText("eager", MirLinkMode.Eager);
+  RunText("lazybb", MirLinkMode.LazyBB);
+  RunText("interp", MirLinkMode.Interp);
+  TestLookups();
+  TestC2Mir();
+  TestBinary();
+  TestBuilder();
+  TestFailures();
+  println("done {}", GFails);
+end.

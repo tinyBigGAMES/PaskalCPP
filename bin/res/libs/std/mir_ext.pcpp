@@ -1,0 +1,1216 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  mir_ext.pcpp - the mir_ext unit: `import mir_ext;` puts MIR's C boundary
+  behind PaskalCPP routines, so a program using MIR (the mir unit) writes
+  no C++ of its own.
+  A context: MirNew() (MIR_init, MIR_gen_init and this unit's error
+  handler), MirFree(). MIR's errors never end the program inside these
+  routines: a routine that hits one returns nil / false and MirLastError()
+  gives MIR's message; that context is then spent (MIR leaves it half
+  built): make a fresh one.
+  Modules: MirLoadModuleText (MIR's text form), C2MirCompileString / IO /
+  File / Zip (C11 through c2mir), MirReadIO / File / Zip (MIR's binary
+  form) each load what they bring in and return its last module;
+  MirWriteIO / File write every module of a context in the binary form.
+  The Zip forms read one entry of a zip archive (CustomIO's
+  CreateZipFileIO: password, `$P:` paths), so a program ships its C or
+  .bmir in bin\assets.zip.
+  Hosts and calls: MirLoadHost registers a `routine clink` of 0 to 3 int64
+  parameters for JIT'd code to import (MIR_load_external), MirLoadStdC the
+  C runtime routines c2mir's code imports (memcpy, memset, memmove);
+  MirLink links every loaded module (MirLinkMode: lazy, eager, lazy per
+  basic block, or MIR's interpreter); MirFuncItem / MirFuncAddr find a
+  function by name (mir.h's MIR_get_global_item is declared but not
+  defined in v1.0.0: PaskalCPP-Libs src\mir\FIXES.md, B); MirCall calls a
+  function address with 0 to 3 int64 arguments. MirLastModule is the
+  newest module of a context.
+  Building: inside MIR_new_module, MirNewFunc starts a function of int64s
+  (0 to 3 parameters), MirEmit / MirEmitRet / MirEmitLabel append its code,
+  MirFinishFunc and MirFinishModule end and check them (the module
+  loaded). MirPrintModule prints a module in MIR's text form.
+  Rules from research\mir\findings.md: a host routine must not let a C++
+  exception escape into JIT'd code; MIR's error callback leaves by longjmp
+  (_setjmp(buf, NULL) on Windows: no unwinding over MIR's frames).
+==============================================================================*/
+
+module unit mir_ext;
+
+import
+  mir,
+  CustomIO;
+
+// MIR's C boundary: the error handler and its longjmp guard, the byte
+// readers / writers MIR and c2mir call, MIR's list macros and calls by
+// code address. Every helper is named MirExtDo* (apart from the exported
+// names).
+cpp source;
+
+#include <atomic>
+#include <chrono>
+#include <csetjmp>
+#include <cstdarg>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <string.h>
+#include <string>
+#include <system_error>
+
+namespace {
+
+// The guard a MIR error leaves to (nullptr: none, the error ends the
+// program as MIR's own handler does) and the last error's text
+thread_local std::jmp_buf* GMirExtJump = nullptr;
+thread_local std::string GMirExtError;
+
+// Windows: _setjmp with no frame, so longjmp never unwinds over MIR's
+// frames (mingw's setjmp passes the frame and longjmp then SEH-unwinds:
+// research\mir\findings.md, P3). Linux: plain setjmp.
+#ifdef _WIN32
+#define MIREXT_SETJMP(ABuf) _setjmp((ABuf), nullptr)
+#else
+#define MIREXT_SETJMP(ABuf) setjmp(ABuf)
+#endif
+
+// MIR's error callback: never returns. With a guard set it records the
+// message and jumps to it; without one it prints and ends the program.
+// MIR_NO_RETURN (GNU noreturn) is part of MIR_error_func_t's type, which
+// C++'s [[noreturn]] is not.
+void MIR_NO_RETURN MirExtDoError(MIR_error_type_t AType, const char* AFormat, ...)
+{
+  char LText[2048];
+  va_list LArgs;
+  va_start(LArgs, AFormat);
+  std::vsnprintf(LText, sizeof(LText), AFormat, LArgs);
+  va_end(LArgs);
+  // No exception may leave into MIR's C frames: out of memory keeps the
+  // last text
+  try
+  {
+    GMirExtError.assign(LText);
+  }
+  catch (...)
+  {
+  }
+  if (GMirExtJump != nullptr)
+    std::longjmp(*GMirExtJump, 1);
+  std::fprintf(stderr, "MIR error %d: %s\n", static_cast<int>(AType), LText);
+  std::exit(1);
+}
+
+// Sets the last error's text (never throws)
+void MirExtDoSetError(const char* AText) noexcept
+{
+  try
+  {
+    GMirExtError.assign(AText);
+  }
+  catch (...)
+  {
+  }
+}
+
+// A fresh context with this unit's error handler and the generator ready
+MIR_context_t MirExtDoNew()
+{
+  MIR_context_t LCtx = MIR_init();
+  MIR_set_error_func(LCtx, MirExtDoError);
+  MIR_gen_init(LCtx);
+  return LCtx;
+}
+
+void MirExtDoFree(MIR_context_t ACtx)
+{
+  if (ACtx == nullptr)
+    return;
+  MIR_gen_finish(ACtx);
+  MIR_finish(ACtx);
+}
+
+// The newest module of the context, or nullptr
+MIR_module_t MirExtDoLastModule(MIR_context_t ACtx)
+{
+  return DLIST_TAIL(MIR_module_t, *MIR_get_module_list(ACtx));
+}
+
+// Loads every module after ABefore (all of them when it is nullptr); the
+// last one loaded, or nullptr when there was none. Runs inside a guard.
+MIR_module_t MirExtDoLoadAfter(MIR_context_t ACtx, MIR_module_t ABefore)
+{
+  MIR_module_t LModule;
+  MIR_module_t LLast = nullptr;
+  if (ABefore == nullptr)
+    LModule = DLIST_HEAD(MIR_module_t, *MIR_get_module_list(ACtx));
+  else
+    LModule = DLIST_NEXT(MIR_module_t, ABefore);
+  for (; LModule != nullptr; LModule = DLIST_NEXT(MIR_module_t, LModule))
+  {
+    MIR_load_module(ACtx, LModule);
+    LLast = LModule;
+  }
+  if (LLast == nullptr)
+    MirExtDoSetError("no module was brought in");
+  return LLast;
+}
+
+// MIR's text form scanned and its modules loaded; nullptr on a MIR error
+MIR_module_t MirExtDoScanLoad(MIR_context_t ACtx, const char* AText)
+{
+  std::jmp_buf LJump;
+  std::jmp_buf* const LOuter = GMirExtJump;
+  MIR_module_t const LBefore = MirExtDoLastModule(ACtx);
+  MIR_module_t LLast;
+  GMirExtError.clear();
+  GMirExtJump = &LJump;
+  if (MIREXT_SETJMP(LJump) != 0)
+  {
+    GMirExtJump = LOuter;
+    return nullptr;
+  }
+  MIR_scan_string(ACtx, AText);
+  LLast = MirExtDoLoadAfter(ACtx, LBefore);
+  GMirExtJump = LOuter;
+  return LLast;
+}
+
+// The bytes MIR_read_with_func reads: one read at a time, per thread
+struct MirExtReadData
+{
+  const std::string* Data = nullptr;
+  std::size_t Position = 0;
+};
+thread_local MirExtReadData* GMirExtRead = nullptr;
+
+int MirExtDoReadByte(MIR_context_t)
+{
+  if ((GMirExtRead == nullptr) || (GMirExtRead->Position >= GMirExtRead->Data->size()))
+    return EOF;
+  return static_cast<unsigned char>((*GMirExtRead->Data)[GMirExtRead->Position++]);
+}
+
+// MIR's binary form from memory, its modules loaded; nullptr on a MIR
+// error (a cut or foreign binary is one)
+MIR_module_t MirExtDoReadLoad(MIR_context_t ACtx, const std::string& AData)
+{
+  std::jmp_buf LJump;
+  std::jmp_buf* const LOuter = GMirExtJump;
+  MIR_module_t const LBefore = MirExtDoLastModule(ACtx);
+  MIR_module_t LLast;
+  MirExtReadData LRead;
+  LRead.Data = &AData;
+  GMirExtError.clear();
+  GMirExtRead = &LRead;
+  GMirExtJump = &LJump;
+  if (MIREXT_SETJMP(LJump) != 0)
+  {
+    GMirExtJump = LOuter;
+    GMirExtRead = nullptr;
+    return nullptr;
+  }
+  MIR_read_with_func(ACtx, MirExtDoReadByte);
+  LLast = MirExtDoLoadAfter(ACtx, LBefore);
+  GMirExtJump = LOuter;
+  GMirExtRead = nullptr;
+  return LLast;
+}
+
+// The bytes MIR_write_with_func writes go here, per thread
+thread_local std::string* GMirExtWrite = nullptr;
+thread_local bool GMirExtWriteFailed = false;
+
+int MirExtDoWriteByte(MIR_context_t, std::uint8_t AByte)
+{
+  try
+  {
+    GMirExtWrite->push_back(static_cast<char>(AByte));
+  }
+  catch (...)
+  {
+    GMirExtWriteFailed = true;
+    return 0;
+  }
+  return 1;
+}
+
+// Every module of the context in MIR's binary form into AOut; false on a
+// MIR error or out of memory
+bool MirExtDoWriteAll(MIR_context_t ACtx, std::string& AOut)
+{
+  std::jmp_buf LJump;
+  std::jmp_buf* const LOuter = GMirExtJump;
+  GMirExtError.clear();
+  AOut.clear();
+  GMirExtWrite = &AOut;
+  GMirExtWriteFailed = false;
+  GMirExtJump = &LJump;
+  if (MIREXT_SETJMP(LJump) != 0)
+  {
+    GMirExtJump = LOuter;
+    GMirExtWrite = nullptr;
+    return false;
+  }
+  MIR_write_with_func(ACtx, MirExtDoWriteByte);
+  GMirExtJump = LOuter;
+  GMirExtWrite = nullptr;
+  if (GMirExtWriteFailed)
+    MirExtDoSetError("out of memory writing the binary form");
+  return !GMirExtWriteFailed;
+}
+
+// Links every loaded module: AMode is MirLinkMode's ordinal (Lazy 0,
+// Eager 1, LazyBB 2, Interp 3); false on a MIR error (an import nobody
+// registered is one)
+bool MirExtDoLink(MIR_context_t ACtx, const std::int32_t AMode)
+{
+  std::jmp_buf LJump;
+  std::jmp_buf* const LOuter = GMirExtJump;
+  void (*LInterface)(MIR_context_t, MIR_item_t) = MIR_set_lazy_gen_interface;
+  if (AMode == 1)
+    LInterface = MIR_set_gen_interface;
+  else if (AMode == 2)
+    LInterface = MIR_set_lazy_bb_gen_interface;
+  else if (AMode == 3)
+    LInterface = MIR_set_interp_interface;
+  GMirExtError.clear();
+  GMirExtJump = &LJump;
+  if (MIREXT_SETJMP(LJump) != 0)
+  {
+    GMirExtJump = LOuter;
+    return false;
+  }
+  MIR_link(ACtx, LInterface, nullptr);
+  GMirExtJump = LOuter;
+  return true;
+}
+
+// The C source c2mir reads, per thread
+struct MirExtCSource
+{
+  const std::string* Text = nullptr;
+  std::size_t Position = 0;
+};
+
+int MirExtDoCGetc(void* AData)
+{
+  MirExtCSource* const LSource = static_cast<MirExtCSource*>(AData);
+  if (LSource->Position >= LSource->Text->size())
+    return EOF;
+  return static_cast<unsigned char>((*LSource->Text)[LSource->Position++]);
+}
+
+// Each compile names its module apart from the context's earlier ones
+thread_local std::size_t GMirExtModuleNum = 0;
+
+// Where c2mir writes its messages for one compile: a file of its own in the
+// system's temp folder (c2mir takes a FILE*, and the C runtime has no
+// in-memory FILE on Windows), read back and removed after the compile. A
+// temp file that cannot be made leaves the messages on stderr.
+struct MirExtMessages
+{
+  std::FILE* File = nullptr;
+  std::filesystem::path Path;
+
+  MirExtMessages()
+  {
+    static std::atomic<std::uint64_t> GCount{0};
+    std::error_code LError;
+    try
+    {
+      const auto LNow = std::chrono::steady_clock::now().time_since_epoch().count();
+      Path = std::filesystem::temp_directory_path(LError) /
+        ("pcpp_c2mir_" + std::to_string(static_cast<std::uint64_t>(LNow)) + "_" +
+         std::to_string(GCount.fetch_add(1)) + ".txt");
+      if (!LError)
+      {
+#ifdef _WIN32
+        File = _wfopen(Path.c_str(), L"w+b");
+#else
+        File = std::fopen(Path.c_str(), "w+b");
+#endif
+      }
+    }
+    catch (...)
+    {
+      File = nullptr;
+    }
+  }
+
+  // The messages written so far ("" when there is no file)
+  std::string Text()
+  {
+    std::string LText;
+    if (File == nullptr)
+      return LText;
+    std::fflush(File);
+    std::rewind(File);
+    char LChunk[4096];
+    std::size_t LGot;
+    while ((LGot = std::fread(LChunk, 1, sizeof(LChunk), File)) > 0)
+      LText.append(LChunk, LGot);
+    return LText;
+  }
+
+  ~MirExtMessages()
+  {
+    std::error_code LError;
+    if (File == nullptr)
+      return;
+    std::fclose(File);
+    std::filesystem::remove(Path, LError);
+  }
+
+  MirExtMessages(const MirExtMessages&) = delete;
+  MirExtMessages& operator=(const MirExtMessages&) = delete;
+};
+
+// c2mir compiles ASource (named AName in its messages) and its module is
+// loaded; nullptr when the C does not compile (c2mir's messages, errors
+// first, become the last error: none reach stderr) or on a MIR error. The
+// warnings of a compile that succeeds go to stderr, as c2mir writes them.
+MIR_module_t MirExtDoCompileC(MIR_context_t ACtx, const std::string& ASource, const char* AName)
+{
+  std::jmp_buf LJump;
+  std::jmp_buf* const LOuter = GMirExtJump;
+  MIR_module_t const LBefore = MirExtDoLastModule(ACtx);
+  MIR_module_t LLast;
+  struct c2mir_options LOptions;
+  MirExtCSource LSource;
+  MirExtMessages LMessages;
+  int LOk;
+  std::memset(&LOptions, 0, sizeof(LOptions));
+  LOptions.message_file = (LMessages.File != nullptr) ? LMessages.File : stderr;
+  LOptions.module_num = GMirExtModuleNum++;
+  LSource.Text = &ASource;
+  GMirExtError.clear();
+  GMirExtJump = &LJump;
+  if (MIREXT_SETJMP(LJump) != 0)
+  {
+    GMirExtJump = LOuter;
+    return nullptr;
+  }
+  c2mir_init(ACtx);
+  LOk = c2mir_compile(ACtx, &LOptions, MirExtDoCGetc, &LSource, AName, nullptr);
+  c2mir_finish(ACtx);
+  GMirExtJump = LOuter;
+  if (LOk == 0)
+  {
+    const std::string LText = LMessages.Text();
+    if (LText.empty())
+      MirExtDoSetError("c2mir: the C source did not compile");
+    else
+      MirExtDoSetError(("c2mir: " + LText).c_str());
+    return nullptr;
+  }
+  // A compile that succeeded: its warnings to stderr, as c2mir writes them
+  const std::string LWarnings = LMessages.Text();
+  if (!LWarnings.empty())
+    std::fputs(LWarnings.c_str(), stderr);
+  GMirExtJump = &LJump;
+  if (MIREXT_SETJMP(LJump) != 0)
+  {
+    GMirExtJump = LOuter;
+    return nullptr;
+  }
+  LLast = MirExtDoLoadAfter(ACtx, LBefore);
+  GMirExtJump = LOuter;
+  return LLast;
+}
+
+void MirExtDoLoadExternal(MIR_context_t ACtx, const std::string& AName, void* AAddress)
+{
+  MIR_load_external(ACtx, AName.c_str(), AAddress);
+}
+
+// The C runtime routines c2mir's code imports (struct copies and clears)
+void MirExtDoLoadStdC(MIR_context_t ACtx)
+{
+  MIR_load_external(ACtx, "memcpy", reinterpret_cast<void*>(&::memcpy));
+  MIR_load_external(ACtx, "memset", reinterpret_cast<void*>(&::memset));
+  MIR_load_external(ACtx, "memmove", reinterpret_cast<void*>(&::memmove));
+}
+
+// A function of AModule by name, or nullptr
+MIR_item_t MirExtDoFuncItem(MIR_context_t ACtx, MIR_module_t AModule, const std::string& AName)
+{
+  if ((ACtx == nullptr) || (AModule == nullptr))
+    return nullptr;
+  for (MIR_item_t LItem = DLIST_HEAD(MIR_item_t, AModule->items); LItem != nullptr;
+       LItem = DLIST_NEXT(MIR_item_t, LItem))
+  {
+    if ((LItem->item_type == MIR_func_item) && (std::strcmp(MIR_item_name(ACtx, LItem), AName.c_str()) == 0))
+      return LItem;
+  }
+  return nullptr;
+}
+
+void* MirExtDoItemAddr(MIR_item_t AItem)
+{
+  if (AItem == nullptr)
+    return nullptr;
+  return AItem->addr;
+}
+
+// Calls by code address: int64 results and arguments
+std::int64_t MirExtDoCall0(void* AAddress)
+{
+  return reinterpret_cast<std::int64_t (*)()>(AAddress)();
+}
+
+std::int64_t MirExtDoCall1(void* AAddress, std::int64_t AA)
+{
+  return reinterpret_cast<std::int64_t (*)(std::int64_t)>(AAddress)(AA);
+}
+
+std::int64_t MirExtDoCall2(void* AAddress, std::int64_t AA, std::int64_t AB)
+{
+  return reinterpret_cast<std::int64_t (*)(std::int64_t, std::int64_t)>(AAddress)(AA, AB);
+}
+
+std::int64_t MirExtDoCall3(void* AAddress, std::int64_t AA, std::int64_t AB, std::int64_t AC)
+{
+  return reinterpret_cast<std::int64_t (*)(std::int64_t, std::int64_t, std::int64_t)>(AAddress)(AA, AB, AC);
+}
+
+const std::string& MirExtDoLastError()
+{
+  return GMirExtError;
+}
+
+// A function of int64s: one int64 result, ACount int64 parameters named
+// by ANames (MIR copies the names)
+MIR_item_t MirExtDoNewFunc(MIR_context_t ACtx, const char* AName, const std::size_t ACount,
+  const char* const* ANames)
+{
+  MIR_type_t LResult = MIR_T_I64;
+  MIR_var_t LVars[3];
+  for (std::size_t LI = 0; LI < ACount; ++LI)
+  {
+    LVars[LI].type = MIR_T_I64;
+    LVars[LI].name = ANames[LI];
+    LVars[LI].size = 0;
+  }
+  return MIR_new_func_arr(ACtx, AName, 1, &LResult, ACount, LVars);
+}
+
+MIR_item_t MirExtDoNewFunc0(MIR_context_t ACtx, const std::string& AName)
+{
+  return MirExtDoNewFunc(ACtx, AName.c_str(), 0, nullptr);
+}
+
+MIR_item_t MirExtDoNewFunc1(MIR_context_t ACtx, const std::string& AName, const std::string& AA)
+{
+  const char* const LNames[1] = {AA.c_str()};
+  return MirExtDoNewFunc(ACtx, AName.c_str(), 1, LNames);
+}
+
+MIR_item_t MirExtDoNewFunc2(MIR_context_t ACtx, const std::string& AName, const std::string& AA,
+  const std::string& AB)
+{
+  const char* const LNames[2] = {AA.c_str(), AB.c_str()};
+  return MirExtDoNewFunc(ACtx, AName.c_str(), 2, LNames);
+}
+
+MIR_item_t MirExtDoNewFunc3(MIR_context_t ACtx, const std::string& AName, const std::string& AA,
+  const std::string& AB, const std::string& AC)
+{
+  const char* const LNames[3] = {AA.c_str(), AB.c_str(), AC.c_str()};
+  return MirExtDoNewFunc(ACtx, AName.c_str(), 3, LNames);
+}
+
+// An instruction of ACount operands appended to AFunc
+void MirExtDoEmit(MIR_context_t ACtx, MIR_item_t AFunc, MIR_insn_code_t ACode, const std::size_t ACount,
+  MIR_op_t* AOps)
+{
+  MIR_append_insn(ACtx, AFunc, MIR_new_insn_arr(ACtx, ACode, ACount, AOps));
+}
+
+void MirExtDoEmit1(MIR_context_t ACtx, MIR_item_t AFunc, MIR_insn_code_t ACode, MIR_op_t AA)
+{
+  MIR_op_t LOps[1] = {AA};
+  MirExtDoEmit(ACtx, AFunc, ACode, 1, LOps);
+}
+
+void MirExtDoEmit2(MIR_context_t ACtx, MIR_item_t AFunc, MIR_insn_code_t ACode, MIR_op_t AA, MIR_op_t AB)
+{
+  MIR_op_t LOps[2] = {AA, AB};
+  MirExtDoEmit(ACtx, AFunc, ACode, 2, LOps);
+}
+
+void MirExtDoEmit3(MIR_context_t ACtx, MIR_item_t AFunc, MIR_insn_code_t ACode, MIR_op_t AA, MIR_op_t AB,
+  MIR_op_t AC)
+{
+  MIR_op_t LOps[3] = {AA, AB, AC};
+  MirExtDoEmit(ACtx, AFunc, ACode, 3, LOps);
+}
+
+void MirExtDoEmitRet(MIR_context_t ACtx, MIR_item_t AFunc, MIR_op_t AValue)
+{
+  MIR_append_insn(ACtx, AFunc, MIR_new_ret_insn(ACtx, 1, AValue));
+}
+
+// MIR_finish_func checks the function: false on a MIR error
+bool MirExtDoFinishFunc(MIR_context_t ACtx)
+{
+  std::jmp_buf LJump;
+  std::jmp_buf* const LOuter = GMirExtJump;
+  GMirExtError.clear();
+  GMirExtJump = &LJump;
+  if (MIREXT_SETJMP(LJump) != 0)
+  {
+    GMirExtJump = LOuter;
+    return false;
+  }
+  MIR_finish_func(ACtx);
+  GMirExtJump = LOuter;
+  return true;
+}
+
+// MIR_finish_module, then the module loaded; nullptr on a MIR error
+MIR_module_t MirExtDoFinishModule(MIR_context_t ACtx)
+{
+  std::jmp_buf LJump;
+  std::jmp_buf* const LOuter = GMirExtJump;
+  MIR_module_t LModule;
+  GMirExtError.clear();
+  GMirExtJump = &LJump;
+  if (MIREXT_SETJMP(LJump) != 0)
+  {
+    GMirExtJump = LOuter;
+    return nullptr;
+  }
+  MIR_finish_module(ACtx);
+  LModule = MirExtDoLastModule(ACtx);
+  MIR_load_module(ACtx, LModule);
+  GMirExtJump = LOuter;
+  return LModule;
+}
+
+// A module in MIR's text form on stdout; C stdio is flushed around it, so
+// it lands between the program's lines in order
+void MirExtDoPrintModule(MIR_context_t ACtx, MIR_module_t AModule)
+{
+  std::fflush(stdout);
+  if ((ACtx != nullptr) && (AModule != nullptr))
+    MIR_output_module(ACtx, stdout, AModule);
+  std::fflush(stdout);
+}
+
+}
+
+exported type
+  /// How MirLink makes a function's code: Lazy generates each function on
+  /// its first call, Eager every function at link, LazyBB each basic block
+  /// when it is first reached, Interp runs MIR's interpreter (no native
+  /// code: the fallback where JIT is not allowed). A function address calls
+  /// the same way in every mode.
+  /// @since 0.3
+  /// @see MirLink
+  MirLinkMode = choices(Lazy, Eager, LazyBB, Interp);
+
+  /// A host routine JIT'd code may import, taking no argument.
+  /// @since 0.3
+  /// @see MirLoadHost
+  MirHost0 = routine clink(): int64;
+
+  /// A host routine JIT'd code may import, taking one int64.
+  /// @since 0.3
+  /// @see MirLoadHost
+  MirHost1 = routine clink(AA: int64): int64;
+
+  /// A host routine JIT'd code may import, taking two int64s.
+  /// @since 0.3
+  /// @see MirLoadHost
+  MirHost2 = routine clink(AA: int64; AB: int64): int64;
+
+  /// A host routine JIT'd code may import, taking three int64s.
+  /// @since 0.3
+  /// @see MirLoadHost
+  MirHost3 = routine clink(AA: int64; AB: int64; AC: int64): int64;
+
+/// A fresh MIR context: MIR_init, this unit's error handler (a MIR error
+/// inside a mir_ext routine makes it fail, MirLastError says why) and the
+/// native generator ready (MIR_gen_init).
+/// @returns the context; end it with MirFree
+/// @example `LCtx := MirNew(); ... MirFree(LCtx);`
+/// @since 0.3
+/// @see MirFree
+exported routine MirNew(): MIR_context_t;
+begin
+  return MirExtDoNew();
+end;
+
+/// Ends a context made by MirNew (MIR_gen_finish, MIR_finish); every
+/// function address taken from it is invalid afterwards. nil does nothing.
+/// @param ACtx the context
+/// @example `MirFree(LCtx);`
+/// @since 0.3
+/// @see MirNew
+exported routine MirFree(const ACtx: MIR_context_t);
+begin
+  MirExtDoFree(ACtx);
+end;
+
+/// MIR's message for the last mir_ext routine that failed on this thread
+/// ("" when the last one succeeded). After a MIR error the context is spent
+/// (MIR leaves it half built): use a fresh one.
+/// @returns the message
+/// @example `if LModule = nil then println("MIR: {}", MirLastError()); end;`
+/// @since 0.3
+exported routine MirLastError(): string;
+begin
+  return MirExtDoLastError();
+end;
+
+/// The newest module of a context (the last one scanned, read, compiled or
+/// built), or nil when it has none.
+/// @param ACtx the context
+/// @returns the module, or nil
+/// @since 0.3
+exported routine MirLastModule(const ACtx: MIR_context_t): MIR_module_t;
+begin
+  return MirExtDoLastModule(ACtx);
+end;
+
+/// Scans MIR's text form (MIR_scan_string) and loads every module it holds.
+/// Register the hosts its code imports (MirLoadHost) before MirLink.
+/// @param ACtx the context
+/// @param AText the module(s) in MIR's text form
+/// @returns the last module loaded, or nil on a MIR error (a syntax error,
+///   no module in the text: MirLastError says which)
+/// @example `LModule := MirLoadModuleText(LCtx, CSource);`
+/// @since 0.3
+/// @see MirLink
+exported routine MirLoadModuleText(const ACtx: MIR_context_t; const AText: string): MIR_module_t;
+begin
+  return MirExtDoScanLoad(ACtx, AText.c_str());
+end;
+
+/// Registers a host routine taking no argument under AName, for JIT'd code
+/// that imports it (MIR_load_external). It must not let a C++ exception
+/// escape: nothing unwinds through JIT'd code.
+/// @param ACtx the context
+/// @param AName the name the code imports
+/// @param AHost the routine
+/// @example `MirLoadHost(LCtx, "tick", Tick);`
+/// @since 0.3
+/// @see MirLink
+exported routine MirLoadHost(const ACtx: MIR_context_t; const AName: string; const AHost: MirHost0);
+begin
+  MirExtDoLoadExternal(ACtx, AName, reinterpret_cast<void*>(AHost));
+end;
+
+/// Registers a host routine taking one int64 (see the no-argument form).
+/// @param ACtx the context
+/// @param AName the name the code imports
+/// @param AHost the routine
+/// @example `MirLoadHost(LCtx, "square", Square);`
+/// @since 0.3
+/// @see MirLoadHost
+exported routine MirLoadHost(const ACtx: MIR_context_t; const AName: string; const AHost: MirHost1);
+begin
+  MirExtDoLoadExternal(ACtx, AName, reinterpret_cast<void*>(AHost));
+end;
+
+/// Registers a host routine taking two int64s (see the no-argument form).
+/// @param ACtx the context
+/// @param AName the name the code imports
+/// @param AHost the routine
+/// @example `MirLoadHost(LCtx, "host_mul", HostMul);`
+/// @since 0.3
+/// @see MirLoadHost
+exported routine MirLoadHost(const ACtx: MIR_context_t; const AName: string; const AHost: MirHost2);
+begin
+  MirExtDoLoadExternal(ACtx, AName, reinterpret_cast<void*>(AHost));
+end;
+
+/// Registers a host routine taking three int64s (see the no-argument form).
+/// @param ACtx the context
+/// @param AName the name the code imports
+/// @param AHost the routine
+/// @example `MirLoadHost(LCtx, "clamp", Clamp);`
+/// @since 0.3
+/// @see MirLoadHost
+exported routine MirLoadHost(const ACtx: MIR_context_t; const AName: string; const AHost: MirHost3);
+begin
+  MirExtDoLoadExternal(ACtx, AName, reinterpret_cast<void*>(AHost));
+end;
+
+/// Registers the C runtime routines c2mir's code imports: memcpy, memset
+/// and memmove (struct copies and clears are lowered to them). Call it
+/// before MirLink for code from C.
+/// @param ACtx the context
+/// @example `MirLoadStdC(LCtx);`
+/// @since 0.3
+/// @see C2MirCompileString
+exported routine MirLoadStdC(const ACtx: MIR_context_t);
+begin
+  MirExtDoLoadStdC(ACtx);
+end;
+
+/// Links every loaded module (MIR_link): imports are resolved to the hosts
+/// registered, and code is made the way AMode says.
+/// @param ACtx the context
+/// @param AMode lazy, eager, per basic block or the interpreter
+/// @returns true when linked; false on a MIR error (an import with no host
+///   registered: MirLastError says which)
+/// @example `if not MirLink(LCtx, MirLinkMode.Eager) then ... end;`
+/// @since 0.3
+/// @see MirLinkMode
+/// @see MirFuncAddr
+exported routine MirLink(const ACtx: MIR_context_t; const AMode: MirLinkMode): bool;
+begin
+  return MirExtDoLink(ACtx, int32(AMode));
+end;
+
+/// A function of a module by name (the item MIR_interp or MIR_output_item
+/// take), or nil.
+/// @param ACtx the context
+/// @param AModule the module
+/// @param AName the function's name
+/// @returns the item, or nil when the module has no function AName
+/// @since 0.3
+/// @see MirFuncAddr
+exported routine MirFuncItem(const ACtx: MIR_context_t; const AModule: MIR_module_t; const AName: string): MIR_item_t;
+begin
+  return MirExtDoFuncItem(ACtx, AModule, AName);
+end;
+
+/// The address to call a function of a module at (after MirLink), or nil.
+/// @param ACtx the context
+/// @param AModule the module
+/// @param AName the function's name
+/// @returns the address, or nil when the module has no function AName
+/// @example `LSum := MirFuncAddr(LCtx, LModule, "sum");`
+/// @since 0.3
+/// @see MirCall
+exported routine MirFuncAddr(const ACtx: MIR_context_t; const AModule: MIR_module_t; const AName: string): ptr;
+begin
+  return MirExtDoItemAddr(MirExtDoFuncItem(ACtx, AModule, AName));
+end;
+
+/// Calls a function taking no argument and returning an int64.
+/// @param AAddress the function's address (MirFuncAddr, not nil)
+/// @returns its result
+/// @since 0.3
+/// @see MirFuncAddr
+exported routine MirCall(const AAddress: ptr): int64;
+begin
+  return MirExtDoCall0(AAddress);
+end;
+
+/// Calls a function taking one int64 and returning an int64.
+/// @param AAddress the function's address (MirFuncAddr, not nil)
+/// @param AA the argument
+/// @returns its result
+/// @example `println("{}", MirCall(LSum, 1000));`
+/// @since 0.3
+/// @see MirFuncAddr
+exported routine MirCall(const AAddress: ptr; const AA: int64): int64;
+begin
+  return MirExtDoCall1(AAddress, AA);
+end;
+
+/// Calls a function taking two int64s and returning an int64.
+/// @param AAddress the function's address (MirFuncAddr, not nil)
+/// @param AA the first argument
+/// @param AB the second argument
+/// @returns its result
+/// @since 0.3
+/// @see MirFuncAddr
+exported routine MirCall(const AAddress: ptr; const AA: int64; const AB: int64): int64;
+begin
+  return MirExtDoCall2(AAddress, AA, AB);
+end;
+
+/// Calls a function taking three int64s and returning an int64.
+/// @param AAddress the function's address (MirFuncAddr, not nil)
+/// @param AA the first argument
+/// @param AB the second argument
+/// @param AC the third argument
+/// @returns its result
+/// @since 0.3
+/// @see MirFuncAddr
+exported routine MirCall(const AAddress: ptr; const AA: int64; const AB: int64; const AC: int64): int64;
+begin
+  return MirExtDoCall3(AAddress, AA, AB, AC);
+end;
+
+/// Compiles C11 source with c2mir and loads its module. When the C does not
+/// compile, c2mir's messages (each with the source's name, line and column)
+/// are MirLastError's text and nothing reaches stderr; the warnings of a
+/// compile that succeeds go to stderr. Register MirLoadStdC (and any host
+/// the C calls) before MirLink.
+/// @param ACtx the context
+/// @param ASource the C source
+/// @param AName the source's name in c2mir's messages
+/// @returns the module, or nil when the C does not compile or on a MIR error
+///   (MirLastError says why)
+/// @example `LModule := C2MirCompileString(LCtx, "long long sq (long long x) { return x * x; }", "sq.c");`
+/// @since 0.3
+/// @see C2MirCompileFile
+exported routine C2MirCompileString(const ACtx: MIR_context_t; const ASource: string; const AName: string): MIR_module_t;
+begin
+  return MirExtDoCompileC(ACtx, ASource, AName.c_str());
+end;
+
+/// C2MirCompileString over the bytes of a stream, read to its end.
+/// @param ACtx the context
+/// @param AIO the C source's stream (the caller's: not closed)
+/// @param AName the source's name in c2mir's messages
+/// @returns the module, or nil (the stream cannot be read, the C does not
+///   compile, a MIR error)
+/// @since 0.3
+/// @see C2MirCompileString
+exported routine C2MirCompileIO(const ACtx: MIR_context_t; const AIO: IO; const AName: string): MIR_module_t;
+var
+  LSource: string;
+begin
+  if not IOReadAll(AIO, LSource) then
+    MirExtDoSetError("the C source could not be read");
+    return nil;
+  end;
+  return MirExtDoCompileC(ACtx, LSource, AName.c_str());
+end;
+
+/// C2MirCompileString over a C file (UTF-8 path, `$P:` / `$D:` as
+/// CreateFileIO resolves them); the path is its name in c2mir's messages.
+/// @param ACtx the context
+/// @param APath the C file
+/// @returns the module, or nil (a missing file, the C does not compile, a
+///   MIR error)
+/// @example `LModule := C2MirCompileFile(LCtx, "$P:square.c");`
+/// @since 0.3
+/// @see C2MirCompileString
+exported routine C2MirCompileFile(const ACtx: MIR_context_t; const APath: string): MIR_module_t;
+var
+  LIO: IO;
+  LModule: MIR_module_t;
+begin
+  LIO := CreateFileIO(APath, FileMode.Read);
+  if LIO = nil then
+    MirExtDoSetError("the C file cannot be opened");
+    return nil;
+  end;
+  LModule := C2MirCompileIO(ACtx, LIO, APath);
+  IOClose(LIO);
+  return LModule;
+end;
+
+/// C2MirCompileString over one entry of a zip archive (CreateZipFileIO:
+/// `$P:` paths, ZipCrypto passwords); the entry is its name in c2mir's
+/// messages.
+/// @param ACtx the context
+/// @param AArchive the zip file
+/// @param AEntry the C source's entry
+/// @param APassword the entry's password ("" for none)
+/// @returns the module, or nil (no such entry, a wrong password, the C does
+///   not compile, a MIR error)
+/// @example `LModule := C2MirCompileZip(LCtx, "$P:assets.zip", "res/assets/scripts/mir/square.c", "PaskalCPP");`
+/// @since 0.3
+/// @see C2MirCompileString
+exported routine C2MirCompileZip(const ACtx: MIR_context_t; const AArchive: string; const AEntry: string; const APassword: string): MIR_module_t;
+var
+  LIO: IO;
+  LModule: MIR_module_t;
+begin
+  LIO := CreateZipFileIO(AArchive, AEntry, APassword);
+  if LIO = nil then
+    MirExtDoSetError("the zip entry cannot be opened (no such entry, or a wrong password)");
+    return nil;
+  end;
+  LModule := C2MirCompileIO(ACtx, LIO, AEntry);
+  IOClose(LIO);
+  return LModule;
+end;
+
+/// Writes every module of the context in MIR's binary form
+/// (MIR_write_with_func) to a stream.
+/// @param ACtx the context
+/// @param AIO where the bytes go (the caller's: not closed)
+/// @returns true when written; false on a MIR error or a short write
+/// @since 0.3
+/// @see MirReadIO
+exported routine MirWriteIO(const ACtx: MIR_context_t; const AIO: IO): bool;
+var
+  LData: string;
+begin
+  if not MirExtDoWriteAll(ACtx, LData) then
+    return false;
+  end;
+  if IOWriteFull(AIO, LData.data(), int64(LData.size())) <> int64(LData.size()) then
+    MirExtDoSetError("the binary form could not be written");
+    return false;
+  end;
+  return true;
+end;
+
+/// MirWriteIO into a file (created or emptied; UTF-8 path, `$P:` / `$D:`).
+/// The binary form belongs to the MIR the program links: it is read back
+/// by the same MIR version.
+/// @param ACtx the context
+/// @param APath the file (.bmir by custom)
+/// @returns true when written
+/// @example `MirWriteFile(LCtx, "$P:demo.bmir");`
+/// @since 0.3
+/// @see MirReadFile
+exported routine MirWriteFile(const ACtx: MIR_context_t; const APath: string): bool;
+var
+  LIO: IO;
+  LOk: bool;
+begin
+  LIO := CreateFileIO(APath, FileMode.Write);
+  if LIO = nil then
+    MirExtDoSetError("the file cannot be created");
+    return false;
+  end;
+  LOk := MirWriteIO(ACtx, LIO);
+  if not IOClose(LIO) then
+    MirExtDoSetError("the file could not be closed");
+    LOk := false;
+  end;
+  return LOk;
+end;
+
+/// Reads MIR's binary form from a stream to its end (MIR_read_with_func)
+/// and loads every module it holds.
+/// @param ACtx the context
+/// @param AIO the binary form's stream (the caller's: not closed)
+/// @returns the last module loaded, or nil (the stream cannot be read, a
+///   cut or foreign binary: a MIR error)
+/// @since 0.3
+/// @see MirWriteIO
+exported routine MirReadIO(const ACtx: MIR_context_t; const AIO: IO): MIR_module_t;
+var
+  LData: string;
+begin
+  if not IOReadAll(AIO, LData) then
+    MirExtDoSetError("the binary form could not be read");
+    return nil;
+  end;
+  return MirExtDoReadLoad(ACtx, LData);
+end;
+
+/// MirReadIO from a file (UTF-8 path, `$P:` / `$D:`).
+/// @param ACtx the context
+/// @param APath the file
+/// @returns the last module loaded, or nil (a missing file, a bad binary)
+/// @example `LModule := MirReadFile(LCtx, "$P:demo.bmir");`
+/// @since 0.3
+/// @see MirWriteFile
+exported routine MirReadFile(const ACtx: MIR_context_t; const APath: string): MIR_module_t;
+var
+  LIO: IO;
+  LModule: MIR_module_t;
+begin
+  LIO := CreateFileIO(APath, FileMode.Read);
+  if LIO = nil then
+    MirExtDoSetError("the file cannot be opened");
+    return nil;
+  end;
+  LModule := MirReadIO(ACtx, LIO);
+  IOClose(LIO);
+  return LModule;
+end;
+
+/// MirReadIO from one entry of a zip archive (CreateZipFileIO: `$P:` paths,
+/// ZipCrypto passwords).
+/// @param ACtx the context
+/// @param AArchive the zip file
+/// @param AEntry the binary form's entry
+/// @param APassword the entry's password ("" for none)
+/// @returns the last module loaded, or nil (no such entry, a wrong password,
+///   a bad binary)
+/// @example `LModule := MirReadZip(LCtx, "$P:assets.zip", "res/assets/data/mir/demo.bmir", "PaskalCPP");`
+/// @since 0.3
+/// @see MirReadFile
+exported routine MirReadZip(const ACtx: MIR_context_t; const AArchive: string; const AEntry: string; const APassword: string): MIR_module_t;
+var
+  LIO: IO;
+  LModule: MIR_module_t;
+begin
+  LIO := CreateZipFileIO(AArchive, AEntry, APassword);
+  if LIO = nil then
+    MirExtDoSetError("the zip entry cannot be opened (no such entry, or a wrong password)");
+    return nil;
+  end;
+  LModule := MirReadIO(ACtx, LIO);
+  IOClose(LIO);
+  return LModule;
+end;
+
+/// Starts a function of int64s inside the module being built
+/// (MIR_new_module ... MirFinishModule): one int64 result, no parameter.
+/// Its locals come from MIR_new_func_reg, its code from MirEmit / MirEmitRet
+/// / MirEmitLabel, and MirFinishFunc ends it.
+/// @param ACtx the context
+/// @param AName the function's name
+/// @returns the function's item
+/// @example `LFunc := MirNewFunc(LCtx, "answer");`
+/// @since 0.3
+/// @see MirFinishFunc
+exported routine MirNewFunc(const ACtx: MIR_context_t; const AName: string): MIR_item_t;
+begin
+  return MirExtDoNewFunc0(ACtx, AName);
+end;
+
+/// Starts a function of int64s with one int64 parameter (see the
+/// no-parameter form); the parameter's register is MIR_reg(ACtx, AA, ...).
+/// @param ACtx the context
+/// @param AName the function's name
+/// @param AA the parameter's name
+/// @returns the function's item
+/// @example `LFunc := MirNewFunc(LCtx, "sum_to", "n");`
+/// @since 0.3
+/// @see MirNewFunc
+exported routine MirNewFunc(const ACtx: MIR_context_t; const AName: string; const AA: string): MIR_item_t;
+begin
+  return MirExtDoNewFunc1(ACtx, AName, AA);
+end;
+
+/// Starts a function of int64s with two int64 parameters (see the
+/// no-parameter form).
+/// @param ACtx the context
+/// @param AName the function's name
+/// @param AA the first parameter's name
+/// @param AB the second parameter's name
+/// @returns the function's item
+/// @since 0.3
+/// @see MirNewFunc
+exported routine MirNewFunc(const ACtx: MIR_context_t; const AName: string; const AA: string; const AB: string): MIR_item_t;
+begin
+  return MirExtDoNewFunc2(ACtx, AName, AA, AB);
+end;
+
+/// Starts a function of int64s with three int64 parameters (see the
+/// no-parameter form).
+/// @param ACtx the context
+/// @param AName the function's name
+/// @param AA the first parameter's name
+/// @param AB the second parameter's name
+/// @param AC the third parameter's name
+/// @returns the function's item
+/// @since 0.3
+/// @see MirNewFunc
+exported routine MirNewFunc(const ACtx: MIR_context_t; const AName: string; const AA: string; const AB: string; const AC: string): MIR_item_t;
+begin
+  return MirExtDoNewFunc3(ACtx, AName, AA, AB, AC);
+end;
+
+/// Appends an instruction of one operand to a function (MIR_new_insn_arr,
+/// MIR_append_insn): `MIR_JMP label`. MIR checks the operands when the
+/// function is finished (MirFinishFunc).
+/// @param ACtx the context
+/// @param AFunc the function (MirNewFunc's item)
+/// @param ACode the instruction (MIR_JMP, ...)
+/// @param AA its operand
+/// @example `MirEmit(LCtx, LFunc, MIR_JMP, MIR_new_label_op(LCtx, LLoop));`
+/// @since 0.3
+/// @see MirFinishFunc
+exported routine MirEmit(const ACtx: MIR_context_t; const AFunc: MIR_item_t; const ACode: MIR_insn_code_t; const AA: MIR_op_t);
+begin
+  MirExtDoEmit1(ACtx, AFunc, ACode, AA);
+end;
+
+/// Appends an instruction of two operands: `MIR_MOV dest, src`,
+/// `MIR_NEG dest, src`.
+/// @param ACtx the context
+/// @param AFunc the function
+/// @param ACode the instruction
+/// @param AA its first operand
+/// @param AB its second operand
+/// @since 0.3
+/// @see MirEmit
+exported routine MirEmit(const ACtx: MIR_context_t; const AFunc: MIR_item_t; const ACode: MIR_insn_code_t; const AA: MIR_op_t; const AB: MIR_op_t);
+begin
+  MirExtDoEmit2(ACtx, AFunc, ACode, AA, AB);
+end;
+
+/// Appends an instruction of three operands: `MIR_ADD dest, a, b`,
+/// `MIR_BGE label, a, b`.
+/// @param ACtx the context
+/// @param AFunc the function
+/// @param ACode the instruction
+/// @param AA its first operand
+/// @param AB its second operand
+/// @param AC its third operand
+/// @since 0.3
+/// @see MirEmit
+exported routine MirEmit(const ACtx: MIR_context_t; const AFunc: MIR_item_t; const ACode: MIR_insn_code_t; const AA: MIR_op_t; const AB: MIR_op_t; const AC: MIR_op_t);
+begin
+  MirExtDoEmit3(ACtx, AFunc, ACode, AA, AB, AC);
+end;
+
+/// Appends a return of one value (MIR_new_ret_insn).
+/// @param ACtx the context
+/// @param AFunc the function
+/// @param AValue the value returned
+/// @since 0.3
+/// @see MirEmit
+exported routine MirEmitRet(const ACtx: MIR_context_t; const AFunc: MIR_item_t; const AValue: MIR_op_t);
+begin
+  MirExtDoEmitRet(ACtx, AFunc, AValue);
+end;
+
+/// Places a label (MIR_new_label's) at the end of a function's code.
+/// @param ACtx the context
+/// @param AFunc the function
+/// @param ALabel the label
+/// @since 0.3
+/// @see MirEmit
+exported routine MirEmitLabel(const ACtx: MIR_context_t; const AFunc: MIR_item_t; const ALabel: MIR_label_t);
+begin
+  MIR_append_insn(ACtx, AFunc, ALabel);
+end;
+
+/// Ends the function being built (MIR_finish_func), which checks it.
+/// @param ACtx the context
+/// @returns true when the function is sound; false on a MIR error (a wrong
+///   operand count, an undeclared register: MirLastError says which)
+/// @since 0.3
+/// @see MirNewFunc
+exported routine MirFinishFunc(const ACtx: MIR_context_t): bool;
+begin
+  return MirExtDoFinishFunc(ACtx);
+end;
+
+/// Ends the module being built (MIR_finish_module) and loads it.
+/// @param ACtx the context
+/// @returns the module, or nil on a MIR error
+/// @example `LModule := MirFinishModule(LCtx);`
+/// @since 0.3
+/// @see MirLink
+exported routine MirFinishModule(const ACtx: MIR_context_t): MIR_module_t;
+begin
+  return MirExtDoFinishModule(ACtx);
+end;
+
+/// Prints a module in MIR's text form (MIR_output_module) to the program's
+/// standard output, in order with its own printed lines.
+/// @param ACtx the context
+/// @param AModule the module (nil prints nothing)
+/// @since 0.3
+/// @see MirLoadModuleText
+exported routine MirPrintModule(const ACtx: MIR_context_t; const AModule: MIR_module_t);
+begin
+  MirExtDoPrintModule(ACtx, AModule);
+end;
+
+end.

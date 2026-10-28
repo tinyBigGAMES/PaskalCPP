@@ -1,0 +1,51 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  MirCCompileZip.pcpp - MIR example (import mir, mir_ext): C compiled
+  straight from bin\assets.zip. C2MirCompileZip reads the entry
+  res/assets/scripts/mir/square.c (password PaskalCPP) through CustomIO,
+  with nothing unpacked to disk, and c2mir compiles it; its two functions
+  are JIT'd and called.
+==============================================================================*/
+
+module exe MirCCompileZip;
+
+import
+  mir,
+  mir_ext;
+
+var
+  LCtx: MIR_context_t;
+  LModule: MIR_module_t;
+  LN: int64;
+
+begin
+  LCtx := MirNew();
+  LModule := C2MirCompileZip(LCtx, "$P:../../assets.zip", "res/assets/scripts/mir/square.c", "PaskalCPP");
+  if LModule = nil then
+    println("square.c does not compile from assets.zip: {}", MirLastError());
+    return;
+  end;
+  MirLoadStdC(LCtx);
+  if not MirLink(LCtx, MirLinkMode.Lazy) then
+    println("the link failed: {}", MirLastError());
+    return;
+  end;
+  println("square(12) = {}", MirCall(MirFuncAddr(LCtx, LModule, "square"), 12));
+  for LN := 1 to 5 do
+    println("sum_squares({}) = {}", LN * 10, MirCall(MirFuncAddr(LCtx, LModule, "sum_squares"), LN * 10));
+  end;
+  MirFree(LCtx);
+end.

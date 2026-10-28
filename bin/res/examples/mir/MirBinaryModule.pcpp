@@ -1,0 +1,78 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  MirBinaryModule.pcpp - MIR example (import mir, mir_ext): compile once,
+  load fast. A module compiled from C is written in MIR's compact binary
+  form (MirWriteFile) beside the program, then read back into a brand new
+  context (MirReadFile) and run there, with no c2mir in the second step.
+  The file is deleted at the end (SysUtils' DeleteFile). The binary form
+  belongs to the MIR the program links: read it with the same version.
+==============================================================================*/
+
+module exe MirBinaryModule;
+
+import
+  mir,
+  mir_ext,
+  SysUtils;
+
+const
+  CFile: string = "$P:collatz.bmir";
+
+  CSource: string = R"(
+long long collatz_steps (long long n) {
+  long long steps = 0;
+  while (n != 1) {
+    n = (n % 2 == 0) ? n / 2 : 3 * n + 1;
+    steps++;
+  }
+  return steps;
+}
+)";
+
+var
+  LCtx: MIR_context_t;
+  LModule: MIR_module_t;
+  LFunc: ptr;
+  LN: int64;
+
+begin
+  // Step 1: C -> MIR -> collatz.bmir
+  LCtx := MirNew();
+  if C2MirCompileString(LCtx, CSource, "collatz.c") = nil then
+    println("the C does not compile: {}", MirLastError());
+    return;
+  end;
+  if not MirWriteFile(LCtx, CFile) then
+    println("collatz.bmir cannot be written: {}", MirLastError());
+    return;
+  end;
+  MirFree(LCtx);
+  println("wrote {}", ResolvePath(CFile));
+
+  // Step 2: a fresh context loads the binary form and runs it
+  LCtx := MirNew();
+  LModule := MirReadFile(LCtx, CFile);
+  if (LModule = nil) or not MirLink(LCtx, MirLinkMode.Lazy) then
+    println("collatz.bmir does not load: {}", MirLastError());
+    return;
+  end;
+  LFunc := MirFuncAddr(LCtx, LModule, "collatz_steps");
+  for LN := 1 to 10 do
+    println("collatz_steps({}) = {}", LN * 9, MirCall(LFunc, LN * 9));
+  end;
+  MirFree(LCtx);
+  DeleteFile(CFile);
+end.

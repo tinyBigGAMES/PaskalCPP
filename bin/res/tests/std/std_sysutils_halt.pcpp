@@ -1,0 +1,56 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_sysutils_halt.pcpp - Std: SysUtils Halt
+
+  Halt(7) ends the program at once with exit code 7, from inside a routine
+  two calls down: the lines printed before it are all out (the exit work
+  flushes them, the heap report is printed), and nothing after the call
+  runs (no "not reached" line, the main block's last line never prints).
+*******************************************************************************/
+
+module exe std_sysutils_halt;
+
+/*
+  @@test
+    kind run
+    exitcode 7
+    expect
+    | before halt
+    | in leave
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import SysUtils;
+
+routine Leave();
+begin
+  println("in leave");
+  Halt(7);
+  println("not reached in leave");
+end;
+
+routine Outer();
+begin
+  Leave();
+  println("not reached in outer");
+end;
+
+begin
+  println("before halt");
+  Outer();
+  println("not reached in main");
+end.

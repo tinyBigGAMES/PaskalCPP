@@ -104,6 +104,7 @@ import
   sfml,
   minizip,
   pl_mpeg,
+  CustomIO,
   SysUtils,
   Console,
   Math,
@@ -570,7 +571,8 @@ using ZipProgress = std::function<void(const std::string& AEntry, int APercent, 
 // through SysUtils' ResolvePath ($P: / $D: work). An AArchive inside AFolder
 // is left out; an existing AArchive is replaced. False when AFolder is not
 // inside ARoot or cannot be listed, a file cannot be read or the archive
-// cannot be written (an archive begun is then incomplete).
+// cannot be written (an archive begun is then incomplete). The writing is
+// CustomIO's ZipDirectoryContents (one zip writer in std).
 [[nodiscard]] bool buildZip(const std::string& AFolder,
                             const std::string& AArchive,
                             const std::string& APassword = {},
@@ -2270,13 +2272,6 @@ std::filesystem::path zipUtf8Path(const std::string& AText)
     return std::filesystem::path(std::u8string(AText.begin(), AText.end()));
 }
 
-// A path as UTF-8 text with '/' between folders
-std::string zipPathText(const std::filesystem::path& APath)
-{
-    const std::u8string LText = APath.generic_u8string();
-    return std::string(LText.begin(), LText.end());
-}
-
 // A path an sfx caller hands over: SysUtils' ResolvePath ($P: / $D: prefixes,
 // the current folder for a relative one), the unit this unit imports
 std::string zipResolve(const std::string& APath)
@@ -2289,55 +2284,6 @@ std::string zipEntryName(const std::string& AEntry)
 {
     std::string LResult = AEntry;
     std::replace(LResult.begin(), LResult.end(), '\\', '/');
-    return LResult;
-}
-
-bool zipIsAscii(const std::string& AText)
-{
-    for (const char LChar : AText)
-    {
-        if (static_cast<unsigned char>(LChar) >= 0x80)
-            return false;
-    }
-    return true;
-}
-
-// AFile's modification time in minizip's local date form; 1980-01-01 (the
-// earliest date an entry holds) when it cannot be read or lies before it
-tm_zip zipFileTime(const std::filesystem::path& AFile)
-{
-    tm_zip LResult{};
-    LResult.tm_mday = 1;
-    LResult.tm_year = 1980;
-
-    std::error_code LError;
-    const std::filesystem::file_time_type LWritten = std::filesystem::last_write_time(AFile, LError);
-    if (LError)
-        return LResult;
-
-    // zig's libc++ has no std::chrono::clock_cast: the file clock's time moved
-    // to the system clock by the two clocks' offset now (microseconds off; a
-    // zip entry's date holds 2-second steps)
-    const auto LSystem = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-        LWritten - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
-    const std::time_t LTime = std::chrono::system_clock::to_time_t(LSystem);
-    std::tm LLocal{};
-#ifdef _WIN32
-    if (localtime_s(&LLocal, &LTime) != 0)
-        return LResult;
-#else
-    if (localtime_r(&LTime, &LLocal) == nullptr)
-        return LResult;
-#endif
-    if (LLocal.tm_year + 1900 < 1980)
-        return LResult;
-
-    LResult.tm_sec  = LLocal.tm_sec;
-    LResult.tm_min  = LLocal.tm_min;
-    LResult.tm_hour = LLocal.tm_hour;
-    LResult.tm_mday = LLocal.tm_mday;
-    LResult.tm_mon  = LLocal.tm_mon;
-    LResult.tm_year = LLocal.tm_year + 1900;
     return LResult;
 }
 
@@ -2380,89 +2326,11 @@ bool zipPasswordFits(unzFile AZip, const unz_file_info64& AInfo, const std::stri
     return static_cast<unsigned long>(LLast) == LCheck;
 }
 
-// Writes AFile as the entry AName: its CRC read in a first pass (the password
-// header needs it before the data), then its bytes. False when the file
-// cannot be read, changed between the passes, or the entry cannot be written.
-bool zipAddFile(zipFile                     AZip,
-                const std::filesystem::path& AFile,
-                const std::string&           AName,
-                const std::string&           APassword,
-                const sfx::ZipProgress&      AProgress)
+// buildZip's progress as CustomIO's ZipProgress (a plain routine and a user
+// pointer): AUserData is the caller's sfx::ZipProgress
+void zipProgressThunk(void* AUserData, const std::string& AEntry, std::int32_t APercent, bool ANewFile)
 {
-    std::ifstream     LIn(AFile, std::ios::binary);
-    std::vector<char> LBuffer(kZipChunk);
-    uLong             LCrc  = crc32(0L, Z_NULL, 0);
-    std::uint64_t     LSize = 0;
-
-    if (!LIn)
-        return false;
-    while (LIn)
-    {
-        LIn.read(LBuffer.data(), static_cast<std::streamsize>(LBuffer.size()));
-        const std::streamsize LGot = LIn.gcount();
-        if (LGot > 0)
-        {
-            LCrc = crc32(LCrc, reinterpret_cast<const Bytef*>(LBuffer.data()), static_cast<uInt>(LGot));
-            LSize += static_cast<std::uint64_t>(LGot);
-        }
-    }
-    // The end of the file sets failbit too; badbit is a read error
-    if (LIn.bad())
-        return false;
-    LIn.clear();
-    LIn.seekg(0);
-    if (!LIn)
-        return false;
-
-    zip_fileinfo LInfo{};
-    LInfo.tmz_date = zipFileTime(AFile);
-
-    const char* LPassword = nullptr;
-    if (!APassword.empty())
-        LPassword = APassword.c_str();
-    // General purpose bit 11: the name is UTF-8 (set when it holds a non-ASCII byte)
-    uLong LFlags = 0;
-    if (!zipIsAscii(AName))
-        LFlags = 1u << 11;
-    int LZip64 = 0;
-    if (LSize >= 0xffffffffull)
-        LZip64 = 1;
-
-    if (zipOpenNewFileInZip4_64(AZip, AName.c_str(), &LInfo, nullptr, 0, nullptr, 0, nullptr,
-                                Z_DEFLATED, Z_BEST_COMPRESSION, 0, -MAX_WBITS, DEF_MEM_LEVEL,
-                                Z_DEFAULT_STRATEGY, LPassword, LCrc, 0, LFlags, LZip64) != ZIP_OK)
-        return false;
-
-    if (AProgress)
-        AProgress(AName, 0, true);
-
-    bool          LOk   = true;
-    std::uint64_t LDone = 0;
-    while (LOk && LIn)
-    {
-        LIn.read(LBuffer.data(), static_cast<std::streamsize>(LBuffer.size()));
-        const std::streamsize LGot = LIn.gcount();
-        if (LGot <= 0)
-            continue;
-        if (zipWriteInFileInZip(AZip, LBuffer.data(), static_cast<unsigned int>(LGot)) != ZIP_OK)
-        {
-            LOk = false;
-            continue;
-        }
-        LDone += static_cast<std::uint64_t>(LGot);
-        if (AProgress)
-            AProgress(AName, static_cast<int>(LDone * 100 / LSize), false);
-    }
-    // A read error, or a file whose size changed since its CRC was taken
-    if (LIn.bad() || LDone != LSize)
-        LOk = false;
-    if (LOk && LSize == 0 && AProgress)
-        AProgress(AName, 100, false);
-
-    // Called whatever the writes gave: the entry is always closed
-    if (zipCloseFileInZip(AZip) != ZIP_OK)
-        LOk = false;
-    return LOk;
+    (*static_cast<const sfx::ZipProgress*>(AUserData))(AEntry, static_cast<int>(APercent), ANewFile);
 }
 
 } // namespace
@@ -2682,63 +2550,12 @@ bool sfx::buildZip(const std::string& AFolder,
                    const std::string& ARoot,
                    const ZipProgress& AProgress)
 {
-    std::error_code LError;
-    const std::string           LArchiveText = zipResolve(AArchive);
-    const std::filesystem::path LFolder      = zipUtf8Path(zipResolve(AFolder));
-    const std::filesystem::path LArchive     = zipUtf8Path(LArchiveText);
-    std::filesystem::path       LRoot        = LFolder;
-    if (!ARoot.empty())
-        LRoot = zipUtf8Path(zipResolve(ARoot));
-
-    // The folder must lie inside the root: its path below the root holds no ".."
-    const std::filesystem::path LBelow = LFolder.lexically_relative(LRoot);
-    if (LBelow.empty() || *LBelow.begin() == "..")
-        return false;
-
-    // Every regular file below the folder, named by its path below the root with '/'
-    std::vector<std::pair<std::string, std::filesystem::path>> LFiles;
-    // ResolvePath gives full, normalized paths: the entries' paths compare as text
-    std::filesystem::recursive_directory_iterator LEntry(LFolder, LError);
-    for (; !LError && LEntry != std::filesystem::recursive_directory_iterator(); LEntry.increment(LError))
-    {
-        const bool LRegular = LEntry->is_regular_file(LError);
-        if (LError)
-            break;
-        if (!LRegular)
-            continue;
-
-        const std::filesystem::path LFile = LEntry->path().lexically_normal();
-        if (LFile == LArchive.lexically_normal())
-            continue;
-        LFiles.emplace_back(zipPathText(LFile.lexically_relative(LRoot)), LEntry->path());
-    }
-    if (LError)
-        return false;
-
-    // In byte order of the names: the same archive whatever order the OS lists them in
-    std::sort(LFiles.begin(), LFiles.end(),
-              [](const auto& ALeft, const auto& ARight) { return ALeft.first < ARight.first; });
-
-    zlib_filefunc64_def LFuncs;
-    fill_utf8_filefunc64(&LFuncs);
-    zipFile LZip = zipOpen2_64(LArchiveText.c_str(), APPEND_STATUS_CREATE, nullptr, &LFuncs);
-    if (LZip == nullptr)
-        return false;
-
-    bool LOk = true;
-    for (const auto& LFile : LFiles)
-    {
-        if (!zipAddFile(LZip, LFile.second, LFile.first, APassword, AProgress))
-        {
-            LOk = false;
-            break;
-        }
-    }
-
-    // Called whatever the entries gave: the archive is always closed
-    if (zipClose(LZip, nullptr) != ZIP_OK)
-        LOk = false;
-    return LOk;
+    // One writer in std: CustomIO's ZipDirectoryContents (archive first). It
+    // resolves the paths itself; an empty ARoot is the folder itself there too
+    if (!AProgress)
+        return ::pcpp_m_CustomIO::ZipDirectoryContents(AArchive, AFolder, APassword, ARoot, nullptr, nullptr);
+    return ::pcpp_m_CustomIO::ZipDirectoryContents(AArchive, AFolder, APassword, ARoot, zipProgressThunk,
+                                                   const_cast<sfx::ZipProgress*>(&AProgress));
 }
 
 #include <deque>

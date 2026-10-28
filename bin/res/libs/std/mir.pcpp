@@ -36,8 +36,10 @@
   JIT'd code makes is resolved by the host (MIR_load_external), c2mir's
   memcpy / memset / memmove included.
 
-  It loads no files (c2mir reads its source through a callback, MIR text
-  and binary come from memory), so it has no _ext unit.
+  mir_ext (std\mir_ext.pcpp) puts MIR's C boundary behind PaskalCPP
+  routines: contexts with recoverable errors, hosts, linking, calls by
+  address, C from a string / file / zip entry and the binary form from a
+  file / zip entry.
 ==============================================================================*/
 
 module unit mir;

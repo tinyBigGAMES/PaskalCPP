@@ -1,0 +1,144 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_diagnostics.pcpp - Std: the Diagnostics unit (Stopwatch)
+
+  A new Stopwatch is stopped at zero. StartNew() runs; after Delay(50) it
+  reads at least 50 ms and the ticks agree with the milliseconds through
+  Frequency; two reads while it runs never go back. Stop freezes the total
+  (two reads 30 ms apart are equal), Start on a running one and Stop on a
+  stopped one change nothing, Start after Stop adds on to the total. Reset
+  stops it at zero; Restart is zero and running again. GetTimeStamp moves
+  forward by at least the time waited. Only lower bounds and ordering are
+  checked, never how long anything took (no timing flakiness). Each row
+  prints ok or FAIL with its name.
+*******************************************************************************/
+
+module exe std_diagnostics;
+
+/*
+  @@test
+    kind run
+    expect
+    | ok new stopped
+    | ok new zero ms
+    | ok new zero ticks
+    | ok frequency positive
+    | ok startnew running
+    | ok startnew elapsed
+    | ok ticks agree with ms
+    | ok monotonic
+    | ok start while running
+    | ok stop not running
+    | ok stop freezes
+    | ok stop twice
+    | ok start adds on
+    | ok reset stopped
+    | ok reset zero
+    | ok restart running
+    | ok restart from zero
+    | ok timestamp forward
+    | done 0
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  Diagnostics,
+  SysUtils;
+
+var
+  GFails: int32;
+
+routine Check(const AName: string; const AOk: bool);
+begin
+  if AOk then
+    println("ok {}", AName);
+  else
+    println("FAIL {}", AName);
+    GFails := GFails + 1;
+  end;
+end;
+
+routine TestStopwatch();
+var
+  LNew: Stopwatch;
+  LWatch: Stopwatch;
+  LFirst: int64;
+  LSecond: int64;
+  LTicks: int64;
+  LMs: int64;
+  LStamp: int64;
+begin
+  Check("new stopped", not LNew.IsRunning());
+  Check("new zero ms", LNew.ElapsedMilliseconds() = 0);
+  Check("new zero ticks", LNew.ElapsedTicks() = 0);
+  Check("frequency positive", LNew.Frequency() > 0);
+
+  LWatch := StartNew();
+  Check("startnew running", LWatch.IsRunning());
+  Delay(50);
+  LMs := LWatch.ElapsedMilliseconds();
+  Check("startnew elapsed", LMs >= 50);
+  // Ticks read after the ms: at least as many as the ms say
+  LTicks := LWatch.ElapsedTicks();
+  Check("ticks agree with ms", LTicks div (LWatch.Frequency() div 1000) >= LMs);
+  LFirst := LWatch.ElapsedTicks();
+  LSecond := LWatch.ElapsedTicks();
+  Check("monotonic", LSecond >= LFirst);
+
+  // Start while running keeps the span it is in
+  LFirst := LWatch.ElapsedMilliseconds();
+  LWatch.Start();
+  Check("start while running", LWatch.ElapsedMilliseconds() >= LFirst);
+
+  LWatch.Stop();
+  Check("stop not running", not LWatch.IsRunning());
+  LFirst := LWatch.ElapsedTicks();
+  Delay(30);
+  LSecond := LWatch.ElapsedTicks();
+  Check("stop freezes", LFirst = LSecond);
+  LWatch.Stop();
+  Check("stop twice", LWatch.ElapsedTicks() = LFirst);
+
+  LWatch.Start();
+  Delay(20);
+  LWatch.Stop();
+  Check("start adds on", LWatch.ElapsedMilliseconds() >= LMs + 20);
+
+  LWatch.Reset();
+  Check("reset stopped", not LWatch.IsRunning());
+  Check("reset zero", LWatch.ElapsedTicks() = 0);
+
+  LWatch.Start();
+  Delay(20);
+  LFirst := LWatch.ElapsedTicks();
+  LWatch.Restart();
+  Check("restart running", LWatch.IsRunning());
+  // Restarted from zero: stopped at once, it holds less than the 20 ms span
+  // before it (an ordering, not a duration)
+  LWatch.Stop();
+  Check("restart from zero", LWatch.ElapsedTicks() < LFirst);
+
+  LStamp := GetTimeStamp();
+  Delay(10);
+  Check("timestamp forward", GetTimeStamp() - LStamp >= (LWatch.Frequency() div 1000) * 10);
+end;
+
+begin
+  GFails := 0;
+  TestStopwatch();
+  println("done {}", GFails);
+end.

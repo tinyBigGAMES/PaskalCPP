@@ -1,0 +1,85 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  MirCCompile.pcpp - MIR example (import mir, mir_ext): C compiled at run
+  time. c2mir turns C11 source held in a string into a MIR module
+  (C2MirCompileString), which is JIT'd and called like any other. The C
+  uses a struct, copies it (c2mir lowers the copy to memcpy, which
+  MirLoadStdC provides) and calls back into the program (host_log, a
+  `routine clink` registered with MirLoadHost). The C keeps to long long:
+  long is 32 bits on Win64.
+==============================================================================*/
+
+module exe MirCCompile;
+
+import
+  mir,
+  mir_ext;
+
+const
+  CSource: string = R"(
+long long host_log (long long value);
+
+struct stats { long long count, sum, min, max; };
+
+static struct stats scan (long long n) {
+  struct stats s = { 0, 0, 0, 0 };
+  for (long long i = 1; i <= n; i++) {
+    long long v = (i * 7919) % 1000;
+    if (s.count == 0 || v < s.min) s.min = v;
+    if (s.count == 0 || v > s.max) s.max = v;
+    s.sum += v;
+    s.count++;
+  }
+  return s;
+}
+
+long long summary (long long n) {
+  struct stats s = scan (n);
+  struct stats copy = s;
+  host_log (copy.min);
+  host_log (copy.max);
+  return copy.sum / copy.count;
+}
+)";
+
+// The routine the C calls back into
+routine clink host_log(AValue: int64): int64;
+begin
+  println("  the C reports {}", AValue);
+  return AValue;
+end;
+
+var
+  LCtx: MIR_context_t;
+  LModule: MIR_module_t;
+
+begin
+  LCtx := MirNew();
+  LModule := C2MirCompileString(LCtx, CSource, "summary.c");
+  if LModule = nil then
+    println("the C does not compile: {}", MirLastError());
+    return;
+  end;
+  MirLoadStdC(LCtx);
+  MirLoadHost(LCtx, "host_log", host_log);
+  if not MirLink(LCtx, MirLinkMode.Lazy) then
+    println("the link failed: {}", MirLastError());
+    return;
+  end;
+  println("summary(1000):");
+  println("  average {}", MirCall(MirFuncAddr(LCtx, LModule, "summary"), 1000));
+  MirFree(LCtx);
+end.

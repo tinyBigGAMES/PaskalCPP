@@ -1,0 +1,175 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  Diagnostics.pcpp - the Diagnostics unit: `import Diagnostics;` gives a
+  Stopwatch in the shape of Delphi's System.Diagnostics.TStopwatch: Start,
+  Stop, Reset, Restart, IsRunning, Elapsed in milliseconds and in ticks,
+  the tick Frequency. StartNew() makes one already running (Delphi's
+  TStopwatch.StartNew: an object has no class methods here, so it is a
+  routine of the unit). GetTimeStamp() reads the clock alone. The clock is
+  std::chrono::steady_clock on every target: monotonic, never set back by a
+  change of the system time.
+==============================================================================*/
+
+module unit Diagnostics;
+
+// The clock: std::chrono::steady_clock, read in its own ticks
+cpp source;
+
+#include <chrono>
+#include <cstdint>
+
+namespace {
+
+// The steady clock now, in its ticks
+std::int64_t ClockDoNow() noexcept
+{
+  return static_cast<std::int64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
+}
+
+// The steady clock's ticks per second
+std::int64_t ClockDoFrequency() noexcept
+{
+  using LPeriod = std::chrono::steady_clock::period;
+  return static_cast<std::int64_t>(LPeriod::den / LPeriod::num);
+}
+
+}
+
+/// The current value of the clock a Stopwatch runs on
+/// (std::chrono::steady_clock), in ticks (Frequency per second). Only the
+/// difference of two readings means anything (Delphi's
+/// TStopwatch.GetTimeStamp).
+/// @returns the clock's value in ticks
+/// @example `LT0 := GetTimeStamp(); Work(); LTicks := GetTimeStamp() - LT0;`
+/// @since 0.3
+/// @see Stopwatch
+exported routine GetTimeStamp(): int64;
+begin
+  return ClockDoNow();
+end;
+
+exported type
+  /// Measures time passed, as Delphi's TStopwatch: Start and Stop add up
+  /// running spans, Elapsed* reads the total (the span still running
+  /// included). Built stopped at zero; StartNew() gives one already
+  /// running. Monotonic (std::chrono::steady_clock): a change of the system
+  /// time never moves it.
+  /// @example `LWatch := StartNew(); Work(); println("{} ms", LWatch.ElapsedMilliseconds());`
+  /// @since 0.3
+  /// @see StartNew
+  Stopwatch = object
+    /// The ticks of the spans already stopped
+    hidden Accumulated: int64;
+    /// The clock's value when the running span began
+    hidden StartedAt: int64;
+    /// True while a span runs
+    hidden Running: bool;
+    /// A stopwatch stopped at zero.
+    init();
+    begin
+      self.Accumulated := 0;
+      self.StartedAt := 0;
+      self.Running := false;
+    end;
+    /// Starts (or goes on) measuring; nothing when it runs already.
+    /// @example `LWatch.Start();`
+    method Start();
+    begin
+      if not self.Running then
+        self.StartedAt := ClockDoNow();
+        self.Running := true;
+      end;
+    end;
+    /// Stops measuring, keeping the total; nothing when it is stopped.
+    /// @example `LWatch.Stop();`
+    method Stop();
+    begin
+      if self.Running then
+        self.Accumulated := self.Accumulated + (ClockDoNow() - self.StartedAt);
+        self.Running := false;
+      end;
+    end;
+    /// Stops measuring and sets the total to zero.
+    /// @example `LWatch.Reset();`
+    method Reset();
+    begin
+      self.Accumulated := 0;
+      self.StartedAt := 0;
+      self.Running := false;
+    end;
+    /// Sets the total to zero and starts measuring again (Reset, then Start).
+    /// @example `LWatch.Restart();`
+    method Restart();
+    begin
+      self.Reset();
+      self.Start();
+    end;
+    /// True while the stopwatch measures.
+    /// @returns true between Start and Stop
+    const method IsRunning(): bool;
+    begin
+      return self.Running;
+    end;
+    /// The total measured, in ticks of the clock (Frequency per second),
+    /// the running span included.
+    /// @returns the ticks, 0 or more
+    const method ElapsedTicks(): int64;
+    begin
+      if self.Running then
+        return self.Accumulated + (ClockDoNow() - self.StartedAt);
+      end;
+      return self.Accumulated;
+    end;
+    /// The total measured, in whole milliseconds (rounded down), the running
+    /// span included.
+    /// @returns the milliseconds, 0 or more
+    /// @example `println("{} ms", LWatch.ElapsedMilliseconds());`
+    const method ElapsedMilliseconds(): int64;
+    var
+      LTicks: int64;
+      LFrequency: int64;
+    begin
+      // One reading, then ticks * 1000 / frequency split so the product
+      // cannot overflow
+      LTicks := self.ElapsedTicks();
+      LFrequency := ClockDoFrequency();
+      return (LTicks div LFrequency) * 1000 + ((LTicks mod LFrequency) * 1000) div LFrequency;
+    end;
+    /// The clock's ticks per second, as ElapsedTicks counts them.
+    /// @returns the frequency (1000000000 for a nanosecond clock)
+    const method Frequency(): int64;
+    begin
+      return ClockDoFrequency();
+    end;
+  end;
+
+/// A stopwatch already running (Delphi's TStopwatch.StartNew).
+/// @returns the running stopwatch
+/// @example `LWatch := StartNew();`
+/// @since 0.3
+/// @see Stopwatch
+exported routine StartNew(): Stopwatch;
+var
+  LWatch: Stopwatch;
+begin
+  LWatch.Start();
+  return LWatch;
+end;
+
+end.
