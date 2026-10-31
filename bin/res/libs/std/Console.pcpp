@@ -695,9 +695,12 @@ std::string ReadKeyText()
 #endif
 }
 
-// One line from standard input, without its line break; empty at its end
-std::string ReadLineText()
+// One line from standard input into ALine, without its line break. False at
+// the end of input (nothing left to read, or a console line that is only
+// Ctrl+Z), ALine then empty; a last line with no line break is still a line
+bool ReadLineInput(std::string& ALine)
 {
+    ALine.clear();
     std::fflush(stdout);
 #ifdef _WIN32
     // A console reads as UTF-16 (ReadFile would lose non-ASCII text)
@@ -707,11 +710,13 @@ std::string ReadLineText()
         std::wstring LLine;
         wchar_t LBuffer[256];
         DWORD LRead = 0;
+        bool LBreak = false;
         while ((ReadConsoleW(LIn, LBuffer, 256, &LRead, nullptr) != 0) && (LRead > 0))
         {
             LLine.append(LBuffer, LRead);
             if (LLine.find(L'\n') != std::wstring::npos)
             {
+                LBreak = true;
                 break;
             }
         }
@@ -720,20 +725,41 @@ std::string ReadLineText()
         {
             LLine.erase(LEnd);
         }
-        return ConsoleUtf8(LLine.data(), static_cast<int>(LLine.size()));
+        // Ctrl+Z then Enter is the console's end of input
+        if (LLine == L"\x1a")
+        {
+            return false;
+        }
+        if (!LBreak && LLine.empty())
+        {
+            return false;
+        }
+        ALine = ConsoleUtf8(LLine.data(), static_cast<int>(LLine.size()));
+        return true;
     }
 #endif
-    std::string LLine;
     int LChar = std::fgetc(stdin);
+    if (LChar == EOF)
+    {
+        return false;
+    }
     while ((LChar != EOF) && (LChar != '\n'))
     {
-        LLine.push_back(static_cast<char>(LChar));
+        ALine.push_back(static_cast<char>(LChar));
         LChar = std::fgetc(stdin);
     }
-    if (!LLine.empty() && (LLine.back() == '\r'))
+    if (!ALine.empty() && (ALine.back() == '\r'))
     {
-        LLine.pop_back();
+        ALine.pop_back();
     }
+    return true;
+}
+
+// One line from standard input, without its line break; empty at its end
+std::string ReadLineText()
+{
+    std::string LLine;
+    ReadLineInput(LLine);
     return LLine;
 }
 
@@ -1984,6 +2010,23 @@ end;
 exported routine ReadKey(): string;
 begin
   return ReadKeyText();
+end;
+
+/// Reads one line from standard input into ALine, without its line break, as
+/// UTF-8 text on both targets (a Windows console reads as UTF-16 and is
+/// converted). Standard output is flushed first, so a prompt written with
+/// WriteText shows before the read waits.
+/// @param ALine receives the line; "" for an empty line and at the end of
+///   input
+/// @returns true when a line was read; false at the end of input (nothing
+///   left to read, a closed pipe, or Ctrl+Z then Enter in a Windows console)
+/// @example `while ReadLn(LLine) do println("you typed {}", LLine); end;`
+/// @since 0.3
+/// @see ReadKey
+/// @see WaitForEnter
+exported routine ReadLn(var ALine: string): bool;
+begin
+  return ReadLineInput(ALine);
 end;
 
 /// Whether a ReadKey result is Enter.

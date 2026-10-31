@@ -1,0 +1,147 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_llama_ext.pcpp - Std library compliance: the llama_ext unit's easy
+  layer (res\libs\std\llama_ext.pcpp)
+
+  Loads fail with a reason (a missing file, a file that is no GGUF), and
+  generate / chat refuse with nothing loaded. Then the fixture model
+  (stories260K.gguf, a tiny story model) loads, continues a prompt whole
+  and streamed (the pieces joined are the text), refuses an empty prompt,
+  and holds a chat: an empty message is refused, a message gets a reply
+  whose streamed pieces are the reply, and a reset chat talks again.
+  Sampling is random (llama.cpp's default), so the row prints only facts
+  every run shares, never the model's text.
+*******************************************************************************/
+
+module exe std_llama_ext;
+
+/*
+  @@test
+    kind run
+    expect
+    | missing false
+    | missing error the model file was not found: $P:../no_such_model.gguf
+    | missing valid false
+    | bad false
+    | bad error gguf_init_from_reader: invalid magic characters: 'this', expected 'GGUF'
+    | bad valid false
+    | generate unloaded false
+    | generate unloaded error no model is loaded
+    | chat unloaded false
+    | chat unloaded error no model is loaded
+    | load true
+    | load error []
+    | valid true
+    | generate empty false
+    | generate empty error the prompt is empty
+    | generate true
+    | generate text true
+    | generate streamed true
+    | generate short true
+    | generate short text true
+    | chat true
+    | chat valid true
+    | say empty false
+    | say empty error the message is empty
+    | say true
+    | say error []
+    | say streamed true
+    | say after reset true
+    | chat freed valid false
+    | say freed false
+    | say freed error no chat is open
+    | unloaded valid false
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  llama_ext;
+
+type
+  // What CountPiece gathers: how many pieces came and their text joined
+  StreamCount = record
+    Pieces: int32;
+    Text: string;
+  end;
+
+routine CountPiece(const AUserData: ptr; const APiece: string);
+var
+  LCount: ptr to StreamCount;
+begin
+  LCount := ptr to StreamCount(AUserData);
+  LCount->Pieces := LCount->Pieces + 1;
+  LCount->Text := LCount->Text + APiece;
+end;
+
+var
+  LModel: LlamaModel;
+  LChat: LlamaChat;
+  LText: string;
+  LReply: string;
+  LCount: StreamCount;
+begin
+  // A missing file and a file that is no GGUF model fail with a reason
+  println("missing {}", LoadLlamaModel("$P:../no_such_model.gguf", LModel));
+  println("missing error {}", LModel.ErrorMessage);
+  println("missing valid {}", IsLlamaModelValid(LModel));
+  println("bad {}", LoadLlamaModel("$P:../../res/tests/std/fixtures/std_llama_ext_bad.gguf", LModel));
+  println("bad error {}", LModel.ErrorMessage);
+  println("bad valid {}", IsLlamaModelValid(LModel));
+
+  // Nothing loaded: generate and chat refuse
+  println("generate unloaded {}", GenerateLlama(LModel, "Once upon a time", LText));
+  println("generate unloaded error {}", LModel.ErrorMessage);
+  println("chat unloaded {}", CreateLlamaChat(LModel, "", LChat));
+  println("chat unloaded error {}", LChat.ErrorMessage);
+
+  // The fixture model continues a prompt, whole and streamed
+  println("load {}", LoadLlamaModel("$P:../../res/assets/models/stories260K.gguf", LModel));
+  println("load error [{}]", LModel.ErrorMessage);
+  println("valid {}", IsLlamaModelValid(LModel));
+  println("generate empty {}", GenerateLlama(LModel, "", LText));
+  println("generate empty error {}", LModel.ErrorMessage);
+  LCount.Pieces := 0;
+  LCount.Text := "";
+  println("generate {}", GenerateLlama(LModel, "Once upon a time", LText, CountPiece, address of LCount));
+  println("generate text {}", len(LText) > 0);
+  println("generate streamed {}", (LCount.Pieces > 0) and (LCount.Text = LText));
+  println("generate short {}", GenerateLlama(LModel, "Once upon a time", LText));
+  println("generate short text {}", len(LText) > 0);
+
+  // A chat: an empty message is refused, a message gets its reply streamed
+  println("chat {}", CreateLlamaChat(LModel, "You tell short stories.", LChat));
+  println("chat valid {}", IsLlamaChatValid(LChat));
+  println("say empty {}", SayLlamaChat(LChat, "", LReply));
+  println("say empty error {}", LChat.ErrorMessage);
+  LCount.Pieces := 0;
+  LCount.Text := "";
+  println("say {}", SayLlamaChat(LChat, "Tell me a story.", LReply, CountPiece, address of LCount));
+  println("say error [{}]", LChat.ErrorMessage);
+  println("say streamed {}", LCount.Text = LReply);
+  ResetLlamaChat(LChat);
+  println("say after reset {}", SayLlamaChat(LChat, "Tell me another story.", LReply));
+
+  // Freed: the chat refuses, freeing again and unloading twice do nothing
+  FreeLlamaChat(LChat);
+  println("chat freed valid {}", IsLlamaChatValid(LChat));
+  println("say freed {}", SayLlamaChat(LChat, "Hello.", LReply));
+  println("say freed error {}", LChat.ErrorMessage);
+  FreeLlamaChat(LChat);
+  UnloadLlamaModel(LModel);
+  UnloadLlamaModel(LModel);
+  println("unloaded valid {}", IsLlamaModelValid(LModel));
+end.

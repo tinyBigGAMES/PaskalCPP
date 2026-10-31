@@ -1,0 +1,310 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  StrUtils.pcpp - the StrUtils unit: `import StrUtils;` takes text apart
+  with Delphi's names: Trim / TrimLeft / TrimRight cut the blanks at the
+  ends, SplitString cuts text into pieces at any of a set of separator
+  characters (lines, words, fields), and TryStrToInt / StrToIntDef read a
+  whole number. Text is UTF-8 bytes throughout: a blank is a byte at or
+  below the space, which a UTF-8 lead or continuation byte never is, so a
+  character is never cut in two. A name is read bare when no other
+  imported unit exports it (Trim), or qualified (StrUtils.Trim).
+==============================================================================*/
+
+module unit StrUtils;
+
+// The implementation is plain mixed C++ placed in the unit's own source file
+// (cpp source;): none of it is visible to an importer. The PaskalCPP
+// routines below are the interface.
+cpp source;
+
+#include <charconv>
+#include <cstdint>
+#include <limits>
+#include <string>
+#include <system_error>
+
+namespace {
+
+// True for a byte Trim cuts: at or below the space (Delphi's rule)
+bool StrDoIsBlank(const char AByte)
+{
+  return static_cast<unsigned char>(AByte) <= ' ';
+}
+
+// AText without the blank bytes at its start (AFront) and / or its end (ABack)
+std::string StrDoTrim(const std::string& AText, const bool AFront, const bool ABack)
+{
+  std::size_t LFirst = 0;
+  std::size_t LLast = AText.size();
+  if (AFront)
+  {
+    while ((LFirst < LLast) && StrDoIsBlank(AText[LFirst]))
+      ++LFirst;
+  }
+  if (ABack)
+  {
+    while ((LLast > LFirst) && StrDoIsBlank(AText[LLast - 1]))
+      --LLast;
+  }
+  return AText.substr(LFirst, LLast - LFirst);
+}
+
+// The next piece of AText from AStart up to the first byte that is in
+// ASeparators (or the end); AStart moves past that separator. False once
+// the text is used up: a text ending in a separator gives one last empty
+// piece, as Delphi's SplitString does, and only then false. AStart past
+// the text's size marks the end
+bool StrDoNextPiece(const std::string& AText, const std::string& ASeparators,
+  int64_t& AStart, std::string& APiece)
+{
+  const std::size_t LSize = AText.size();
+  if ((AStart < 0) || (static_cast<std::size_t>(AStart) > LSize))
+    return false;
+  const std::size_t LFrom = static_cast<std::size_t>(AStart);
+  std::size_t LAt = std::string::npos;
+  if (!ASeparators.empty())
+    LAt = AText.find_first_of(ASeparators, LFrom);
+  if (LAt == std::string::npos)
+  {
+    APiece = AText.substr(LFrom);
+    AStart = static_cast<int64_t>(LSize) + 1;
+  }
+  else
+  {
+    APiece = AText.substr(LFrom, LAt - LFrom);
+    AStart = static_cast<int64_t>(LAt) + 1;
+  }
+  return true;
+}
+
+// Reads a whole decimal number: blanks around it allowed, one optional
+// sign, then digits only, to the end. False for anything else and for a
+// number outside int64 (std::from_chars reports it, nothing wraps)
+bool StrDoParseInt64(const std::string& AText, int64_t& AValue)
+{
+  const std::string LText = StrDoTrim(AText, true, true);
+  std::size_t LFirst = 0;
+  bool LNegative = false;
+  if ((!LText.empty()) && ((LText[0] == '+') || (LText[0] == '-')))
+  {
+    LNegative = (LText[0] == '-');
+    LFirst = 1;
+  }
+  // from_chars takes a minus but no plus, and no sign after a sign: the
+  // digits are read alone, the sign put back after (an int64's lowest
+  // value, -9223372036854775808, has no positive twin: read as unsigned)
+  if ((LFirst >= LText.size()) || (LText[LFirst] < '0') || (LText[LFirst] > '9'))
+    return false;
+  uint64_t LMagnitude = 0;
+  const char* LBegin = LText.data() + LFirst;
+  const char* LEnd = LText.data() + LText.size();
+  const std::from_chars_result LRead = std::from_chars(LBegin, LEnd, LMagnitude, 10);
+  if ((LRead.ec != std::errc()) || (LRead.ptr != LEnd))
+    return false;
+  const uint64_t LLimit = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+  if (LNegative)
+  {
+    if (LMagnitude > LLimit + 1)
+      return false;
+    if (LMagnitude == LLimit + 1)
+      AValue = std::numeric_limits<int64_t>::min();
+    else
+      AValue = -static_cast<int64_t>(LMagnitude);
+  }
+  else
+  {
+    if (LMagnitude > LLimit)
+      return false;
+    AValue = static_cast<int64_t>(LMagnitude);
+  }
+  return true;
+}
+
+} // namespace
+
+/// The text without the blanks at either end, as Delphi's Trim: a blank is
+/// any byte at or below the space (spaces, tabs, line ends, control
+/// characters). Blanks inside the text stay.
+/// @param AText the text
+/// @returns the trimmed text; "" when it is all blanks
+/// @example `Trim("  ship 1 16  ")   // "ship 1 16"`
+/// @since 0.3
+/// @see TrimLeft
+/// @see TrimRight
+exported routine Trim(const AText: string): string;
+begin
+  return StrDoTrim(AText, true, true);
+end;
+
+/// The text without the blanks at its start, as Delphi's TrimLeft (a blank
+/// is any byte at or below the space).
+/// @param AText the text
+/// @returns the text from its first byte that is not a blank
+/// @example `TrimLeft("  ship ")   // "ship "`
+/// @since 0.3
+/// @see Trim
+exported routine TrimLeft(const AText: string): string;
+begin
+  return StrDoTrim(AText, true, false);
+end;
+
+/// The text without the blanks at its end, as Delphi's TrimRight (a blank
+/// is any byte at or below the space).
+/// @param AText the text
+/// @returns the text up to its last byte that is not a blank
+/// @example `TrimRight("  ship ")   // "  ship"`
+/// @since 0.3
+/// @see Trim
+exported routine TrimRight(const AText: string): string;
+begin
+  return StrDoTrim(AText, false, true);
+end;
+
+/// Cuts text into pieces at every byte that is one of the separators, as
+/// Delphi's SplitString, with a choice to leave the empty pieces out. Two
+/// separators side by side (or one at either end) make an empty piece;
+/// with ASkipEmpty those are dropped, so `" \r\n"` as the separators with
+/// ASkipEmpty reads the lines of a text whatever its line ends, and `" "`
+/// the words of a line however many spaces lie between them. "" gives no
+/// pieces; no separators gives the whole text as one piece.
+/// @param AText the text to cut
+/// @param ASeparators the separator bytes (any of them cuts)
+/// @param ASkipEmpty true to leave the empty pieces out
+/// @param AParts the pieces, in order (set to empty first)
+/// @example `SplitString("lander 1 1  16 14", " ", true, LParts)   // 5 pieces`
+/// @since 0.3
+/// @see Trim
+exported routine SplitString(const AText: string; const ASeparators: string; const ASkipEmpty: bool;
+  var AParts: array of string);
+var
+  LStart: int64;
+  LPiece: string;
+begin
+  setlength(AParts, 0);
+  if len(AText) = 0 then
+    return;
+  end;
+  LStart := 0;
+  while StrDoNextPiece(AText, ASeparators, LStart, LPiece) do
+    if (not ASkipEmpty) or (len(LPiece) > 0) then
+      setlength(AParts, len(AParts) + 1);
+      AParts[len(AParts) - 1] := LPiece;
+    end;
+  end;
+end;
+
+/// Cuts text into pieces at every byte that is one of the separators,
+/// keeping the empty pieces, exactly as Delphi's SplitString:
+/// `SplitString("a,,b", ",", LParts)` gives "a", "", "b".
+/// @param AText the text to cut
+/// @param ASeparators the separator bytes (any of them cuts)
+/// @param AParts the pieces, in order (set to empty first)
+/// @example `SplitString("x=1;y=2", ";", LParts)   // "x=1", "y=2"`
+/// @since 0.3
+/// @see SplitString
+exported routine SplitString(const AText: string; const ASeparators: string; var AParts: array of string);
+begin
+  SplitString(AText, ASeparators, false, AParts);
+end;
+
+/// Reads a whole number written in decimal, as Delphi's TryStrToInt with
+/// decimal text: blanks around it are allowed, then an optional `+` or
+/// `-`, then digits and nothing else. A number outside int64 is refused,
+/// never wrapped.
+/// @param AText the text
+/// @param AValue the number (left as it was when the call fails)
+/// @returns true when the whole text is one number in range
+/// @example `if TryStrToInt(" -42 ", LValue) then ... end;   // -42`
+/// @since 0.3
+/// @see StrToIntDef
+exported routine TryStrToInt(const AText: string; var AValue: int64): bool;
+var
+  LValue: int64;
+begin
+  LValue := 0;
+  if not StrDoParseInt64(AText, LValue) then
+    return false;
+  end;
+  AValue := LValue;
+  return true;
+end;
+
+/// Reads a whole number written in decimal into an int32, as Delphi's
+/// TryStrToInt: the int64 form's rules, and a number outside int32 is
+/// refused, never cut down.
+/// @param AText the text
+/// @param AValue the number (left as it was when the call fails)
+/// @returns true when the whole text is one number in int32's range
+/// @example `if TryStrToInt("16", LWidth) then ... end;`
+/// @since 0.3
+/// @see StrToIntDef
+exported routine TryStrToInt(const AText: string; var AValue: int32): bool;
+var
+  LValue: int64;
+begin
+  LValue := 0;
+  if not StrDoParseInt64(AText, LValue) then
+    return false;
+  end;
+  if (LValue < -2147483648) or (LValue > 2147483647) then
+    return false;
+  end;
+  AValue := int32(LValue);
+  return true;
+end;
+
+/// A whole number read from decimal text, or a default when the text is
+/// not one, as Delphi's StrToIntDef (TryStrToInt's rules).
+/// @param AText the text
+/// @param ADefault what to give when the text is not a number in range
+/// @returns the number, or ADefault
+/// @example `StrToIntDef("12x", -1)   // -1`
+/// @since 0.3
+/// @see TryStrToInt
+exported routine StrToIntDef(const AText: string; const ADefault: int64): int64;
+var
+  LValue: int64;
+begin
+  LValue := 0;
+  if TryStrToInt(AText, LValue) then
+    return LValue;
+  end;
+  return ADefault;
+end;
+
+/// A whole number read from decimal text into an int32, or a default when
+/// the text is not one in int32's range, as Delphi's StrToIntDef.
+/// @param AText the text
+/// @param ADefault what to give when the text is not a number in range
+/// @returns the number, or ADefault
+/// @example `LWidth := StrToIntDef(LParts[3], 0);`
+/// @since 0.3
+/// @see TryStrToInt
+exported routine StrToIntDef(const AText: string; const ADefault: int32): int32;
+var
+  LValue: int32;
+begin
+  LValue := 0;
+  if TryStrToInt(AText, LValue) then
+    return LValue;
+  end;
+  return ADefault;
+end;
+
+end.

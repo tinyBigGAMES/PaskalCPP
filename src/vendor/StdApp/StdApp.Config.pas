@@ -73,6 +73,10 @@ type
     // Key existence
     function HasKey(const AKeyPath: string): Boolean;
 
+    // The keys of a table in document order ('' = the root table); empty
+    // when the path names no table
+    function GetKeys(const AKeyPath: string): TArray<string>;
+
     // String
     function GetString(const AKeyPath: string;
       const ADefault: string = ''): string;
@@ -498,6 +502,25 @@ var
   LValue: TTomlValue;
 begin
   Result := GetValueAtPath(AKeyPath, LValue);
+end;
+
+function TConfig.GetKeys(const AKeyPath: string): TArray<string>;
+var
+  LValue: TTomlValue;
+begin
+  SetLength(Result, 0);
+
+  if not Assigned(FToml) then
+    Exit;
+
+  if AKeyPath = '' then
+  begin
+    Result := FToml.GetKeys();
+    Exit;
+  end;
+
+  if GetValueAtPath(AKeyPath, LValue) and (LValue.Kind = tvkTable) then
+    Result := LValue.AsTable().GetKeys();
 end;
 
 // -- String -------------------------------------------------------------------
@@ -1062,7 +1085,16 @@ var
   LArray: TTomlArray;
 begin
   Result := '';
-  if GetValueAtPath(AKeyPath, LValue) and (LValue.Kind = tvkArray) then
+  if not GetValueAtPath(AKeyPath, LValue) then
+    Exit;
+
+  // A plain [table] is entry 0; an array of tables [[...]] has one per entry
+  if LValue.Kind = tvkTable then
+  begin
+    if AIndex = 0 then
+      Result := LValue.AsTable().Comment;
+  end
+  else if LValue.Kind = tvkArray then
   begin
     LArray := LValue.AsArray();
     if (AIndex >= 0) and (AIndex < LArray.Count) and
@@ -1077,7 +1109,16 @@ var
   LValue: TTomlValue;
   LArray: TTomlArray;
 begin
-  if GetValueAtPath(AKeyPath, LValue) and (LValue.Kind = tvkArray) then
+  if not GetValueAtPath(AKeyPath, LValue) then
+    Exit;
+
+  // A plain [table] is entry 0; an array of tables [[...]] has one per entry
+  if LValue.Kind = tvkTable then
+  begin
+    if AIndex = 0 then
+      LValue.AsTable().Comment := AComment;
+  end
+  else if LValue.Kind = tvkArray then
   begin
     LArray := LValue.AsArray();
     if (AIndex >= 0) and (AIndex < LArray.Count) and

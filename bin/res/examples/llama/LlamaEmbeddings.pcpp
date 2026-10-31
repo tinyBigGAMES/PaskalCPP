@@ -1,0 +1,83 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  LlamaEmbeddings.pcpp - llama.cpp example (import llama_ext, Math): how
+  alike sentences are. The model comes from bin\assets.zip (entry
+  res/assets/models/stories260K.gguf, password PaskalCPP). EmbedLlama turns
+  each sentence into one vector (unit length); Math's CosineSimilarity of
+  two vectors is 1 for the same meaning and lower the further apart they
+  are. Every pair of the sentences is compared and the closest pair named.
+  A tiny story model gives rough vectors; a real embedding model gives
+  sharper ones through the same calls.
+==============================================================================*/
+
+module exe LlamaEmbeddings;
+
+import
+  llama_ext,
+  Math;
+
+var
+  LModel: LlamaModel;
+  LSentences: array of string;
+  LVectors: array of array of float32;
+  LIndex: int32;
+  LOther: int32;
+  LScore: float64;
+  LBest: float64;
+  LBestA: int32;
+  LBestB: int32;
+
+begin
+  if not LoadLlamaModelZip("$P:../../assets.zip", "res/assets/models/stories260K.gguf", "PaskalCPP", LModel) then
+    println("cannot load the model: {}", LModel.ErrorMessage);
+    return;
+  end;
+
+  setlength(LSentences, 4);
+  LSentences[0] := "The cat sat on the mat.";
+  LSentences[1] := "A kitten was sleeping on the rug.";
+  LSentences[2] := "The dog ran after the ball in the park.";
+  LSentences[3] := "Taxes are due at the end of the year.";
+
+  setlength(LVectors, len(LSentences));
+  for LIndex := 0 to int32(len(LSentences)) - 1 do
+    if not EmbedLlama(LModel, LSentences[LIndex], LVectors[LIndex]) then
+      println("embed failed: {}", LModel.ErrorMessage);
+      UnloadLlamaModel(LModel);
+      return;
+    end;
+  end;
+  println("{} sentences, {} numbers per vector", len(LSentences), len(LVectors[0]));
+
+  // Every pair once (LOther after LIndex), keeping the most alike
+  LBest := -2.0;
+  LBestA := 0;
+  LBestB := 0;
+  for LIndex := 0 to int32(len(LSentences)) - 2 do
+    for LOther := LIndex + 1 to int32(len(LSentences)) - 1 do
+      LScore := CosineSimilarity(LVectors[LIndex], LVectors[LOther]);
+      println("{:.4f}  {} | {}", LScore, LSentences[LIndex], LSentences[LOther]);
+      if LScore > LBest then
+        LBest := LScore;
+        LBestA := LIndex;
+        LBestB := LOther;
+      end;
+    end;
+  end;
+  println("most alike: \"{}\" and \"{}\"", LSentences[LBestA], LSentences[LBestB]);
+
+  UnloadLlamaModel(LModel);
+end.

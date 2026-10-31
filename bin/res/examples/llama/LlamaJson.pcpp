@@ -1,0 +1,78 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  LlamaJson.pcpp - llama.cpp example (import llama_ext, yyjson): output that
+  is valid JSON by construction. The model comes from bin\assets.zip (entry
+  res/assets/models/stories260K.gguf, password PaskalCPP). Setting
+  LlamaOptions.JsonSchema turns the schema into a grammar the sampler
+  follows, so every token the model may pick keeps the text inside the
+  schema: even a tiny story model that knows nothing of JSON answers with an
+  object yyjson reads. The schema here only allows a mood from a fixed list
+  and one bool, so the output is always short and complete.
+==============================================================================*/
+
+module exe LlamaJson;
+
+import
+  llama_ext,
+  yyjson;
+
+const
+  // An object with a "mood" from three words and a bool "happy_end", nothing else
+  KSchema: string = "{\"type\": \"object\", \"properties\": {\"mood\": {\"enum\": [\"brave\", \"sad\", \"funny\"]}, \"happy_end\": {\"type\": \"boolean\"}}, \"required\": [\"mood\", \"happy_end\"], \"additionalProperties\": false}";
+
+var
+  LModel: LlamaModel;
+  LOptions: LlamaOptions;
+  LText: string;
+  LDoc: ptr to yyjson_doc;
+  LRoot: ptr to yyjson_val;
+  LMood: ptr to yyjson_val;
+  LHappy: ptr to yyjson_val;
+
+begin
+  if not LoadLlamaModelZip("$P:../../assets.zip", "res/assets/models/stories260K.gguf", "PaskalCPP", LModel) then
+    println("cannot load the model: {}", LModel.ErrorMessage);
+    return;
+  end;
+
+  LOptions := DefaultLlamaOptions();
+  LOptions.JsonSchema := KSchema;
+  if not GenerateLlama(LModel, "Once upon a time", LOptions, LText) then
+    println("generate failed: {}", LModel.ErrorMessage);
+    UnloadLlamaModel(LModel);
+    return;
+  end;
+  println("model output: {}", LText);
+
+  // The grammar made the text JSON; read it back like any other JSON
+  LDoc := yyjson_read(LText.c_str(), size_t(len(LText)), 0);
+  if LDoc = nil then
+    println("the output is no JSON");
+  else
+    LRoot := yyjson_doc_get_root(LDoc);
+    LMood := yyjson_obj_get(LRoot, "mood");
+    LHappy := yyjson_obj_get(LRoot, "happy_end");
+    if yyjson_is_str(LMood) and yyjson_is_bool(LHappy) then
+      println("mood:      {}", yyjson_get_str(LMood));
+      println("happy end: {}", yyjson_get_bool(LHappy));
+    else
+      println("the output does not follow the schema");
+    end;
+    yyjson_doc_free(LDoc);
+  end;
+
+  UnloadLlamaModel(LModel);
+end.

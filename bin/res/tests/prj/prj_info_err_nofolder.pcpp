@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  prj_info_err_nofolder.pcpp - Projects: pcpp --project-info with no folder
+
+  The folder is required (no current-folder default: the editor always
+  names one): a bad argument, exit 2, no JSON, no banner. A cli test (pcpp
+  itself, in the suite's output root); this file itself is never compiled.
+*******************************************************************************/
+
+module exe prj_info_err_nofolder;
+
+/*
+  @@test
+    kind cli
+    args "--project-info"
+    exitcode 2
+    expect
+    | Error: --project-info takes one folder and no other argument
+    |
+    | Run pcpp -h to see available options
+  @@end
+*/
+
+begin
+end.

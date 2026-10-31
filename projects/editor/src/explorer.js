@@ -30,6 +30,10 @@
   Which folders are open (roots included) is remembered between launches
   (window.host.setExplorerOpen); at startup the tree comes back as it was
   left and the restored active tab is not revealed (endRestore ends that).
+  Projects: main.js asks pcpp --project-info about every shown root and
+  hands over the list (setProjects); a valid project's root gets a badge
+  and its output folder is dimmed and starts collapsed. An invalid or
+  missing project.toml = a plain folder (its root's tooltip says why).
 */
 'use strict';
 
@@ -51,6 +55,15 @@ var PcExplorer = (function () {
   // can re-list exactly it. A list, because the same dir can show in both
   // roots.
   var gDirs = {};
+  // Projects as main.js reports them (pcpp --project-info decides, never
+  // the explorer): root key -> info, valid or not (an invalid one explains
+  // itself in its root's tooltip). A valid project's root gets a badge;
+  // its output folder (key -> true) is dimmed and starts collapsed
+  var gProjectInfos = {};
+  var gOutputKeys = {};
+  // Lower-cased dir path -> its nodes (a dir can show in both roots), so a
+  // project change can dim and collapse an output folder already shown
+  var gDirNodes = {};
   // Folder roots shown, in order: { key (lower-cased path), path, box (its
   // section element) }; with the EXAMPLES root, handed to main.js to watch
   var gFolderRoots = [];
@@ -404,18 +417,26 @@ var PcExplorer = (function () {
         await settled(LListing);
         return LListing;
       };
+      LNode.pcCollapse = function () {
+        LChildren.classList.toggle('hidden', true);
+        LRow.classList.toggle('expanded', false);
+        rememberOpen(AEntry.path, false);
+      };
       LRow.addEventListener('click', function () {
         if (LChildren.classList.contains('hidden')) {
           LNode.pcExpand();
         } else {
-          LChildren.classList.toggle('hidden', true);
-          LRow.classList.toggle('expanded', false);
-          rememberOpen(AEntry.path, false);
+          LNode.pcCollapse();
         }
       });
+      // A project's output folder: dimmed, and it starts collapsed (it
+      // opens on a click like any folder)
+      LNode.pcIsOutput = !!gOutputKeys[pathKey(AEntry.path)];
+      LRow.classList.toggle('output-dir', LNode.pcIsOutput);
+      addDirNode(pathKey(AEntry.path), LNode);
       // A folder left open opens again; its own listing then reopens the
       // open folders below it (lazy, one level at a time)
-      if (gExpanded[revealKey(AEntry.path)]) {
+      if (gExpanded[revealKey(AEntry.path)] && !LNode.pcIsOutput) {
         LNode.pcExpand();
       }
     } else {
@@ -444,6 +465,7 @@ var PcExplorer = (function () {
     var LChevron = document.createElement('span');
     var LLabel = document.createElement('span');
     var LChildren = document.createElement('div');
+    var LBadge = document.createElement('span');
     var LClose;
 
     LHeader.className = AOpen ? 'tree-root-header expanded' : 'tree-root-header';
@@ -451,8 +473,13 @@ var PcExplorer = (function () {
     LChevron.className = 'tree-chevron';
     LChevron.textContent = '\u203A';
     LLabel.textContent = ALabel;
+    // The project mark (markRoot fills it while the root is a project)
+    LBadge.className = 'tree-root-badge hidden';
     LHeader.appendChild(LChevron);
     LHeader.appendChild(LLabel);
+    LHeader.appendChild(LBadge);
+    AContainer.pcHeader = LHeader;
+    AContainer.pcBadge = LBadge;
     if (AOnClose) {
       LClose = document.createElement('span');
       LClose.className = 'tree-root-close';
@@ -543,6 +570,108 @@ var PcExplorer = (function () {
     }
   }
 
+  function addDirNode(AKey, ANode) {
+    if (!gDirNodes[AKey]) {
+      gDirNodes[AKey] = [];
+    }
+    gDirNodes[AKey].push(ANode);
+  }
+
+  // Dir nodes no longer in the document (a re-list, a rebuilt root): forget
+  function pruneDirNodes() {
+    var LKey;
+    for (LKey in gDirNodes) {
+      gDirNodes[LKey] = gDirNodes[LKey].filter(function (ANode) {
+        return ANode.isConnected;
+      });
+      if (gDirNodes[LKey].length === 0) {
+        delete gDirNodes[LKey];
+      }
+    }
+  }
+
+  // The reports of an invalid project.toml, one per line (its tooltip)
+  function reportLines(AInfo) {
+    var LLines = [];
+    var LIndex;
+    var LReport;
+
+    if (!Array.isArray(AInfo.reports)) {
+      return LLines;
+    }
+    for (LIndex = 0; LIndex < AInfo.reports.length; LIndex++) {
+      LReport = AInfo.reports[LIndex];
+      LLines.push((LReport.code ? LReport.code + ': ' : '') + LReport.message);
+    }
+    return LLines;
+  }
+
+  // A folder root's project mark: the badge (the kind) on a valid project;
+  // the header's tooltip says what pcpp found, so an invalid project.toml
+  // (or a failed check) is never silent: the folder shows as a plain one
+  function markRoot(ARoot) {
+    var LInfo = gProjectInfos[ARoot.key];
+    var LValid = !!LInfo && LInfo.valid === true;
+    var LTitle = ARoot.path;
+
+    if (!ARoot.box.pcHeader) {
+      return;
+    }
+    ARoot.box.pcHeader.classList.toggle('project', LValid);
+    ARoot.box.pcBadge.textContent = LValid ? LInfo.kind + ' project' : '';
+    ARoot.box.pcBadge.classList.toggle('hidden', !LValid);
+    if (LValid) {
+      LTitle += '\nProject ' + LInfo.name + ' (' + LInfo.kind + '), main module ' + LInfo.main;
+    } else if (LInfo && LInfo.project) {
+      LTitle += '\nproject.toml is not valid, so this is a plain folder:\n' + reportLines(LInfo).join('\n');
+    } else if (LInfo && LInfo.error) {
+      LTitle += '\nNot checked as a project: ' + LInfo.error;
+    }
+    ARoot.box.pcHeader.title = LTitle;
+  }
+
+  // The projects main.js knows, the whole list (pcpp --project-info's
+  // answers): every root re-marked, every output folder shown dimmed. An
+  // output folder that just became one is collapsed once; after that it
+  // opens and closes like any folder
+  function setProjects(AList) {
+    var LIndex;
+    var LInfo;
+    var LKey;
+    var LNodes;
+    var LIsOutput;
+
+    gProjectInfos = {};
+    gOutputKeys = {};
+    if (Array.isArray(AList)) {
+      for (LIndex = 0; LIndex < AList.length; LIndex++) {
+        LInfo = AList[LIndex];
+        if (!LInfo || typeof LInfo.root !== 'string' || LInfo.root === '') {
+          continue;
+        }
+        gProjectInfos[pathKey(LInfo.root)] = LInfo;
+        if (LInfo.valid === true && typeof LInfo.output === 'string' && LInfo.output !== '') {
+          gOutputKeys[pathKey(LInfo.output)] = true;
+        }
+      }
+    }
+    for (LIndex = 0; LIndex < gFolderRoots.length; LIndex++) {
+      markRoot(gFolderRoots[LIndex]);
+    }
+    pruneDirNodes();
+    for (LKey in gDirNodes) {
+      LNodes = gDirNodes[LKey];
+      LIsOutput = !!gOutputKeys[LKey];
+      for (LIndex = 0; LIndex < LNodes.length; LIndex++) {
+        LNodes[LIndex].pcRow.classList.toggle('output-dir', LIsOutput);
+        if (LIsOutput && !LNodes[LIndex].pcIsOutput) {
+          LNodes[LIndex].pcCollapse();
+        }
+        LNodes[LIndex].pcIsOutput = LIsOutput;
+      }
+    }
+  }
+
   // The x of the root showing APath
   function folderCloser(APath) {
     return function () {
@@ -589,6 +718,7 @@ var PcExplorer = (function () {
         LRoot = { key: LKey, path: LPath, box: document.createElement('div') };
         LRoot.box.className = 'tree-root';
         fillRoot(LRoot.box, baseName(LPath).toUpperCase(), LPath, folderCloser(LPath), rootStartsOpen(LPath));
+        markRoot(LRoot);
         LAdded.push(LPath);
       }
       LNew.push(LRoot);
@@ -608,6 +738,7 @@ var PcExplorer = (function () {
       LContainer.replaceChildren.apply(LContainer, LBoxes);
     }
     pruneRows();
+    pruneDirNodes();
     pruneDirs();
     pruneOpen();
     watchRoots();
@@ -817,6 +948,9 @@ var PcExplorer = (function () {
         relistDirs(ADirs);
       }
     });
+    // main.js asks pcpp about every shown root (folder:watch) and reports
+    // the whole project list whenever an answer changes
+    window.host.onProjectsChanged(setProjects);
 
     LFolders = await window.host.folderList();
     // Open folders of the previous session (null = never saved)
@@ -827,6 +961,8 @@ var PcExplorer = (function () {
       }
     }
     setFolders(LFolders.ok ? LFolders.folders : []);
+    // What main already knows (an answer that came before the listener)
+    setProjects(await window.host.projectList());
 
     LExamples = await window.host.examplesFolder();
     // The path comes back even when EXAMPLES is closed or missing
@@ -842,6 +978,7 @@ var PcExplorer = (function () {
     setFolders: setFolders,
     setExamples: setExamples,
     setActive: setActive,
+    setProjects: setProjects,
     refresh: refresh
   };
 })();

@@ -1,0 +1,77 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  llama.pcpp - the llama unit: `import llama;` uses llama.cpp
+  (https://github.com/ggml-org/llama.cpp: llama.h, the model / context /
+  sampler / tokenizer API, and the ggml tensor and backend API under it)
+  from PaskalCPP. A self-describing vendor module: it owns every include
+  path, library path and link library it needs, per official target. The
+  library is libllama.a (one per target, llama + ggml + ggml-cpu +
+  ggml-vulkan merged), built static by PaskalCPP-Libs' build-llama.cmd from
+  llama.cpp's own CMake project, shipped under llama.cpp's MIT license.
+
+  GPU: the Vulkan backend is built in, its shaders embedded in the archive.
+  The Vulkan loader (vulkan-1.dll / libvulkan.so.1) is the GPU driver's and
+  is loaded at run time, never linked: without one, the CPU backend runs.
+
+  The easy layer (load a model, chat, generate) is llama_ext; this unit is
+  the raw C API underneath.
+==============================================================================*/
+
+module unit llama;
+
+// Self-describing vendor module: it owns every path it needs.
+
+@addincludepath "$P:res/libs/vendor/llama/include";
+
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @addlibrarypath "$P:res/libs/vendor/llama/lib/x86_64-windows-gnu";
+@elseif TARGET_X86_64_LINUX_GNU
+  @addlibrarypath "$P:res/libs/vendor/llama/lib/x86_64-linux-gnu";
+@else
+  @message error "llama: unsupported target";
+@endif
+
+@linklibrary "llama";
+
+// The system libraries upstream's link list names, per target
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  @linklibrary "ws2_32";
+@elseif TARGET_X86_64_LINUX_GNU
+  @linklibrary "pthread";
+  @linklibrary "m";
+  @linklibrary "dl";
+@endif
+
+// The headers go to this unit's header, so every importer sees llama's API.
+// Every C header carries its own extern "C" guard; llama-cpp.h and
+// ggml-cpp.h are C++ only (the unique_ptr deleters)
+cpp header;
+
+#include "ggml.h"
+#include "ggml-alloc.h"
+#include "ggml-backend.h"
+#include "ggml-cpu.h"
+#include "ggml-opt.h"
+#include "ggml-vulkan.h"
+#include "gguf.h"
+#include "llama.h"
+#include "ggml-cpp.h"
+#include "llama-cpp.h"
+
+end.

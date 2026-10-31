@@ -1,0 +1,175 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_llama_ext_zip.pcpp - Std library compliance: llama_ext's zip form
+  (LoadLlamaModelZip, res\libs\std\llama_ext.pcpp)
+
+  The fixture model is the entry res/assets/models/stories260K.gguf of
+  bin\assets.zip (password PaskalCPP); the cache folder (CacheDir) is
+  repo\bin\output itself, its cache file named stories260K-<crc>-<size>.gguf.
+  A missing zip, a missing entry (both overloads), an option out of range,
+  no password and a wrong one fail with a reason and write no cache file
+  and no .part. The right password loads the model: the cache file is there
+  at the entry's size, no .part is left, and a greedy continuation is the
+  same text the model gives loaded from its own file. With the cache there,
+  a wrong password still fails. A zip the test packs (no password) holds
+  the same model (the same CRC and size, so the same cache file): with its
+  data overwritten the load still succeeds (the cache is reused, the entry
+  is not decoded again); with the cache gone the damaged entry fails to
+  extract and leaves no cache file and no .part. What the test wrote is
+  removed at the end ("cleaned").
+*******************************************************************************/
+
+module exe std_llama_ext_zip;
+
+/*
+  @@test
+    kind run
+    expect
+    | missing zip false
+    | missing zip error the zip file was not found: $P:../no_such_archive.zip
+    | missing zip valid false
+    | missing entry false
+    | missing entry error the zip file is no zip or has no entry res/assets/models/none.gguf: $P:../../assets.zip
+    | missing entry short false
+    | bad options false
+    | bad options error the option TopP is not from 0 to 1
+    | bad options cache false
+    | no password false
+    | no password error the zip entry could not be opened (a missing or wrong password, or a damaged entry): res/assets/models/stories260K.gguf
+    | wrong password false
+    | wrong password cache false
+    | wrong password part false
+    | load true
+    | load error []
+    | load valid true
+    | cache there true
+    | cache size true
+    | part left false
+    | generate true
+    | same as file true
+    | cached wrong password false
+    | cached wrong password error the zip entry could not be opened (a missing or wrong password, or a damaged entry): res/assets/models/stories260K.gguf
+    | packed true
+    | damaged true
+    | reuse damaged true
+    | cache gone true
+    | extract damaged false
+    | extract damaged cache false
+    | extract damaged part false
+    | cleaned true
+    | [Heap] Allocs: 36, Frees: 36, Leaked: 0
+  @@end
+*/
+
+import
+  llama_ext,
+  CustomIO,
+  SysUtils;
+
+// Overwrites 64 bytes of a file at AOffset (inside an entry's data)
+routine Damage(const APath: string; const AOffset: int64): bool;
+var
+  LIO: IO;
+  LJunk: string;
+  LOk: bool;
+begin
+  LIO := CreateFileIO(APath, FileMode.ReadWrite);
+  if LIO = nil then
+    return false;
+  end;
+  LJunk := "UUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUU";
+  LOk := IOSeek(LIO, AOffset, SeekOrigin.FromStart) = AOffset;
+  LOk := LOk and (IOWriteFull(LIO, LJunk.data(), 64) = 64);
+  return IOClose(LIO) and LOk;
+end;
+
+var
+  LAssets: string;
+  LEntry: string;
+  LOwn: string;
+  LInfo: ZipEntryInfo;
+  LCache: string;
+  LGreedy: LlamaOptions;
+  LBad: LlamaOptions;
+  LModel: LlamaModel;
+  LZipText: string;
+  LFileText: string;
+begin
+  LAssets := "$P:../../assets.zip";
+  LEntry := "res/assets/models/stories260K.gguf";
+  LOwn := "$P:../std_llama_ext_zip.zip";
+  LGreedy := DefaultLlamaOptions();
+  LGreedy.Temperature := 0;
+  LGreedy.MaxTokens := 8;
+  LGreedy.CacheDir := "$P:..";
+  // The cache file's name, as LoadLlamaModelZip makes it; none from an
+  // earlier run
+  GetZipEntryInfo(LAssets, LEntry, "", LInfo);
+  LCache := ResolvePath("$P:..") + "/" + FormatStr("stories260K-{:08x}-{}.gguf", LInfo.Crc, LInfo.Size);
+  DeleteFile(LCache);
+  DeleteFile(LCache + ".part");
+
+  // A missing zip, a missing entry, an option out of range: nothing written
+  println("missing zip {}", LoadLlamaModelZip("$P:../no_such_archive.zip", LEntry, "", LGreedy, LModel));
+  println("missing zip error {}", LModel.ErrorMessage);
+  println("missing zip valid {}", IsLlamaModelValid(LModel));
+  println("missing entry {}", LoadLlamaModelZip(LAssets, "res/assets/models/none.gguf", "PaskalCPP", LGreedy, LModel));
+  println("missing entry error {}", LModel.ErrorMessage);
+  println("missing entry short {}", LoadLlamaModelZip(LAssets, "res/assets/models/none.gguf", "PaskalCPP", LModel));
+  LBad := LGreedy;
+  LBad.TopP := 2;
+  println("bad options {}", LoadLlamaModelZip(LAssets, LEntry, "PaskalCPP", LBad, LModel));
+  println("bad options error {}", LModel.ErrorMessage);
+  println("bad options cache {}", FileExists(LCache));
+
+  // No password and a wrong one: the entry does not open
+  println("no password {}", LoadLlamaModelZip(LAssets, LEntry, "", LGreedy, LModel));
+  println("no password error {}", LModel.ErrorMessage);
+  println("wrong password {}", LoadLlamaModelZip(LAssets, LEntry, "wrong", LGreedy, LModel));
+  println("wrong password cache {}", FileExists(LCache));
+  println("wrong password part {}", FileExists(LCache + ".part"));
+
+  // The right password: the cache file, then the model mapped from it
+  println("load {}", LoadLlamaModelZip(LAssets, LEntry, "PaskalCPP", LGreedy, LModel));
+  println("load error [{}]", LModel.ErrorMessage);
+  println("load valid {}", IsLlamaModelValid(LModel));
+  println("cache there {}", FileExists(LCache));
+  println("cache size {}", FileSize(LCache) = LInfo.Size);
+  println("part left {}", FileExists(LCache + ".part"));
+  println("generate {}", GenerateLlama(LModel, "Once upon a time", LGreedy, LZipText, nil, nil));
+  UnloadLlamaModel(LModel);
+  LoadLlamaModel("$P:../../res/assets/models/stories260K.gguf", LGreedy, LModel);
+  GenerateLlama(LModel, "Once upon a time", LGreedy, LFileText, nil, nil);
+  UnloadLlamaModel(LModel);
+  println("same as file {}", (LZipText <> "") and (LZipText = LFileText));
+
+  // The cache never opens an encrypted entry without its password
+  println("cached wrong password {}", LoadLlamaModelZip(LAssets, LEntry, "wrong", LGreedy, LModel));
+  println("cached wrong password error {}", LModel.ErrorMessage);
+
+  // The same model in a zip of the test's own: the same cache file
+  println("packed {}", ZipDirectoryContents(LOwn, "$P:../../res/assets/models", ""));
+  // The zip holds the one entry: its middle is the model's data
+  println("damaged {}", Damage(LOwn, FileSize(LOwn) div 2));
+  println("reuse damaged {}", LoadLlamaModelZip(LOwn, "stories260K.gguf", "", LGreedy, LModel));
+  UnloadLlamaModel(LModel);
+  println("cache gone {}", DeleteFile(LCache));
+  println("extract damaged {}", LoadLlamaModelZip(LOwn, "stories260K.gguf", "", LGreedy, LModel));
+  println("extract damaged cache {}", FileExists(LCache));
+  println("extract damaged part {}", FileExists(LCache + ".part"));
+
+  println("cleaned {}", DeleteFile(LOwn) and not FileExists(LCache));
+end.

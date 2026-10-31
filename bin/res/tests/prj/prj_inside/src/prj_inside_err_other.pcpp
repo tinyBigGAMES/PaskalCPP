@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  prj_inside_err_other.pcpp - Projects: a file in a project that is not its
+  main module
+
+  Break step of prj_inside: this file sits beside the project's main module,
+  but project.toml names prj_inside.pcpp as main, so this one builds as a
+  plain file (user 2026-10-29). A plain build has no project, so its $R: names
+  nothing.
+*******************************************************************************/
+
+module exe prj_inside_err_other;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$R:units"; // ERROR PR0065@16: has no project
+
+begin
+end.

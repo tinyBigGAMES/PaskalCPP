@@ -59,6 +59,14 @@ const
   { PC_SRC_EXT }
   PC_SRC_EXT = 'pcpp';
 
+  { PC_OUTPUT_BIN_DIR }
+  // An output folder's exe and dynamic library folder (TPCZigBuild's layout
+  // rule); a project's .dat goes beside the exe there too
+  PC_OUTPUT_BIN_DIR = 'bin';
+  { PC_OUTPUT_LIB_DIR }
+  // An output folder's static library folder (TPCZigBuild's layout rule)
+  PC_OUTPUT_LIB_DIR = 'lib';
+
   { PC_STD_MODULE_PATH }
   // The standard library's module folder: the compiler adds it as its first
   // module path when it is created (TPCCompiler.Create -> AddModulePath)

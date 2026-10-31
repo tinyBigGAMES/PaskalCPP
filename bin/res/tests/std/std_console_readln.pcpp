@@ -1,0 +1,63 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_console_readln.pcpp - Std library compliance: Console's ReadLn
+  (res\libs\std\Console.pcpp)
+
+  ReadLn reads standard input one line at a time, its line break gone (LF
+  and CRLF alike), UTF-8 text kept byte for byte. An empty line is a line
+  (true, ""); a last line with no line break is still a line; at the end of
+  input it answers false with the line emptied, and keeps answering false
+  past it. stdin is fixtures/std_console_readln_input.txt (a pipe, so the
+  console read path is checked by scripts\vendor\sfx\console_std.pcpp).
+*******************************************************************************/
+
+module exe std_console_readln;
+
+/*
+  @@test
+    kind run
+    stdin "fixtures/std_console_readln_input.txt"
+    expect
+    | line 1: [first] bytes 5
+    | line 2: [crlf ends here] bytes 14
+    | line 3: [] bytes 0
+    | line 4: [ünïcode €] bytes 13
+    | line 5: [last, no line break] bytes 19
+    | end of input after 5 lines, line []
+    | read past end false, line []
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import Console;
+
+var
+  LLine: string;
+  LCount: int32;
+  LMore: bool;
+
+begin
+  LCount := 0;
+  while ReadLn(LLine) do
+    LCount := LCount + 1;
+    println("line {}: [{}] bytes {}", LCount, LLine, len(LLine));
+  end;
+  println("end of input after {} lines, line [{}]", LCount, LLine);
+  // Past the end a read still fails and still empties the line
+  LLine := "stale";
+  LMore := ReadLn(LLine);
+  println("read past end {}, line [{}]", LMore, LLine);
+end.

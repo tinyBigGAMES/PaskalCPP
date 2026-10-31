@@ -1,0 +1,413 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_llama_ext_tuned.pcpp - Std library compliance: the llama_ext unit's
+  tuned layer (res\libs\std\llama_ext.pcpp)
+
+  Options out of range are refused by every call that takes them. The
+  fixture model (stories260K.gguf) loads with options that become its own:
+  greedy sampling, a small context, a token limit. Greedy text and a fixed
+  seed give the same text twice; MaxTokens caps the pieces; a stop string
+  ends the text before it (built from the greedy run's own pieces, so the
+  row compares text with text and never prints the model's words); a
+  string that only starts like the text is held back and then flushed;
+  cancel from the token routine fails the call, and the next call runs.
+  A chat takes a second turn; a turn that does not fit and a cancelled
+  turn both leave the chat as it was (the next turn's greedy reply equals
+  the one a chat with no failed turn gives). A saved history loads into a
+  fresh chat (its system prompt too), saves back to the same bytes and
+  talks on, as a second chat loaded alike does; a load from a missing file
+  or from text that is no history leaves the chat as it was; a closed chat
+  refuses both.
+*******************************************************************************/
+
+module exe std_llama_ext_tuned;
+
+/*
+  @@test
+    kind run
+    expect
+    | bad ContextSize false
+    | bad ContextSize error the option ContextSize is below 0
+    | bad Threads error the option Threads is below 0
+    | bad Temperature error the option Temperature is below 0
+    | bad TopK error the option TopK is below 0
+    | bad TopP error the option TopP is not from 0 to 1
+    | bad MinP error the option MinP is not from 0 to 1
+    | bad MaxTokens error the option MaxTokens is below 0
+    | bad StopStrings error the option StopStrings holds an empty string
+    | bad load valid false
+    | load true
+    | load error []
+    | options kept true
+    | generate bad false
+    | generate bad error the option TopP is not from 0 to 1
+    | chat bad false
+    | chat bad error the option MaxTokens is below 0
+    | max tokens true
+    | max tokens pieces true
+    | greedy same true
+    | seed same true
+    | stop true
+    | stop text true
+    | stop streamed true
+    | held back true
+    | held back text true
+    | cancel false
+    | cancel error the generation was cancelled
+    | cancel text []
+    | cancel pieces true
+    | after cancel true
+    | cancel before call true
+    | chat true
+    | chat first true
+    | chat second true
+    | chat second error []
+    | no fit false
+    | no fit error the prompt does not fit in the context
+    | no fit chat unchanged true
+    | chat cancel false
+    | chat cancel error the generation was cancelled
+    | chat cancel unchanged true
+    | save closed false
+    | save closed error no chat is open
+    | load closed false
+    | load closed error no chat is open
+    | save true
+    | load true
+    | history system true
+    | history round trip true
+    | history continues true
+    | history loads alike true
+    | load missing false
+    | load missing error the history file could not be read: $P:../no_such_history.json
+    | load missing chat unchanged true
+    | load bad false
+    | load bad chat unchanged true
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  llama_ext,
+  SysUtils;
+
+type
+  // What CollectPiece gathers: each piece, their text joined, and when to
+  // cancel (after CancelAt pieces, the model or the chat it points at)
+  Collect = record
+    Pieces: array of string;
+    Text: string;
+    CancelAt: int32;
+    Model: ptr to LlamaModel;
+    Chat: ptr to LlamaChat;
+  end;
+
+routine CollectPiece(const AUserData: ptr; const APiece: string);
+var
+  LCollect: ptr to Collect;
+  LCount: int32;
+begin
+  LCollect := ptr to Collect(AUserData);
+  LCount := int32(len(LCollect->Pieces));
+  setlength(LCollect->Pieces, LCount + 1);
+  LCollect->Pieces[LCount] := APiece;
+  LCollect->Text := LCollect->Text + APiece;
+  if (LCollect->CancelAt > 0) and (LCount + 1 = LCollect->CancelAt) then
+    if LCollect->Model <> nil then
+      CancelLlamaModel(LCollect->Model^);
+    end;
+    if LCollect->Chat <> nil then
+      CancelLlamaChat(LCollect->Chat^);
+    end;
+  end;
+end;
+
+routine ClearCollect(var ACollect: Collect);
+begin
+  setlength(ACollect.Pieces, 0);
+  ACollect.Text := "";
+  ACollect.CancelAt := 0;
+  ACollect.Model := nil;
+  ACollect.Chat := nil;
+end;
+
+// The first ACount pieces joined
+routine JoinPieces(const ACollect: Collect; const ACount: int32): string;
+var
+  LIndex: int32;
+  LText: string;
+begin
+  LText := "";
+  for LIndex := 0 to ACount - 1 do
+    LText := LText + ACollect.Pieces[LIndex];
+  end;
+  return LText;
+end;
+
+// A load with one option out of range: its error
+routine BadLoad(const AOptions: LlamaOptions): string;
+var
+  LModel: LlamaModel;
+  LResult: bool;
+begin
+  LResult := LoadLlamaModel("$P:../../res/assets/models/stories260K.gguf", AOptions, LModel);
+  if LResult then
+    UnloadLlamaModel(LModel);
+    return "loaded";
+  end;
+  return LModel.ErrorMessage;
+end;
+
+// A greedy chat with the model's options: two turns, the second's reply
+// back in AReply; ABetween runs between them: 0 = nothing, 1 = a turn
+// that does not fit, 2 = a turn cancelled after two pieces. False when a
+// turn that should succeed fails.
+routine ChatRun(var AModel: LlamaModel; const ABetween: int32; var AReply: string;
+  var AChat: LlamaChat; var AFailError: string): bool;
+var
+  LReply: string;
+  LLong: string;
+  LIndex: int32;
+  LCollect: Collect;
+begin
+  AReply := "";
+  AFailError := "";
+  if not CreateLlamaChat(AModel, "You tell short stories.", AChat) then
+    return false;
+  end;
+  if not SayLlamaChat(AChat, "Tell me a story.", LReply) then
+    return false;
+  end;
+  if ABetween = 1 then
+    LLong := "";
+    for LIndex := 1 to 300 do
+      LLong := LLong + "story ";
+    end;
+    if SayLlamaChat(AChat, LLong, LReply) then
+      return false;
+    end;
+    AFailError := AChat.ErrorMessage;
+  end;
+  if ABetween = 2 then
+    ClearCollect(LCollect);
+    LCollect.CancelAt := 2;
+    LCollect.Chat := address of AChat;
+    if SayLlamaChat(AChat, "Tell me another story.", LReply, CollectPiece, address of LCollect) then
+      return false;
+    end;
+    AFailError := AChat.ErrorMessage;
+  end;
+  return SayLlamaChat(AChat, "Tell me another story.", AReply);
+end;
+
+// Whether two files both read and hold the same bytes
+routine SameFiles(const APathA: string; const APathB: string): bool;
+var
+  LTextA: string;
+  LTextB: string;
+begin
+  if not ReadAllText(APathA, LTextA) then
+    return false;
+  end;
+  if not ReadAllText(APathB, LTextB) then
+    return false;
+  end;
+  return LTextA = LTextB;
+end;
+
+var
+  LModel: LlamaModel;
+  LChat: LlamaChat;
+  LLoaded: LlamaChat;
+  LAlike: LlamaChat;
+  LOptions: LlamaOptions;
+  LGreedy: LlamaOptions;
+  LCollect: Collect;
+  LFirst: Collect;
+  LText: string;
+  LAgain: string;
+  LReply: string;
+  LPlain: string;
+  LFailError: string;
+  LResult: bool;
+  LHistory: string;
+  LHistory2: string;
+  LHistory3: string;
+  LBad: string;
+begin
+  // Every option out of range is refused, with its name
+  LOptions := DefaultLlamaOptions();
+  LOptions.ContextSize := -1;
+  println("bad ContextSize {}", LoadLlamaModel("$P:../../res/assets/models/stories260K.gguf", LOptions, LModel));
+  println("bad ContextSize error {}", LModel.ErrorMessage);
+  LOptions := DefaultLlamaOptions();
+  LOptions.Threads := -1;
+  println("bad Threads error {}", BadLoad(LOptions));
+  LOptions := DefaultLlamaOptions();
+  LOptions.Temperature := float32(-1);
+  println("bad Temperature error {}", BadLoad(LOptions));
+  LOptions := DefaultLlamaOptions();
+  LOptions.TopK := -1;
+  println("bad TopK error {}", BadLoad(LOptions));
+  LOptions := DefaultLlamaOptions();
+  LOptions.TopP := float32(1.5);
+  println("bad TopP error {}", BadLoad(LOptions));
+  LOptions := DefaultLlamaOptions();
+  LOptions.MinP := float32(2);
+  println("bad MinP error {}", BadLoad(LOptions));
+  LOptions := DefaultLlamaOptions();
+  LOptions.MaxTokens := -1;
+  println("bad MaxTokens error {}", BadLoad(LOptions));
+  LOptions := DefaultLlamaOptions();
+  setlength(LOptions.StopStrings, 1);
+  LOptions.StopStrings[0] := "";
+  println("bad StopStrings error {}", BadLoad(LOptions));
+  println("bad load valid {}", IsLlamaModelValid(LModel));
+
+  // Loaded with greedy options, a small context and a token limit: the
+  // model keeps them
+  LGreedy := DefaultLlamaOptions();
+  LGreedy.ContextSize := 256;
+  LGreedy.Temperature := float32(0);
+  LGreedy.MaxTokens := 12;
+  println("load {}", LoadLlamaModel("$P:../../res/assets/models/stories260K.gguf", LGreedy, LModel));
+  println("load error [{}]", LModel.ErrorMessage);
+  println("options kept {}", (LModel.Options.ContextSize = 256) and (LModel.Options.MaxTokens = 12));
+
+  // Generate and chat refuse options out of range too
+  LOptions := LGreedy;
+  LOptions.TopP := float32(-0.5);
+  println("generate bad {}", GenerateLlama(LModel, "Once upon a time", LOptions, LText));
+  println("generate bad error {}", LModel.ErrorMessage);
+  LOptions := LGreedy;
+  LOptions.MaxTokens := -3;
+  println("chat bad {}", CreateLlamaChat(LModel, "", LOptions, LChat));
+  println("chat bad error {}", LChat.ErrorMessage);
+
+  // The model's options: greedy, 12 tokens, every piece streamed
+  ClearCollect(LFirst);
+  println("max tokens {}", GenerateLlama(LModel, "Once upon a time", LText, CollectPiece, address of LFirst));
+  println("max tokens pieces {}", (len(LFirst.Pieces) = 12) and (LFirst.Text = LText));
+  LResult := GenerateLlama(LModel, "Once upon a time", LAgain);
+  println("greedy same {}", LResult and (LAgain = LText));
+
+  // A fixed seed: the same sampled text twice
+  LOptions := DefaultLlamaOptions();
+  LOptions.Seed := 1234;
+  LOptions.MaxTokens := 16;
+  LResult := GenerateLlama(LModel, "Once upon a time", LOptions, LText);
+  LResult := GenerateLlama(LModel, "Once upon a time", LOptions, LAgain) and LResult;
+  println("seed same {}", LResult and (LText = LAgain));
+
+  // A stop string: the greedy run's fifth piece; the text is the four
+  // pieces before it, and the stop string is never streamed
+  LOptions := LGreedy;
+  setlength(LOptions.StopStrings, 1);
+  LOptions.StopStrings[0] := LFirst.Pieces[4];
+  ClearCollect(LCollect);
+  println("stop {}", GenerateLlama(LModel, "Once upon a time", LOptions, LText, CollectPiece, address of LCollect));
+  println("stop text {}", LText = JoinPieces(LFirst, 4));
+  println("stop streamed {}", LCollect.Text = LText);
+
+  // A string that starts like the fifth piece but never completes: what
+  // was held back for it comes out at the end, the text whole
+  LOptions.StopStrings[0] := LFirst.Pieces[4] + "#never#";
+  ClearCollect(LCollect);
+  println("held back {}", GenerateLlama(LModel, "Once upon a time", LOptions, LText, CollectPiece, address of LCollect));
+  println("held back text {}", (LText = LFirst.Text) and (LCollect.Text = LText));
+
+  // Cancel from the token routine after three pieces: the call fails,
+  // the next one runs; a cancel before a call does not reach it
+  ClearCollect(LCollect);
+  LCollect.CancelAt := 3;
+  LCollect.Model := address of LModel;
+  println("cancel {}", GenerateLlama(LModel, "Once upon a time", LText, CollectPiece, address of LCollect));
+  println("cancel error {}", LModel.ErrorMessage);
+  println("cancel text [{}]", LText);
+  println("cancel pieces {}", len(LCollect.Pieces) = 3);
+  println("after cancel {}", GenerateLlama(LModel, "Once upon a time", LText) and (LText = LFirst.Text));
+  CancelLlamaModel(LModel);
+  println("cancel before call {}", GenerateLlama(LModel, "Once upon a time", LText) and (LText = LFirst.Text));
+
+  // A chat: a second turn; a turn that does not fit and a cancelled turn
+  // leave the chat as it was (the next reply equals the plain chat's)
+  LResult := ChatRun(LModel, 0, LPlain, LChat, LFailError);
+  println("chat {}", LResult);
+  println("chat first {}", IsLlamaChatValid(LChat));
+  println("chat second {}", len(LPlain) > 0);
+  println("chat second error [{}]", LChat.ErrorMessage);
+  FreeLlamaChat(LChat);
+  LResult := ChatRun(LModel, 1, LReply, LChat, LFailError);
+  // The failed turn's result: false once it failed with a reason
+  println("no fit {}", LFailError = "");
+  println("no fit error {}", LFailError);
+  println("no fit chat unchanged {}", LResult and (LReply = LPlain));
+  FreeLlamaChat(LChat);
+  LResult := ChatRun(LModel, 2, LReply, LChat, LFailError);
+  println("chat cancel {}", LFailError = "");
+  println("chat cancel error {}", LFailError);
+  println("chat cancel unchanged {}", LResult and (LReply = LPlain));
+  FreeLlamaChat(LChat);
+
+  // History: a closed chat refuses save and load (files in repo\bin\output)
+  LHistory := "$P:../std_llama_ext_tuned_history.json";
+  LHistory2 := "$P:../std_llama_ext_tuned_history2.json";
+  LHistory3 := "$P:../std_llama_ext_tuned_history3.json";
+  LBad := "$P:../std_llama_ext_tuned_bad.json";
+  println("save closed {}", SaveLlamaChatHistory(LChat, LHistory));
+  println("save closed error {}", LChat.ErrorMessage);
+  println("load closed {}", LoadLlamaChatHistory(LChat, LHistory));
+  println("load closed error {}", LChat.ErrorMessage);
+
+  // One turn saved; a chat opened with no system prompt loads it, takes its
+  // system prompt, saves the same file and talks on; a second one loaded
+  // the same way gives the same greedy reply
+  CreateLlamaChat(LModel, "You tell short stories.", LChat);
+  SayLlamaChat(LChat, "Tell me a story.", LReply);
+  println("save {}", SaveLlamaChatHistory(LChat, LHistory));
+  CreateLlamaChat(LModel, "", LLoaded);
+  println("load {}", LoadLlamaChatHistory(LLoaded, LHistory));
+  println("history system {}", LLoaded.SystemPrompt = "You tell short stories.");
+  SaveLlamaChatHistory(LLoaded, LHistory2);
+  println("history round trip {}", SameFiles(LHistory, LHistory2));
+  LResult := SayLlamaChat(LLoaded, "Tell me another story.", LReply);
+  println("history continues {}", LResult and (len(LReply) > 0));
+  CreateLlamaChat(LModel, "", LAlike);
+  LoadLlamaChatHistory(LAlike, LHistory);
+  LResult := SayLlamaChat(LAlike, "Tell me another story.", LText);
+  println("history loads alike {}", LResult and (LText = LReply));
+
+  // A load that fails leaves the chat as it was: saved again, the same file
+  SaveLlamaChatHistory(LAlike, LHistory2);
+  println("load missing {}", LoadLlamaChatHistory(LAlike, "$P:../no_such_history.json"));
+  println("load missing error {}", LAlike.ErrorMessage);
+  SaveLlamaChatHistory(LAlike, LHistory3);
+  println("load missing chat unchanged {}", SameFiles(LHistory2, LHistory3));
+  WriteAllText(LBad, "not json");
+  println("load bad {}", LoadLlamaChatHistory(LAlike, LBad));
+  SaveLlamaChatHistory(LAlike, LHistory3);
+  println("load bad chat unchanged {}", SameFiles(LHistory2, LHistory3));
+
+  // The program wrote these files, so it removes them
+  DeleteFile(LHistory);
+  DeleteFile(LHistory2);
+  DeleteFile(LHistory3);
+  DeleteFile(LBad);
+  FreeLlamaChat(LAlike);
+  FreeLlamaChat(LLoaded);
+  FreeLlamaChat(LChat);
+  UnloadLlamaModel(LModel);
+end.

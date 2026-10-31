@@ -26,7 +26,8 @@
   and keep the stream's state: a callback left nil is a clean failure, never
   a crash. IOReadFull / IOWriteFull move a count through any short reads
   or writes a stream gives; IOReadAll reads a stream to its end into a
-  string; IOSameContent compares two streams to their ends.
+  string; IOSameContent compares two streams to their ends; IOCopy copies
+  one stream to its end into another.
   CreateMemoryIO makes an IO over the caller's memory (read-only, or read /
   write within its size) or over a buffer of its own that grows as it is
   written. CreateFileIO makes an IO over a file, opened in one of C's fopen
@@ -41,7 +42,8 @@
   read-only source over a zip archive, which it reads through an IO (a
   file, memory, an entry of another source), ZIP64 included, its entries
   (stored, deflated, ZipCrypto) read-only IOs that seek without starting
-  over. CreateZipFileIO opens one entry of an archive directly.
+  over. CreateZipFileIO opens one entry of an archive directly;
+  GetZipEntryInfo reads an entry's size and CRC from the directory alone.
   ZipDirectoryContents is the write side: every file under a folder into a
   new archive (deflated, optionally ZipCrypto encrypted, entry names below
   a root of the caller's choice, a ZipProgress routine per entry), the
@@ -80,9 +82,15 @@ cpp source;
 
 // The file IO's three calls std:: has no form for: the UTF-8 open (Windows
 // opens by UTF-16), the 64-bit seek / tell (Windows' long is 32 bits) and
-// the resize through the open handle (_chsize_s / ftruncate)
+// the resize through the open handle (_chsize_s / ftruncate). The zip
+// writer's failure check also opens the archive alone (_wsopen_s with
+// _SH_DENYRW: fcntl.h, share.h, sys/stat.h), the way minizip's Windows
+// create does
 #ifdef _WIN32
+#include <fcntl.h>
 #include <io.h>
+#include <share.h>
+#include <sys/stat.h>
 #else
 #include <sys/types.h>
 #include <unistd.h>
@@ -1049,6 +1057,23 @@ std::int64_t ZipDoSize(void* ATable, const std::string& AEntry)
   }
 }
 
+// The entry's CRC-32 as the directory records it (0 to 0xFFFFFFFF); -1
+// when the zip does not have it
+std::int64_t ZipDoEntryCrc(void* ATable, const std::string& AEntry)
+{
+  try
+  {
+    const ZipEntryData* LEntry = ZipDoFind(ATable, AEntry);
+    if (LEntry == nullptr)
+      return -1;
+    return static_cast<std::int64_t>(LEntry->Crc);
+  }
+  catch (...)
+  {
+    return -1;
+  }
+}
+
 // The zip entry IO. minizip finds the entry and where its data starts; the
 // reading is chosen by the entry's size and kind:
 //   Whole  - under ZipDoWholeLimit: read whole through minizip when opened
@@ -1898,25 +1923,60 @@ bool ZipDoListFiles(const std::filesystem::path& AFolder, const std::filesystem:
   return true;
 }
 
+#ifdef _WIN32
+// True when AArchive opens for writing with no other program holding it,
+// the way minizip's Windows create asks (CreateFileW, share mode 0): an
+// open with _SH_DENYRW fails while any other handle is on the file. The
+// file is opened as it is (_O_CREAT only when it was not there, never
+// _O_TRUNC, so it is never emptied) and closed at once; errno says why not
+bool ZipDoOpensAlone(const std::filesystem::path& AArchive, const bool AExisted)
+{
+  int LFlags = _O_RDWR | _O_BINARY;
+  if (!AExisted)
+    LFlags = LFlags | _O_CREAT;
+  int LHandle = -1;
+  errno = _wsopen_s(&LHandle, AArchive.c_str(), LFlags, _SH_DENYRW, _S_IREAD | _S_IWRITE);
+  if (LHandle < 0)
+    return false;
+  _close(LHandle);
+  return true;
+}
+#endif
+
 // Why AArchive cannot be opened for writing, in the C runtime's words:
 // minizip's Windows file functions leave errno alone, so the archive is
-// opened once more in append mode (which never empties it) to ask the C
-// runtime; the handle is closed at once, and a file that open made (none
-// was there) is removed again
+// opened again to ask the C runtime. First alone, as minizip's create
+// needs it on Windows (ZipDoOpensAlone), then in append mode (which never
+// empties it): a file that opens shared but not alone is held by another
+// program, named as that rather than as minizip's fault. Every handle is
+// closed at once, and a file these opens made (none was there) is removed
 std::string ZipDoWhyNoWrite(const std::filesystem::path& AArchive)
 {
   std::error_code LError;
   const bool LExisted = std::filesystem::exists(AArchive, LError);
+#ifdef _WIN32
+  const bool LAlone = ZipDoOpensAlone(AArchive, LExisted);
+  const int LAloneError = errno;
+#endif
   errno = 0;
   std::FILE* const LProbe = FileDoOpenHandle(AArchive, 3);
-  if (LProbe != nullptr)
+  if (LProbe == nullptr)
+    return ZipDoErrno();
+  std::fclose(LProbe);
+  if (!LExisted)
+    std::filesystem::remove(AArchive, LError);
+#ifdef _WIN32
+  if (!LAlone)
   {
-    std::fclose(LProbe);
-    if (!LExisted)
-      std::filesystem::remove(AArchive, LError);
-    return "minizip refused it (the file itself opens for writing)";
+    // _wsopen_s reports a sharing violation as EACCES; a read-only file
+    // fails the append open above too, so EACCES here is the other program
+    if (LAloneError == EACCES)
+      return "another program has the file open (it opens shared, but not alone, as minizip needs it)";
+    errno = LAloneError;
+    return ZipDoErrno();
   }
-  return ZipDoErrno();
+#endif
+  return "minizip refused it (the file itself opens for writing)";
 }
 
 const std::string& ZipDoLastError()
@@ -2502,6 +2562,45 @@ begin
     end;
   end;
   return false;
+end;
+
+/// Copies a stream from where it stands to its end into another, where that
+/// one stands, in 64 KB chunks (a stream of any size, sized or not; both
+/// positions move). A zip entry IO's CRC is checked as its last chunk is
+/// read, so a copy that returns the count read the whole entry intact.
+/// @param ASource the stream to read
+/// @param ADest the stream to write
+/// @returns the bytes copied; -1 when either is nil, a read failed (state
+///   Error: a read error or a CRC mismatch) or a write stopped short (the
+///   bytes written up to there stay in ADest)
+/// @example `if IOCopy(CreateZipFileIO("$P:assets.zip", "big.bin"), LFileIO) < 0 then ... end;`
+/// @since 0.3
+/// @see IOReadAll
+exported routine IOCopy(const ASource: IO; const ADest: IO): int64;
+var
+  LChunk: array[0..65535] of uint8;
+  LGot: int64;
+  LTotal: int64;
+begin
+  if (ASource = nil) or (ADest = nil) then
+    return -1;
+  end;
+  LTotal := 0;
+  while true do
+    LGot := IOReadFull(ASource, address of LChunk[0], 65536);
+    if (LGot > 0) and (IOWriteFull(ADest, address of LChunk[0], LGot) <> LGot) then
+      return -1;
+    end;
+    LTotal := LTotal + LGot;
+    if LGot < 65536 then
+      // A short chunk is the end, or a read that failed before it
+      if IOStatus(ASource) = IOState.Error then
+        return -1;
+      end;
+      return LTotal;
+    end;
+  end;
+  return -1;
 end;
 
 type
@@ -3487,6 +3586,65 @@ end;
 exported routine CreateZipFileIO(const APath: string; const AEntry: string): IO;
 begin
   return ZipEntryOf(ZipCreate(CreateFileIO(APath, FileMode.Read), true, ""), AEntry);
+end;
+
+exported type
+  /// What a zip's central directory records about one entry, read by
+  /// GetZipEntryInfo without opening or decoding the entry.
+  /// @example `if GetZipEntryInfo("$P:assets.zip", "models/ship.bin", "", LInfo) then println("{} {}", LInfo.Size, LInfo.Crc); end;`
+  /// @since 0.3
+  /// @see GetZipEntryInfo
+  ZipEntryInfo = record
+    /// The entry's uncompressed size in bytes
+    Size: int64;
+    /// The CRC-32 of the entry's uncompressed bytes, as the directory
+    /// records it (the CRC an entry IO checks its bytes against)
+    Crc: uint32;
+  end;
+
+/// Reads an entry's uncompressed size and CRC-32 from a zip file's central
+/// directory, without opening or decoding the entry: a cache of an
+/// extracted entry compares its file against these to know it is current.
+/// The zip is opened as CreateZipIOSource(APath, APassword) opens it and
+/// closed again before the call returns. The directory is never encrypted,
+/// so an encrypted entry's info reads with any password; APassword is kept
+/// so the call names the archive the way CreateZipFileIO does.
+/// @param APath the zip file (UTF-8, ResolvePath's `$P:` / `$D:`)
+/// @param AEntry the entry's path (IOSourceOpen's rules)
+/// @param APassword the archive's password ("" for none)
+/// @param AInfo set to the entry's size and CRC when the call succeeds;
+///   left as it was otherwise
+/// @returns true when the zip has the entry; false when the file cannot be
+///   opened or is not a valid zip, the path is refused or no entry has it
+/// @example `if GetZipEntryInfo("$P:assets.zip", "models/ship.bin", "", LInfo) then ... end;`
+/// @since 0.3
+/// @see ZipEntryInfo
+/// @see CreateZipFileIO
+exported routine GetZipEntryInfo(const APath: string; const AEntry: string; const APassword: string; var AInfo: ZipEntryInfo): bool;
+var
+  LSource: IOSource;
+  LPath: string;
+  LSize: int64;
+  LCrc: int64;
+begin
+  LSource := ZipCreate(CreateFileIO(APath, FileMode.Read), true, APassword);
+  if LSource = nil then
+    return false;
+  end;
+  LPath := SourceDoNormalize(AEntry);
+  if LPath = "" then
+    IOSourceClose(LSource);
+    return false;
+  end;
+  LSize := ZipDoSize(LSource->UserData, LPath);
+  LCrc := ZipDoEntryCrc(LSource->UserData, LPath);
+  IOSourceClose(LSource);
+  if (LSize < 0) or (LCrc < 0) then
+    return false;
+  end;
+  AInfo.Size := LSize;
+  AInfo.Crc := uint32(LCrc);
+  return true;
 end;
 
 exported type

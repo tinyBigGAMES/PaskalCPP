@@ -60,6 +60,7 @@ uses
   PaskalCPP.Emitter,
   PaskalCPP.Archive,
   PaskalCPP.Icon,
+  PaskalCPP.Project,
   PaskalCPP.ZigBuild;
 
 const
@@ -79,6 +80,8 @@ const
   PC_ERR_CMP_007 = 'CMP0007';   // warning: a linked library could not be read for its data keys
   { PC_ERR_CMP_008 }
   PC_ERR_CMP_008 = 'CMP0008';   // a non-Windows exe's icon could not be decoded / written (PLAN-RESDATA A6)
+  { PC_ERR_CMP_009 }
+  PC_ERR_CMP_009 = 'CMP0009';   // the project's type differs from its main module's kind (PLAN-PROJECTS)
 
   { PC_CMP_OUTPUT_RECORD }
   // pcpp's own record of an output folder, written by every build (beside
@@ -215,6 +218,13 @@ type
     FDefaultOutputPath: string;
     FGeneratedPath: string;
     FProjectName: string;
+    // The project this build is (DoFindProject): only when the source is the
+    // main module of the nearest project.toml above it; else a plain file
+    // build, FProjectRoot '' (user 2026-10-29)
+    FProjectRoot: string;         // the folder $R: names; '' = no project
+    FProjectOutput: string;       // its output folder, resolved (the default output)
+    FProjectKind: TPCProjectKind; // its type, checked against the main module's kind
+    FProjectPassword: string;     // its pack password ('' = none); reaches the AST only scrambled (DoApplyProjectSecret)
     FLastExitCode: Cardinal;
     FPrepared: Boolean;   // the last Prepare succeeded: Build may run
     FSourceProvider: TPCSourceProvider;          // texts that win over the disk (the LSP's buffers); nil = disk
@@ -250,6 +260,16 @@ type
     procedure DoFreePhases();
     procedure DoCreatePhases();
     function DoResolveSource(const ASourceFile: string): Boolean;
+    // The nearest project.toml above FSourceFile, loaded: FProject* set when
+    // the source is its main module. False = an invalid project.toml (its PJ
+    // reports stop the build, user 2026-10-29)
+    function DoFindProject(): Boolean;
+    // A project build's password, scrambled, onto the AST before SEM
+    // (TPCAst.ProjectSecret); a plain build's says it is none
+    procedure DoApplyProjectSecret();
+    // A project build: project.toml's type is the main module's kind
+    // (CMP0009 reported when not); nothing outside a project
+    procedure DoCheckProjectKind();
     function DoPrepare(const ASourceFile: string; const AOutputPath: string): Boolean;
     function DoAnalyze(const ACheckOnly: Boolean): Boolean;
     function DoApplyOutputPath(): Boolean;
@@ -289,6 +309,7 @@ type
       out AProject: string): Boolean;
     function DoCheckCleanBuildFile(const AFolder: string; const AProject: string): Boolean;
     function DoCheckCleanSource(const AFolder: string; const ASource: string): Boolean;
+    function DoIsProjectOutput(const AFolder: string; out AIsProject: Boolean): Boolean;
     function DoCollectCleanTargets(const AFolder: string;
       out ATargets: TArray<string>): Boolean;
   public
@@ -359,6 +380,9 @@ type
     function GetLastExitCode(): Cardinal;
     // The last compile's values ('' before the first build)
     function GetOutputPath(): string;
+    // The project root the last Prepare / Analyze found: the folder $R:
+    // names ('' = a plain file build, or none run yet)
+    function GetProjectRoot(): string;
     function GetOutputFilename(): string;
     // The built artifact's full path (ZigBuild's layout rule)
     function GetArtifactPath(): string;
@@ -459,6 +483,9 @@ begin
   FDefaultOutputPath := '';
   FGeneratedPath := '';
   FProjectName := '';
+  FProjectRoot := '';
+  FProjectOutput := '';
+  FProjectKind := pkExe;
   FLastExitCode := 0;
   FPrepared := False;
 
@@ -1034,6 +1061,11 @@ begin
   Result := FOutputPath;
 end;
 
+function TPCCompiler.GetProjectRoot(): string;
+begin
+  Result := FProjectRoot;
+end;
+
 function TPCCompiler.GetOutputFilename(): string;
 begin
   Result := FZigBuild.GetOutputFilename();
@@ -1455,7 +1487,80 @@ begin
     FErrors.Add(esFatal, PC_ERR_CMP_001, RSCmpSourceNotFound, [FSourceFile]);
     Exit;
   end;
-  Result := True;
+
+  // The build's project, found from the source (the editor's checks too, so
+  // $R: means the same there)
+  Result := DoFindProject();
+end;
+
+function TPCCompiler.DoFindProject(): Boolean;
+var
+  LProject: TPCProject;
+  LRoot: string;
+begin
+  // No project.toml at or above the source: a plain file build, as before
+  // (opt-in). One that is there must load; the source is a project build
+  // only as its main module (user 2026-10-29)
+  FProjectRoot := '';
+  FProjectOutput := '';
+  FProjectKind := pkExe;
+  FProjectPassword := '';
+  Result := False;
+  LProject := TPCProject.Create();
+  try
+    LProject.SetErrors(FErrors);
+    LRoot := LProject.Find(FSourceFile);
+    if FErrors.HasErrors() then
+      Exit;
+    if LRoot = '' then
+      Exit(True);
+    if not LProject.Load(LRoot) then
+      Exit;
+    if TUtils.SamePath(LProject.MainPath(), FSourceFile) then
+    begin
+      FProjectRoot := LProject.Root;
+      FProjectOutput := LProject.OutputPath();
+      FProjectKind := LProject.Kind;
+      FProjectPassword := LProject.Password;
+    end;
+    Result := True;
+  finally
+    LProject.Free();
+  end;
+end;
+
+procedure TPCCompiler.DoApplyProjectSecret();
+var
+  LSecret: TPCProjectSecret;
+begin
+  // PLAN-PROJECTS atom 6: a project build's pack password reaches the AST
+  // before SEM, scrambled (data from outside the source, as ApiExeIcon):
+  // SEM reads InProject (ProjectPassword() is SM0433 without it), the
+  // emitter writes Data and Key. A plain build: InProject False, no data
+  LSecret := Default(TPCProjectSecret);
+  LSecret.InProject := FProjectRoot <> '';
+  if LSecret.InProject then
+    TPCProject.ScramblePassword(FProjectPassword, LSecret.Data, LSecret.Key);
+  FAst.ProjectSecret := LSecret;
+end;
+
+procedure TPCCompiler.DoCheckProjectKind();
+const
+  { PC_CMP_PROJECT_MODULE_KIND }
+  // The module kind each project type builds
+  PC_CMP_PROJECT_MODULE_KIND: array[TPCProjectKind] of TPCModuleKind = (
+    mkExe,
+    mkDll,
+    mkLib
+  );
+begin
+  // project.toml says what the project builds; its main module must say the
+  // same (a unit, never a main module, is the parser's PR0004)
+  if (FProjectRoot = '') or (FMainModule = nil) or (FMainModule.ModuleKind = mkUnit) then
+    Exit;
+  if FMainModule.ModuleKind <> PC_CMP_PROJECT_MODULE_KIND[FProjectKind] then
+    FErrors.Add(esError, PC_ERR_CMP_009, RSCmpProjectKind,
+      [PC_PRJ_KIND_TEXT[FProjectKind], FSourceFile]);
 end;
 
 function TPCCompiler.DoPrepare(const ASourceFile: string; const AOutputPath: string): Boolean;
@@ -1469,13 +1574,18 @@ begin
   // An explicit folder (-o) wins over the main module's @outputpath, as -t
   // over @target; without one the directive decides (DoApplyOutputPath,
   // once the source is read), else the host's default folder
-  // (SetDefaultOutputPath), else 'output' in the current folder
+  // (SetDefaultOutputPath: testbed's one output folder, which a project
+  // under res\tests must not escape), else a project build's output folder
+  // (project.toml, resolved by the model), else 'output' in the current
+  // folder
   LOutput := AOutputPath;
   FOutputGiven := LOutput.Trim() <> '';
   if not FOutputGiven then
   begin
     if FDefaultOutputPath.Trim() <> '' then
       LOutput := FDefaultOutputPath
+    else if FProjectOutput <> '' then
+      LOutput := FProjectOutput
     else
       LOutput := PC_CMP_DEFAULT_OUTPUT;
   end;
@@ -1535,10 +1645,14 @@ begin
   if not LKeysOk then
     Exit;
 
-  // The compiler's module paths go to the main parser; it hands them (and
-  // the source provider) to every import's parser
+  // The compiler's module paths go to the main parser; it hands them, the
+  // source provider and the project root ($R:, '' outside a project) to
+  // every import's parser
   FMainModule := ParseModuleFile(FAst, FErrors, FSourceFile, nil,
-    Default(TPCTargetTriple), LOverride, LDefault, FModulePaths, FSourceProvider, ACheckOnly);
+    Default(TPCTargetTriple), LOverride, LDefault, FModulePaths, FSourceProvider, ACheckOnly,
+    FProjectRoot);
+  // Reported, never a gate: SEM still runs (no phase gate, PROJECT.md)
+  DoCheckProjectKind();
 
   // A8: the API icon is AST data before SEM (its key counts for SM0122)
   if (FMainModule <> nil) and (FApiExeIcon <> '') then
@@ -1553,6 +1667,9 @@ begin
       end;
     end;
   end;
+
+  // The project's password, scrambled, is AST data before SEM too
+  DoApplyProjectSecret();
 
   FSemantics.Analyze(FAst);
   Result := not FErrors.HasErrors();
@@ -1573,16 +1690,10 @@ begin
     if (LDirective.DirectiveKind <> bdOutputPath) or LDirective.ResolvedNoEffect or
       (LDirective.Args.Count = 0) or (not LDirective.Args[0].HasValue) then
       Continue;
-    try
-      FOutputPath := TUtils.ResolvePath(LDirective.Args[0].ResolvedText);
-      FGeneratedPath := TUtils.JoinResolvedPath(FOutputPath, PC_CMP_GENERATED_DIR);
-    except
-      on E: Exception do
-      begin
-        FErrors.Add(esFatal, PC_ERR_CMP_001, RSCmpPathFailed, [LDirective.Args[0].ResolvedText, E.Message]);
-        Exit(False);
-      end;
-    end;
+    // Taken as resolved: never resolved again (PROJECT.md). JoinResolvedPath
+    // joins as text and cannot raise
+    FOutputPath := LDirective.Args[0].ResolvedText;
+    FGeneratedPath := TUtils.JoinResolvedPath(FOutputPath, PC_CMP_GENERATED_DIR);
   end;
 end;
 
@@ -2003,6 +2114,12 @@ begin
 
   FZigBuild.SetOutputPath(FOutputPath);
   FZigBuild.SetProjectName(FProjectName);
+  // A project build of its own output (the main module of a project:
+  // FProjectRoot set, DoFindProject; into that project's output, both
+  // resolved): the one build that removes the files it no longer produces.
+  // -o / @outputpath elsewhere = a plain build of that folder
+  FZigBuild.SetProjectOutputBuild((FProjectRoot <> '') and
+    TUtils.SamePath(FOutputPath, FProjectOutput));
   FZigBuild.SetBuildMode(PC_CMP_BUILD_MODES[LKind]);
   FZigBuild.SetTarget(LTarget.ToZig());
 
@@ -2573,6 +2690,38 @@ begin
   Result := True;
 end;
 
+function TPCCompiler.DoIsProjectOutput(const AFolder: string; out AIsProject: Boolean): Boolean;
+var
+  LProject: TPCProject;
+  LRoot: string;
+begin
+  // AFolder is the output folder of the project found above it: pcpp pack's
+  // packer folder (PC_PRJ_PACK_DIR) is then one of its own. The project is
+  // read with no TErrors: a missing or invalid project.toml only means "not
+  // a project's output", never a report of the clean. False = the folder's
+  // path could not be resolved (refused, CMP0006)
+  Result := False;
+  AIsProject := False;
+  LProject := TPCProject.Create();
+  try
+    LRoot := LProject.Find(AFolder);
+    if (LRoot = '') or (not LProject.Load(LRoot)) then
+      Exit(True);
+    try
+      AIsProject := TUtils.SamePath(LProject.OutputPath(), AFolder);
+    except
+      on E: Exception do
+      begin
+        DoCleanRefuse(AFolder, E.Message);
+        Exit;
+      end;
+    end;
+  finally
+    LProject.Free();
+  end;
+  Result := True;
+end;
+
 function TPCCompiler.DoCollectCleanTargets(const AFolder: string;
   out ATargets: TArray<string>): Boolean;
 var
@@ -2581,11 +2730,12 @@ var
   LName: string;
   LPath: string;
   LAttr: DWORD;
+  LIsProject: Boolean;
 begin
   // generated\ (the Compiler's), then the driver's names, in the order
-  // CleanFolder deletes them; only what exists. A target that is a link
-  // refuses the whole clean (the delete would refuse it anyway, after the
-  // person said yes)
+  // CleanFolder deletes them, then a project output's packer folder; only
+  // what exists. A target that is a link refuses the whole clean (the
+  // delete would refuse it anyway, after the person said yes)
   Result := False;
   ATargets := nil;
   LZig := TPCZigBuild.Create();
@@ -2594,6 +2744,10 @@ begin
   finally
     LZig.Free();
   end;
+  if not DoIsProjectOutput(AFolder, LIsProject) then
+    Exit;
+  if LIsProject then
+    LNames := LNames + [PC_PRJ_PACK_DIR];
   for LName in LNames do
   begin
     LPath := TUtils.JoinResolvedPath(AFolder, LName);
@@ -2667,10 +2821,14 @@ var
   LZig: TPCZigBuild;
   LGeneratedCleared: Boolean;
   LDriverCleared: Boolean;
+  LPackCleared: Boolean;
+  LPackPath: string;
+  LTarget: string;
 begin
   // The checks again, right before the first delete (the folder may have
-  // changed while the person read the list), then generated\ and the
-  // driver's names through the driver's delete, which never enters a link
+  // changed while the person read the list), then generated\, the driver's
+  // names and a project output's packer folder through the driver's
+  // delete, which never enters a link
   Result := False;
   if not CheckCleanFolder(AFolder, LResolved, LTargets) then
     Exit;
@@ -2685,7 +2843,16 @@ begin
           Exit;
         LGeneratedCleared := LZig.ClearBuildDir(PC_CMP_GENERATED_DIR);
         LDriverCleared := LZig.ClearOutput();
-        Result := LGeneratedCleared and LDriverCleared;
+        // A project output's packer folder: only when the checks listed it
+        // (DoCollectCleanTargets: the folder is that project's output)
+        LPackCleared := True;
+        LPackPath := TUtils.JoinResolvedPath(LResolved, PC_PRJ_PACK_DIR);
+        for LTarget in LTargets do
+        begin
+          if TUtils.SamePath(LTarget, LPackPath) then
+            LPackCleared := LZig.ClearBuildDir(PC_PRJ_PACK_DIR);
+        end;
+        Result := LGeneratedCleared and LDriverCleared and LPackCleared;
       finally
         LZig.Free();
       end;

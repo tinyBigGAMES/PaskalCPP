@@ -52,6 +52,25 @@
     Rbutton_set_clicked_callback(button, OnClicked, nil).
   - Errors: Rerror_set_callback(handler) reports Raven's errors with their
     code, severity and detail (Rerror_to_string / Rseverity_to_string).
+  - Device loss: when the GPU device is lost, Raven makes a new one at the
+    next frame and remakes its surfaces, textures and shaders; the
+    application rebuilds what it made itself in the callback set by
+    Rset_device_reset_callback(callback, user_data) (an RDeviceResetCallback,
+    called on the UI thread during Rdraw_frame / Rwait_frame; set it after
+    Rinit, nil removes it). A custom backend reports the loss with
+    Rbackend_device_lost() (thread-safe, from the render thread);
+    Rvulkan_simulate_device_lost() acts as if the Vulkan device was lost,
+    to test the recovery (nothing with an external device).
+  - Texture filters: Rtexture_set_filter(texture, filter) takes
+    R_FILTER_LINEAR, R_FILTER_NEAREST (pixel art) or R_FILTER_MIPMAP (smooth
+    with mipmaps, for images shown much smaller than their size). Textures
+    made from image files start with R_FILTER_MIPMAP, the others with
+    R_FILTER_LINEAR. A backend without mipmaps treats MIPMAP as LINEAR:
+    raven_raylib draws every filter but NEAREST as raylib's LINEAR.
+  - Timeline sizes: Rtimeline_set_header_width (the track-name column),
+    Rtimeline_set_ruler_height and Rtimeline_set_default_track_height, each
+    in logical units with 0 for the automatic size, and their
+    Rtimeline_get_ forms (get_header_width returns the width as laid out).
   - Files: every load (XML windows, themes, fonts, textures, Rfile_read)
     looks in Raven's memory files first (Rfile_register_memory), then opens
     the path with the C runtime, which HookIO reaches: a zip such as

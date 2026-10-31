@@ -73,6 +73,14 @@ const
   { ERR_PAK_CHECKSUM }
   ERR_PAK_CHECKSUM = 'PAK007';
 
+  { ERR_PAK_PATH }
+  // A manifest path (or the manifest's own) that cannot be resolved
+  ERR_PAK_PATH = 'PAK008';
+
+  { PAK_ANY_FOLDERS }
+  // A glob's leading "any folders" part: zero or more folders
+  PAK_ANY_FOLDERS = '**/';
+
 type
   { TPackSource }
   TPackSource = record
@@ -120,8 +128,10 @@ type
     function DoParseBool(const AValue: string): Boolean;
     function DoParseManifest(const ALines: TArray<string>): Boolean;
     function DoExpandPlaceholders(const AText: string): string;
-    function DoResolvePath(const APath: string): string;
-    procedure DoResolve();
+    // False = PAK008 reported (a path no file routine takes), AResolved ''
+    function DoResolvePath(const APath: string; out AResolved: string): Boolean;
+    // False = a path could not be resolved (PAK008 reported)
+    function DoResolve(): Boolean;
     // discovery
     function DoNormalizeGlob(const APattern: string): string;
     function DoRelativePath(const ABaseDir, AFullPath: string): string;
@@ -491,28 +501,49 @@ begin
   Result := Result.Replace('{version}', FVersion, [rfReplaceAll]);
 end;
 
-function TPacker.DoResolvePath(const APath: string): string;
+function TPacker.DoResolvePath(const APath: string; out AResolved: string): Boolean;
 begin
-  if TPath.IsPathRooted(APath) then
-    Result := TPath.GetFullPath(APath)
-  else
-    Result := TPath.GetFullPath(TPath.Combine(FManifestDir, APath));
+  // The one resolver: a manifest path is relative to the manifest's folder
+  // (a rooted one only normalized). A path it refuses is reported, never
+  // raised out of the packer
+  try
+    AResolved := TUtils.ResolvePath(APath, FManifestDir);
+    Result := True;
+  except
+    on E: Exception do
+    begin
+      FErrors.Add(esError, ERR_PAK_PATH, RSPakPathResolve, [APath, E.Message]);
+      AResolved := '';
+      Result := False;
+    end;
+  end;
 end;
 
-procedure TPacker.DoResolve();
+function TPacker.DoResolve(): Boolean;
 var
   LIndex: Integer;
   LSource: TPackSource;
+  LResolved: string;
 begin
+  Result := False;
   for LIndex := 0 to FSources.Count - 1 do
   begin
     LSource := FSources[LIndex];
-    LSource.SourcePath := DoResolvePath(DoExpandPlaceholders(LSource.SourcePath));
+    if not DoResolvePath(DoExpandPlaceholders(LSource.SourcePath), LResolved) then
+      Exit;
+    LSource.SourcePath := LResolved;
     FSources[LIndex] := LSource;
   end;
-  FOutput := DoResolvePath(DoExpandPlaceholders(FOutput));
+  if not DoResolvePath(DoExpandPlaceholders(FOutput), LResolved) then
+    Exit;
+  FOutput := LResolved;
   if FSign.Enabled and (FSign.SecretKeyFile <> '') then
-    FSign.SecretKeyFile := DoResolvePath(DoExpandPlaceholders(FSign.SecretKeyFile));
+  begin
+    if not DoResolvePath(DoExpandPlaceholders(FSign.SecretKeyFile), LResolved) then
+      Exit;
+    FSign.SecretKeyFile := LResolved;
+  end;
+  Result := True;
 end;
 
 function TPacker.LoadManifest(const AFilename: string): Boolean;
@@ -522,7 +553,15 @@ var
   LFlat: TPackSource;
 begin
   Result := False;
-  LFull := TPath.GetFullPath(AFilename);
+  try
+    LFull := TUtils.ResolvePath(AFilename);
+  except
+    on E: Exception do
+    begin
+      FErrors.Add(esError, ERR_PAK_PATH, RSPakPathResolve, [AFilename, E.Message]);
+      Exit;
+    end;
+  end;
   if not TFile.Exists(LFull) then
   begin
     FErrors.Add(esError, ERR_PAK_MANIFEST, RSPakManifestNotFound, [LFull]);
@@ -557,8 +596,7 @@ begin
     LFlat.IncludeGlobs := FTopInclude;
     FSources.Add(LFlat);
   end;
-  DoResolve();
-  Result := True;
+  Result := DoResolve();
 end;
 
 function TPacker.DoNormalizeGlob(const APattern: string): string;
@@ -571,11 +609,15 @@ var
   LBase: string;
 begin
   // Strict prefix strip (port of UTigerPack.GetRelativePathStrict): returns
-  // '' when AFullPath is not under ABaseDir; forward-slash separators.
-  LBase := IncludeTrailingPathDelimiter(TPath.GetFullPath(ABaseDir));
-  Result := TPath.GetFullPath(AFullPath);
+  // '' when AFullPath is not under ABaseDir; forward-slash separators. Both
+  // sides in one spelling (resolved, plain, forward slashes), so a base and a
+  // file on either side of the long-path limit still compare
+  LBase := TUtils.StripLongPathPrefix(TUtils.ResolvePath(ABaseDir)).Replace('\', '/');
+  if not LBase.EndsWith('/') then
+    LBase := LBase + '/';
+  Result := TUtils.StripLongPathPrefix(TUtils.ResolvePath(AFullPath)).Replace('\', '/');
   if Result.StartsWith(LBase, True) then
-    Result := Copy(Result, Length(LBase) + 1, MaxInt).Replace('\', '/')
+    Result := Copy(Result, Length(LBase) + 1, MaxInt)
   else
     Result := '';
 end;
@@ -585,6 +627,7 @@ var
   LRel: string;
   LFileName: string;
   LIndex: Integer;
+  LGlob: string;
   LMask: string;
 begin
   Result := False;
@@ -594,8 +637,14 @@ begin
   LFileName := TPath.GetFileName(AFullPath);
   for LIndex := 0 to High(AGlobs) do
   begin
-    LMask := DoNormalizeGlob(AGlobs[LIndex].Replace('\', '/'));
+    LGlob := AGlobs[LIndex].Replace('\', '/');
+    LMask := DoNormalizeGlob(LGlob);
     if MatchesMask(LRel, LMask) or MatchesMask(LFileName, LMask) then
+      Exit(True);
+    // '**/' is zero or more folders (user 2026-10-29): its tail also
+    // matches at the root ('**/*.log' takes 'skip.log', not only 'a/skip.log')
+    if LGlob.StartsWith(PAK_ANY_FOLDERS) and
+      MatchesMask(LRel, DoNormalizeGlob(LGlob.Substring(Length(PAK_ANY_FOLDERS)))) then
       Exit(True);
   end;
 end;
@@ -648,7 +697,7 @@ begin
   if LHead = '' then
     LStartDir := ABaseDir
   else
-    LStartDir := TPath.GetFullPath(TPath.Combine(ABaseDir, LHead));
+    LStartDir := TUtils.ResolvePath(LHead, ABaseDir);
   if not TDirectory.Exists(LStartDir) then
     Exit;
   LMask := DoNormalizeGlob(LFilePart);
@@ -694,7 +743,9 @@ begin
     Exit;
   for LEntry in FEntries do
   begin
-    if SameFileName(LEntry.FullPath, FSign.SecretKeyFile) then
+    // One path in two spellings is the same file (a listed entry and the
+    // resolved key differ in their slashes): compared as paths, never as text
+    if TUtils.SamePath(LEntry.FullPath, FSign.SecretKeyFile) then
     begin
       FErrors.Add(esFatal, ERR_PAK_SECKEY, RSPakSecKeyInArchive, [LEntry.FullPath]);
       Exit(False);

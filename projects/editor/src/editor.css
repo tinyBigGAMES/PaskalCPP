@@ -162,12 +162,13 @@ button, select {
   gap: 2px;
 }
 
-/* Vertical bars between the groups: file | build | debug | mode/target.
-   A border (not a 1px background) snaps to device pixels, so every bar
-   renders identically wherever it lands; opacity keeps them dim */
+/* Vertical bars between the groups: file | build | debug | mode/target |
+   report. A border (not a 1px background) snaps to device pixels, so every
+   bar renders identically wherever it lands; opacity keeps them dim */
 .tb-build::before,
 .tb-build::after,
-.tb-debug::after {
+.tb-debug::after,
+.tb-report::before {
   content: '';
   flex-shrink: 0;
   width: 0;
@@ -176,7 +177,8 @@ button, select {
   opacity: 0.5;
 }
 
-.tb-build::before {
+.tb-build::before,
+.tb-report::before {
   margin-right: 6px;
 }
 
@@ -518,6 +520,27 @@ button, select {
 .tree-root-close:hover {
   color: var(--pc-fg);
   background: var(--pc-bg-chrome);
+}
+
+/* A project root's badge (src/explorer.js markRoot): its kind, a small
+   outlined pill readable on the accent fill */
+.tree-root-badge {
+  margin-left: 8px;
+  padding: 0 6px;
+  border: 1px solid var(--pc-accent-fg);
+  border-radius: 8px;
+  color: var(--pc-accent-fg);
+  font-size: 10px;
+  line-height: 14px;
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+
+/* A project's output folder (built files): dimmed, it starts collapsed */
+.tree-row.output-dir > .tree-label,
+.tree-row.output-dir > .tree-chevron {
+  color: var(--pc-fg-dim);
+  opacity: 0.6;
 }
 
 .tree-row {
@@ -1009,6 +1032,125 @@ body.resizing-h, body.resizing-h * {
 }
 
 .ab-ok:focus-visible {
+  outline: 1px solid var(--pc-fg-strong);
+  outline-offset: 2px;
+}
+
+/* New Project dialog (File > New Project, src/newproject.js); hidden via
+   the global .hidden. Same backdrop and box as the About box */
+#newproject {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.np-box {
+  width: min(460px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px 16px;
+  background: var(--pc-bg-chrome);
+  border: 1px solid var(--pc-border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  color: var(--pc-fg);
+  font-family: var(--pc-font-ui);
+}
+
+.np-title {
+  color: var(--pc-fg-strong);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.np-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.np-caption {
+  color: var(--pc-fg-dim);
+  font-size: 12px;
+}
+
+.np-input {
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--pc-border);
+  border-radius: 4px;
+  background: var(--pc-bg);
+  color: var(--pc-fg);
+  font-family: var(--pc-font-ui);
+  font-size: 13px;
+  outline: none;
+}
+
+.np-input:focus {
+  border-color: var(--pc-accent);
+}
+
+.np-folder {
+  display: flex;
+  gap: 6px;
+}
+
+.np-folder > .np-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* A failure, with pcpp's own lines under it */
+.np-error {
+  margin: 0;
+  max-height: 160px;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 1px solid var(--pc-error);
+  border-radius: 4px;
+  color: var(--pc-error);
+  font-family: var(--pc-font-code);
+  font-size: 12px;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.np-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.np-button {
+  min-width: 80px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--pc-border);
+  border-radius: 4px;
+  background: var(--pc-bg-active);
+  color: var(--pc-fg);
+  font-family: var(--pc-font-ui);
+  cursor: pointer;
+}
+
+.np-button.np-primary {
+  border-color: var(--pc-accent);
+  background: var(--pc-accent);
+  color: var(--pc-accent-fg);
+}
+
+.np-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.np-button:focus-visible {
   outline: 1px solid var(--pc-fg-strong);
   outline-offset: 2px;
 }

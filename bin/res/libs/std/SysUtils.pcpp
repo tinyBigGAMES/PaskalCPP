@@ -19,9 +19,12 @@
   SysUtils.pcpp - the SysUtils unit: `import SysUtils;` turns any spelling of
   a path into one full, normalized path (ResolvePath), with the same prefixes
   the compiler's own directives take ($P: $D: $S:), and tells where the
-  running program lives (ExeDir), checks for and deletes a file
-  (FileExists, DeleteFile), creates and removes a folder (CreateDir,
-  RemoveDir), formats values into a string
+  running program lives (ExeDir) and where temporary files go (TempDir),
+  checks for, sizes, renames and deletes a file (FileExists, FileSize,
+  RenameFile, DeleteFile), reads and writes a whole file (ReadAllText,
+  WriteAllText), takes a path's name apart (ExtractFileName,
+  ChangeFileExt), creates and removes a folder (CreateDir,
+  ForceDirectories, RemoveDir), formats values into a string
   as println prints them (FormatStr), waits a given time (Delay) and ends
   the program with an exit code (Halt). A name is read bare when no other
   imported unit exports it (ResolvePath), or qualified
@@ -39,6 +42,8 @@ cpp source;
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -273,6 +278,12 @@ std::string PathResolve(const char* APath, const char* ABaseDir)
   if (LPath.empty())
     return std::string();
 
+  // $R: (the project root) is the compiler's build-time prefix only (the
+  // Delphi side's PATH_PREFIX_PROJECT): a program has no project, so it
+  // fails plainly ("") instead of naming a folder called "$R:"
+  if (PathDoHasPrefix(LPath, 'R'))
+    return std::string();
+
   // An explicit prefix, at the very start only, overrides the caller's base
   bool LExeBase = false;
   bool LCurrentBase = false;
@@ -397,6 +408,204 @@ bool PathRemoveDir(const std::string& APath)
   }
 }
 
+// A whole file's bytes into AText, as they are (no newline or code page
+// conversion); false for a folder, a missing file, one the OS refuses or
+// no memory (AText is then ""). std::ifstream on the std::filesystem path,
+// the UTF-8 text in as char8_t (PathFileExists's rule).
+bool PathReadAllText(const std::string& APath, std::string& AText)
+{
+  std::error_code LError;
+  AText.clear();
+  if (APath.empty())
+    return false;
+  try
+  {
+    const std::filesystem::path LPath(std::u8string(APath.begin(), APath.end()));
+    if (!std::filesystem::is_regular_file(LPath, LError))
+      return false;
+    std::ifstream LFile(LPath, std::ios::in | std::ios::binary);
+    if (!LFile.is_open())
+      return false;
+    std::string LText((std::istreambuf_iterator<char>(LFile)), std::istreambuf_iterator<char>());
+    if (LFile.bad())
+      return false;
+    AText.swap(LText);
+    return true;
+  }
+  catch (...)
+  {
+    AText.clear();
+    return false;
+  }
+}
+
+// AText's bytes as the whole file, as they are: a file there is replaced,
+// one missing is made (its folder must exist); false for a folder, a
+// missing folder or one the OS refuses. std::ofstream on the
+// std::filesystem path, the UTF-8 text in as char8_t.
+bool PathWriteAllText(const std::string& APath, const std::string& AText)
+{
+  std::error_code LError;
+  if (APath.empty())
+    return false;
+  try
+  {
+    const std::filesystem::path LPath(std::u8string(APath.begin(), APath.end()));
+    if (std::filesystem::is_directory(LPath, LError))
+      return false;
+    std::ofstream LFile(LPath, std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!LFile.is_open())
+      return false;
+    LFile.write(AText.data(), static_cast<std::streamsize>(AText.size()));
+    LFile.close();
+    return !LFile.fail();
+  }
+  catch (...)
+  {
+    return false;
+  }
+}
+
+// Every missing folder of the path, its parents included (Delphi's
+// ForceDirectories); true when the path is a folder afterwards (one there
+// already included), false for a file in the way or one the OS refuses
+bool PathForceDirectories(const std::string& APath)
+{
+  std::error_code LError;
+  if (APath.empty())
+    return false;
+  try
+  {
+    const std::filesystem::path LPath(std::u8string(APath.begin(), APath.end()));
+    std::filesystem::create_directories(LPath, LError);
+    return std::filesystem::is_directory(LPath, LError);
+  }
+  catch (...)
+  {
+    return false;
+  }
+}
+
+// A file to a new name (Delphi's RenameFile): false when the source is not
+// a file, the target exists already (never replaced, on both targets
+// alike: std::filesystem::rename replaces on Linux) or the OS refuses it
+bool PathRenameFile(const std::string& AOldPath, const std::string& ANewPath)
+{
+  std::error_code LError;
+  if (AOldPath.empty() || ANewPath.empty())
+    return false;
+  try
+  {
+    const std::filesystem::path LOld(std::u8string(AOldPath.begin(), AOldPath.end()));
+    const std::filesystem::path LNew(std::u8string(ANewPath.begin(), ANewPath.end()));
+    if (!std::filesystem::is_regular_file(LOld, LError))
+      return false;
+    if (std::filesystem::exists(LNew, LError) || LError)
+      return false;
+    std::filesystem::rename(LOld, LNew, LError);
+    return !LError;
+  }
+  catch (...)
+  {
+    return false;
+  }
+}
+
+// A file's size in bytes; -1 for a folder, a missing path or one the OS
+// refuses
+std::int64_t PathFileSize(const std::string& APath)
+{
+  std::error_code LError;
+  if (APath.empty())
+    return -1;
+  try
+  {
+    const std::filesystem::path LPath(std::u8string(APath.begin(), APath.end()));
+    if (!std::filesystem::is_regular_file(LPath, LError))
+      return -1;
+    const std::uintmax_t LSize = std::filesystem::file_size(LPath, LError);
+    if (LError)
+      return -1;
+    return static_cast<std::int64_t>(LSize);
+  }
+  catch (...)
+  {
+    return -1;
+  }
+}
+
+// True for a path separator: '/' on both targets, '\' on Windows too
+bool PathDoIsSeparator(const char AChar)
+{
+#ifdef _WIN32
+  return (AChar == '/') || (AChar == '\\');
+#else
+  return AChar == '/';
+#endif
+}
+
+// Where the name part of APath starts: after its last separator (a drive's
+// ':' too on Windows)
+std::size_t PathDoNameStart(const std::string& APath)
+{
+  std::size_t LIndex = APath.size();
+  while (LIndex > 0)
+  {
+    const char LChar = APath[LIndex - 1];
+    if (PathDoIsSeparator(LChar))
+      break;
+#ifdef _WIN32
+    if (LChar == ':')
+      break;
+#endif
+    --LIndex;
+  }
+  return LIndex;
+}
+
+// Delphi's ExtractFileName: the text after the last separator
+std::string PathExtractFileName(const std::string& APath)
+{
+  return APath.substr(PathDoNameStart(APath));
+}
+
+// Delphi's ChangeFileExt: the extension (the name part's last '.' on) is
+// replaced by AExt; a name with no '.' gets AExt added
+std::string PathChangeFileExt(const std::string& APath, const std::string& AExt)
+{
+  const std::size_t LStart = PathDoNameStart(APath);
+  const std::size_t LDot = APath.find_last_of('.');
+  if ((LDot == std::string::npos) || (LDot < LStart))
+    return APath + AExt;
+  return APath.substr(0, LDot) + AExt;
+}
+
+// The system's folder for temporary files (std::filesystem's
+// temp_directory_path: TMP / TEMP on Windows, TMPDIR or /tmp on Linux), in
+// ExeDir's form once resolved: no trailing separator except at a root;
+// "" when the system names none
+std::string PathTempDir()
+{
+  std::error_code LError;
+  try
+  {
+    const std::filesystem::path LDir = std::filesystem::temp_directory_path(LError);
+    if (LError)
+      return std::string();
+    const std::u8string LText = LDir.u8string();
+    std::string LPath(LText.begin(), LText.end());
+    // temp_directory_path ends in a separator on Windows; a root keeps its own
+    while ((LPath.size() > 1) && PathDoIsSeparator(LPath.back()) &&
+      !((LPath.size() == 3) && (LPath[1] == ':')))
+      LPath.pop_back();
+    return LPath;
+  }
+  catch (...)
+  {
+    return std::string();
+  }
+}
+
 // std::this_thread on both targets (at least the time asked: the OS may wake
 // the thread a little later); a wait of 0 or less returns at once
 void TimeDelay(const int AMilliseconds)
@@ -416,6 +625,10 @@ void TimeDelay(const int AMilliseconds)
 /// - `$D:` the current working directory;
 /// - `$S:` the caller's base folder, written out (the same as no prefix).
 ///
+/// `$R:` (the project root) is a build-time prefix of the compiler's own
+/// directives only: a running program has no project, so a `$R:` path
+/// gives "".
+///
 /// A rooted path is only normalized; any other is resolved against its base
 /// (no base: the current working directory). `.` and `..` are folded and
 /// repeated separators joined, as text: the disk is never touched, the path
@@ -431,7 +644,7 @@ void TimeDelay(const int AMilliseconds)
 /// To hand the result to a C routine, keep it in a variable and pass that
 /// variable's `.c_str()` while the variable lives.
 /// @param APath the path to resolve; empty (or only a prefix) gives ""
-/// @returns the full path, or "" for an empty path
+/// @returns the full path, or "" for an empty path or a `$R:` path
 /// @since 0.2
 /// @see ExeDir
 /// @example
@@ -555,6 +768,128 @@ end;
 exported routine RemoveDir(const APath: string): bool;
 begin
   return PathRemoveDir(ResolvePath(APath));
+end;
+
+/// Reads a whole file into a string, as Delphi's TFile.ReadAllText reads
+/// one, but byte for byte: no newline or code page conversion (UTF-8 text
+/// comes back as written). The path is UTF-8 and goes through
+/// `ResolvePath` first.
+/// @param APath the file to read
+/// @param AText the file's bytes ("" when the call fails)
+/// @returns true when the file was read; false when it is a folder, is
+///   missing, or the OS refuses it
+/// @example `if ReadAllText("$P:notes.txt", LText) then println("{}", LText); end;`
+/// @since 0.3
+/// @see WriteAllText
+exported routine ReadAllText(const APath: string; var AText: string): bool;
+begin
+  return PathReadAllText(ResolvePath(APath), AText);
+end;
+
+/// Writes a string as a whole file, as Delphi's TFile.WriteAllText writes
+/// one, but byte for byte (no newline or code page conversion): a file
+/// there is replaced, a missing one is made in a folder that exists. The
+/// path is UTF-8 and goes through `ResolvePath` first.
+/// @param APath the file to write
+/// @param AText the file's bytes
+/// @returns true when the file was written; false when the path is a
+///   folder, its folder is missing, or the OS refuses it
+/// @example `WriteAllText("$P:notes.txt", "hello");`
+/// @since 0.3
+/// @see ReadAllText
+exported routine WriteAllText(const APath: string; const AText: string): bool;
+begin
+  return PathWriteAllText(ResolvePath(APath), AText);
+end;
+
+/// Creates a folder and every missing folder above it, as Delphi's
+/// ForceDirectories. A folder already there is a success. The path is UTF-8
+/// and goes through `ResolvePath` first.
+/// @param APath the folder to make
+/// @returns true when the path is a folder afterwards; false when a file
+///   is in the way, the path is "" or the OS refuses it
+/// @example `ForceDirectories("$P:saves/slot1/maps");`
+/// @since 0.3
+/// @see CreateDir
+exported routine ForceDirectories(const APath: string): bool;
+begin
+  return PathForceDirectories(ResolvePath(APath));
+end;
+
+/// Gives a file a new name or moves it, as Delphi's RenameFile: a file at
+/// the new name is never replaced (delete it first), on both targets alike.
+/// Both paths are UTF-8 and go through `ResolvePath` first.
+/// @param AOldPath the file to rename
+/// @param ANewPath its new path (its folder must exist)
+/// @returns true when the file was renamed; false when AOldPath is not a
+///   file, ANewPath exists already, its folder is missing or the OS refuses
+///   it (a move to another drive may be refused)
+/// @example `if RenameFile("$P:save.tmp", "$P:save.dat") then ... end;`
+/// @since 0.3
+/// @see DeleteFile
+exported routine RenameFile(const AOldPath: string; const ANewPath: string): bool;
+begin
+  return PathRenameFile(ResolvePath(AOldPath), ResolvePath(ANewPath));
+end;
+
+/// The size of a file in bytes, read from the file system without opening
+/// it. The path is UTF-8 and goes through `ResolvePath` first.
+/// @param APath the file
+/// @returns its size, or -1 when it is a folder, is missing or the OS
+///   refuses it
+/// @example `if FileSize("$P:model.gguf") > 2 * Gigabyte then ... end;`
+/// @since 0.3
+/// @see FileExists
+exported routine FileSize(const APath: string): int64;
+begin
+  return PathFileSize(ResolvePath(APath));
+end;
+
+/// The name part of a path, as Delphi's ExtractFileName: the text after
+/// its last separator (`/` on both targets; `\` and a drive's `:` on
+/// Windows too). The path is taken as text (not resolved, the disk never
+/// touched).
+/// @param APath the path
+/// @returns the name, "" when the path ends in a separator
+/// @example `ExtractFileName("models/tiny.gguf")   // "tiny.gguf"`
+/// @since 0.3
+/// @see ChangeFileExt
+exported routine ExtractFileName(const APath: string): string;
+begin
+  return PathExtractFileName(APath);
+end;
+
+/// A path with its extension changed, as Delphi's ChangeFileExt: the name
+/// part's text from its last `.` on is replaced by AExt (a name with no `.`
+/// gets AExt added). The path is taken as text, separators as
+/// ExtractFileName reads them.
+/// @param APath the path
+/// @param AExt the new extension with its dot (".bak"), or "" to drop it
+/// @returns the changed path
+/// @example `ChangeFileExt("tiny.gguf", "")   // "tiny"`
+/// @since 0.3
+/// @see ExtractFileName
+exported routine ChangeFileExt(const APath: string; const AExt: string): string;
+begin
+  return PathChangeFileExt(APath, AExt);
+end;
+
+/// The system's folder for temporary files (TMP / TEMP on Windows, TMPDIR
+/// or /tmp on Linux), in the form `ResolvePath` returns, with no trailing
+/// separator (except at a root).
+/// @returns the folder, or "" when the system names none
+/// @example `LCache := TempDir() + "/myapp";`
+/// @since 0.3
+/// @see ExeDir
+exported routine TempDir(): string;
+var
+  LDir: string;
+begin
+  LDir := PathTempDir();
+  if LDir = "" then
+    return "";
+  end;
+  return ResolvePath(LDir);
 end;
 
 /// Ends the program at once with the given exit code (Delphi's Halt):

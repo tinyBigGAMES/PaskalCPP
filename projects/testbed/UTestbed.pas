@@ -33,7 +33,9 @@ uses
   UTestCase.LSP,
   UTestCase.Debug,
   UTestCase.Compiler,
-  UTestCase.Lex;
+  UTestCase.Lex,
+  UTestCase.Project,
+  UTestCase.Vendor;
 
 procedure RunTestbed();
 var
@@ -58,6 +60,8 @@ begin
       LSuite.RegisterCase(TPCDebugTests);
       LSuite.RegisterCase(TPCCompilerTests);
       LSuite.RegisterCase(TPCLexTests);
+      LSuite.RegisterCase(TPCProjectTests);
+      LSuite.RegisterCase(TPCVendorTests);
 
       ExitCode := LSuite.RunCommandLine();
     finally

@@ -21,16 +21,22 @@
 
   The frame window (sfml_ext's sfx::RenderWindow, raylib style):
   InitFrameWindow opens raylib's window at a base (virtual) size x the
-  monitor's scale (DPI / 96; Windows the window's monitor, Linux X11's
-  Xft.dpi, 96 unset: one rule on every target), centred, resizable, and
-  follows a DPI change. BeginFrame / EndFrame (inside BeginDrawing) draw in
-  base units through a letterboxed Camera2D, the aspect kept on resize,
-  maximize and ToggleFrameFullscreen, bars outside it; BeginFrameMode2D /
+  frame's zoom (SetFrameZoom) x the monitor's scale (DPI / 96; Windows the
+  window's monitor, Linux X11's Xft.dpi, 96 unset: one rule on every
+  target), centred, resizable, and follows a DPI change. BeginFrame /
+  EndFrame (inside BeginDrawing) draw in base units through a letterboxed
+  Camera2D, the aspect kept on resize, maximize and ToggleFrameFullscreen,
+  bars outside it; BeginFrameMode2D /
   BeginFrameMode3D draw the program's own Camera2D / Camera3D through the
   letterbox (the 3D scene at the base size's aspect); RestoreFrameClip turns
   the frame's clip on again for code that turned it off (rlimgui_ext's ImGui);
-  GetFrameMousePosition is the mouse in base units. GetLetterboxRect,
-  GetScaledFrameSize and GetFramePoint are its rules, usable with no window.
+  GetFrameMousePosition is the mouse in base units. SetFrameIntegerScale
+  keeps the frame at a whole multiple of its base size (crisp pixel art: every
+  base pixel the same number of screen pixels), bars around it;
+  GetFrameLetterbox is the frame's rectangle in the window now, under
+  whichever rule is on (what code beside the frame maps through, Raven's UI
+  included). GetLetterboxRect, GetIntegerLetterboxRect, GetScaledFrameSize and
+  GetFramePoint are its rules, usable with no window.
 
   Every raylib routine that loads data from a file name has a form taking a
   CustomIO IO in its place, `<Name>IO(...)`: pass the IO CreateZipFileIO
@@ -1276,6 +1282,10 @@ struct RaylibExtDoFrame
   // FLAG_WINDOW_HIGHDPI was set too: raylib sized the window and maps the
   // mouse itself, so the frame window never resizes for the DPI (no stacking)
   bool RaylibScales = false;
+  // SetFrameIntegerScale: the letterbox a whole multiple of the base size
+  bool IntegerScale = false;
+  // SetFrameZoom: the window's normal size is base x Zoom x the DPI scale
+  float Zoom = 1.0f;
   Color FrameColor = WHITE;
   Color BarColor = BLACK;
   Camera2D Camera{};
@@ -1293,16 +1303,32 @@ RaylibExtDoFrame& RaylibExtDoFrameState()
   return *LState;
 }
 
-// AFrame back to "no frame window", the frame and bar colours (the
-// program's settings) kept
+// AFrame back to "no frame window", the frame and bar colours, the
+// integer-scale rule and the zoom (the program's settings) kept
 void RaylibExtDoFrameReset(RaylibExtDoFrame& AFrame)
 {
   const Color LFrameColor = AFrame.FrameColor;
   const Color LBarColor = AFrame.BarColor;
+  const bool LIntegerScale = AFrame.IntegerScale;
+  const float LZoom = AFrame.Zoom;
 
   AFrame = RaylibExtDoFrame();
   AFrame.FrameColor = LFrameColor;
   AFrame.BarColor = LBarColor;
+  AFrame.IntegerScale = LIntegerScale;
+  AFrame.Zoom = LZoom;
+}
+
+// AFrame's base size x its zoom, each side rounded: the window's normal
+// size at 96 DPI (the DPI scale goes on top, RaylibExtDoScaledSize)
+int RaylibExtDoFrameZoomedWidth(const RaylibExtDoFrame& AFrame)
+{
+  return static_cast<int>(std::lround(static_cast<float>(AFrame.BaseWidth) * AFrame.Zoom));
+}
+
+int RaylibExtDoFrameZoomedHeight(const RaylibExtDoFrame& AFrame)
+{
+  return static_cast<int>(std::lround(static_cast<float>(AFrame.BaseHeight) * AFrame.Zoom));
 }
 
 // The frame as it stands, read by every frame routine. Its close is seen
@@ -1472,6 +1498,51 @@ Rectangle RaylibExtDoLetterbox(const int AWindowWidth, const int AWindowHeight, 
   return LRect;
 }
 
+// The rectangle (window units) of the largest WHOLE multiple of ABase that
+// fits into AWindow, centred on whole pixels, bars around it. The multiple
+// is taken in framebuffer pixels (APixelsPerUnit of them per window unit),
+// so each base pixel covers the same square of real pixels on a scaled
+// display too. A window smaller than one base size gets the fit rule
+// instead (never an empty frame); a size of 0 gives the whole window.
+Rectangle RaylibExtDoIntegerLetterbox(const int AWindowWidth, const int AWindowHeight, const int ABaseWidth,
+  const int ABaseHeight, const float APixelsPerUnit)
+{
+  if ((AWindowWidth <= 0) || (AWindowHeight <= 0) || (ABaseWidth <= 0) || (ABaseHeight <= 0) ||
+    (APixelsPerUnit <= 0.0f))
+    return RaylibExtDoLetterbox(AWindowWidth, AWindowHeight, ABaseWidth, ABaseHeight);
+
+  const int LPixelWidth = static_cast<int>(std::lround(static_cast<float>(AWindowWidth) * APixelsPerUnit));
+  const int LPixelHeight = static_cast<int>(std::lround(static_cast<float>(AWindowHeight) * APixelsPerUnit));
+  const int LMultiple = std::min(LPixelWidth / ABaseWidth, LPixelHeight / ABaseHeight);
+  if (LMultiple < 1)
+    return RaylibExtDoLetterbox(AWindowWidth, AWindowHeight, ABaseWidth, ABaseHeight);
+
+  // Whole pixels throughout: the size is exact, the centring rounds down
+  const int LWidth = ABaseWidth * LMultiple;
+  const int LHeight = ABaseHeight * LMultiple;
+  const int LX = (LPixelWidth - LWidth) / 2;
+  const int LY = (LPixelHeight - LHeight) / 2;
+  return Rectangle{static_cast<float>(LX) / APixelsPerUnit, static_cast<float>(LY) / APixelsPerUnit,
+    static_cast<float>(LWidth) / APixelsPerUnit, static_cast<float>(LHeight) / APixelsPerUnit};
+}
+
+// AFrame's letterbox for the window as it is now, under its rule (fit, or
+// a whole multiple): the one rule BeginFrame, the mouse and GetFrameLetterbox
+// share, so nothing beside the frame re-derives it
+Rectangle RaylibExtDoFrameLetterboxNow(const RaylibExtDoFrame& AFrame)
+{
+  if (!AFrame.IntegerScale)
+    return RaylibExtDoLetterbox(GetScreenWidth(), GetScreenHeight(), AFrame.BaseWidth, AFrame.BaseHeight);
+
+  // Framebuffer pixels per window unit: more than 1 when raylib scales the
+  // window itself (FLAG_WINDOW_HIGHDPI)
+  float LPixelsPerUnit = 1.0f;
+  if (GetScreenWidth() > 0)
+    LPixelsPerUnit = static_cast<float>(GetRenderWidth()) / static_cast<float>(GetScreenWidth());
+  return RaylibExtDoIntegerLetterbox(GetScreenWidth(), GetScreenHeight(), AFrame.BaseWidth, AFrame.BaseHeight,
+    LPixelsPerUnit);
+}
+
 // A window point (window units) in frame units through the letterbox
 // ALetterbox of a ABase frame, clamped to the frame and rounded
 Vector2 RaylibExtDoFramePoint(const Vector2 APoint, const Rectangle ALetterbox, const int ABaseWidth,
@@ -1485,9 +1556,9 @@ Vector2 RaylibExtDoFramePoint(const Vector2 APoint, const Rectangle ALetterbox, 
     static_cast<float>(std::lround(std::clamp(LY, 0.0f, static_cast<float>(ABaseHeight - 1))))};
 }
 
-// The window at the base size x the scale (a window at its normal size
-// only: fullscreen, borderless, maximized and minimized are the system's),
-// centred on its monitor's work area when ACenter
+// The window at the base size x the zoom x the scale (a window at its
+// normal size only: fullscreen, borderless, maximized and minimized are the
+// system's), centred on its monitor's work area when ACenter
 void RaylibExtDoFrameApplyScale(const bool ACenter)
 {
   RaylibExtDoFrame& LFrame = RaylibExtDoFrameLive();
@@ -1500,7 +1571,8 @@ void RaylibExtDoFrameApplyScale(const bool ACenter)
   if (LFrame.RaylibScales || IsWindowFullscreen() || IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE) ||
     IsWindowMaximized() || IsWindowMinimized())
     return;
-  const Vector2 LSize = RaylibExtDoScaledSize(LFrame.BaseWidth, LFrame.BaseHeight, LFrame.Dpi);
+  const Vector2 LSize = RaylibExtDoScaledSize(RaylibExtDoFrameZoomedWidth(LFrame),
+    RaylibExtDoFrameZoomedHeight(LFrame), LFrame.Dpi);
   SetWindowSize(static_cast<int>(LSize.x), static_cast<int>(LSize.y));
   if (!ACenter)
     return;
@@ -1529,15 +1601,21 @@ bool RaylibExtDoFrameInit(const int ABaseWidth, const int ABaseHeight, const cha
   // A frame has a size; one window per program (raylib's rule)
   if ((ABaseWidth <= 0) || (ABaseHeight <= 0) || IsWindowReady())
     return false;
+  LFrame.BaseWidth = ABaseWidth;
+  LFrame.BaseHeight = ABaseHeight;
+  // At the zoomed size (raylib scales it on top itself with
+  // FLAG_WINDOW_HIGHDPI; otherwise RaylibExtDoFrameApplyScale does below)
   SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-  InitWindow(ABaseWidth, ABaseHeight, ATitle);
+  InitWindow(RaylibExtDoFrameZoomedWidth(LFrame), RaylibExtDoFrameZoomedHeight(LFrame), ATitle);
   if (!IsWindowReady())
+  {
+    LFrame.BaseWidth = 0;
+    LFrame.BaseHeight = 0;
     return false;
+  }
 
   LFrame.Open = true;
   LFrame.NativeWindow = RaylibExtDoNativeWindow();
-  LFrame.BaseWidth = ABaseWidth;
-  LFrame.BaseHeight = ABaseHeight;
   LFrame.RaylibScales = IsWindowState(FLAG_WINDOW_HIGHDPI);
   LFrame.Dpi = RaylibExtDoQueryDpi();
   LFrame.LastDpiCheck = GetTime();
@@ -1590,8 +1668,7 @@ void RaylibExtDoFrameBegin()
   RaylibExtDoFrameFollowDpi();
 
   // The letterbox follows the window's size as it is now (a resize needs no call)
-  LFrame.Letterbox = RaylibExtDoLetterbox(GetScreenWidth(), GetScreenHeight(), LFrame.BaseWidth,
-    LFrame.BaseHeight);
+  LFrame.Letterbox = RaylibExtDoFrameLetterboxNow(LFrame);
   LFrame.Camera.offset = Vector2{LFrame.Letterbox.x, LFrame.Letterbox.y};
   LFrame.Camera.target = Vector2{0.0f, 0.0f};
   LFrame.Camera.rotation = 0.0f;
@@ -1765,6 +1842,44 @@ void RaylibExtDoFrameSetBarColor(const Color AColor)
 Color RaylibExtDoFrameBarColor()
 {
   return RaylibExtDoFrameLive().BarColor;
+}
+
+void RaylibExtDoFrameSetIntegerScale(const bool AEnabled)
+{
+  RaylibExtDoFrameLive().IntegerScale = AEnabled;
+}
+
+bool RaylibExtDoFrameIntegerScale()
+{
+  return RaylibExtDoFrameLive().IntegerScale;
+}
+
+// A zoom of 0 or less (or not a number) is no zoom: 1. With the frame open
+// the window takes its new normal size at once (where it has one)
+void RaylibExtDoFrameSetZoom(const float AZoom)
+{
+  RaylibExtDoFrame& LFrame = RaylibExtDoFrameLive();
+  if (AZoom > 0.0f)
+    LFrame.Zoom = AZoom;
+  else
+    LFrame.Zoom = 1.0f;
+  if (LFrame.Open)
+    RaylibExtDoFrameApplyScale(false);
+}
+
+float RaylibExtDoFrameZoom()
+{
+  return RaylibExtDoFrameLive().Zoom;
+}
+
+// The frame's letterbox for the window now (its own rule); empty with no
+// frame window
+Rectangle RaylibExtDoFrameLetterbox()
+{
+  const RaylibExtDoFrame& LFrame = RaylibExtDoFrameLive();
+  if (!LFrame.Open)
+    return Rectangle{0.0f, 0.0f, 0.0f, 0.0f};
+  return RaylibExtDoFrameLetterboxNow(LFrame);
 }
 
 void RaylibExtDoFrameToggleFullscreen()
@@ -2686,16 +2801,19 @@ end;
 
 /// Opens the frame window: raylib's window at a base (virtual) size the
 /// program draws in, whatever the window's real size. It opens at the base
-/// size x the monitor's scale (DPI / 96), centred on the monitor's work area,
-/// resizable, and follows a DPI change (a move to another monitor). The DPI
+/// size x the frame's zoom (SetFrameZoom, 1 by default) x the monitor's
+/// scale (DPI / 96), centred on the monitor's work area, resizable, and
+/// follows a DPI change (a move to another monitor). The DPI
 /// is the OS's, the same rule on every target: Windows the window's monitor,
 /// Linux X11's Xft.dpi (96 when the desktop sets none). Draw between
 /// BeginFrame and EndFrame in base units; on resize, maximize or fullscreen
-/// the frame is scaled with its aspect kept, bars outside it. SetConfigFlags
+/// the frame is scaled with its aspect kept (or by whole multiples,
+/// SetFrameIntegerScale), bars outside it. SetConfigFlags
 /// before it still applies (vsync, MSAA, ...); FLAG_WINDOW_HIGHDPI is not
 /// needed, and when set raylib's own scaling is used instead (never both).
 /// CloseWindow closes the frame too (GetFrameWidth 0 again, the frame and
-/// bar colours kept), and a new frame window may then be opened.
+/// bar colours, the integer scale and the zoom kept), and a new frame window
+/// may then be opened.
 /// @param ABaseWidth the frame's width in base units (more than 0)
 /// @param ABaseHeight the frame's height in base units (more than 0)
 /// @param ATitle the window's title
@@ -2911,6 +3029,84 @@ begin
   return RaylibExtDoFrameBarColor();
 end;
 
+/// Turns integer scaling of the frame on or off (off by default). On, the
+/// frame is drawn at the largest WHOLE multiple of its base size that fits
+/// the window (GetIntegerLetterboxRect's rule, taken in real framebuffer
+/// pixels), centred, bars around it: every base pixel covers the same
+/// square of screen pixels, so pixel art stays crisp at any window size and
+/// in fullscreen. A window smaller than the base size falls back to the fit
+/// rule so the frame never vanishes. Off, the frame fills the window at its
+/// aspect (GetLetterboxRect's rule). It may be set before InitFrameWindow
+/// and holds until changed; BeginFrame, GetFrameMousePosition,
+/// GetFrameLetterbox and Raven's UI (raven_raylib) all follow it at once.
+/// @param AEnabled true for whole multiples, false for the fit rule
+/// @example `SetFrameIntegerScale(true); InitFrameWindow(320, 180, "Game");`
+/// @see GetFrameLetterbox
+/// @see GetIntegerLetterboxRect
+/// @since 0.3
+exported routine SetFrameIntegerScale(const AEnabled: bool);
+begin
+  RaylibExtDoFrameSetIntegerScale(AEnabled);
+end;
+
+/// Whether the frame is integer scaled (SetFrameIntegerScale).
+/// @returns true for whole multiples of the base size, false for the fit rule
+/// @example `if IsFrameIntegerScale() then ... end;`
+/// @see SetFrameIntegerScale
+/// @since 0.3
+exported routine IsFrameIntegerScale(): bool;
+begin
+  return RaylibExtDoFrameIntegerScale();
+end;
+
+/// Sets the frame's zoom (1 by default): the window's normal size becomes
+/// the base size x the zoom x the monitor's scale, so a small base size (a
+/// 320 x 180 pixel-art frame) opens at a size worth playing at (zoom 4:
+/// 1280 x 720 at 96 DPI) and returns to it on a DPI change. The base size,
+/// the frame's units and everything drawn in them stay as they are; only
+/// the window is bigger. Set it before InitFrameWindow for the first
+/// window; with the frame open the window takes its new size at once
+/// (unless fullscreen, borderless, maximized or minimized). It holds until
+/// changed, over a close too.
+/// @param AZoom the zoom; 0 or less is taken as 1
+/// @example `SetFrameZoom(4.0f); InitFrameWindow(320, 180, "Game");`
+/// @see InitFrameWindow
+/// @see GetFrameZoom
+/// @since 0.3
+exported routine SetFrameZoom(const AZoom: float32);
+begin
+  RaylibExtDoFrameSetZoom(AZoom);
+end;
+
+/// The frame's zoom (SetFrameZoom).
+/// @returns the zoom, 1 unless set
+/// @example `LZoom := GetFrameZoom();`
+/// @see SetFrameZoom
+/// @since 0.3
+exported routine GetFrameZoom(): float32;
+begin
+  return RaylibExtDoFrameZoom();
+end;
+
+/// The frame's rectangle in the window right now, in window units, under
+/// the frame's own rule (fit, or a whole multiple with
+/// SetFrameIntegerScale): where BeginFrame draws the frame this frame. Code
+/// that maps between the window and the frame outside BeginFrame / EndFrame
+/// (a UI drawn over the game, a post-process blit, mouse picking) reads it
+/// here rather than working the rule out itself, so it never drifts from
+/// the frame. It follows the window's size as it is now (a resize needs no
+/// call).
+/// @returns the frame's rectangle in the window; an empty rectangle (all 0)
+///   with no frame window
+/// @example `LBox := GetFrameLetterbox(); LZoom := LBox.width / float32(GetFrameWidth());`
+/// @see SetFrameIntegerScale
+/// @see BeginFrame
+/// @since 0.3
+exported routine GetFrameLetterbox(): Rectangle;
+begin
+  return RaylibExtDoFrameLetterbox();
+end;
+
 /// Toggles fullscreen: a borderless window over the whole monitor it is on
 /// (the context kept); toggled back, the window returns to its place and
 /// size. The frame keeps its aspect either way. Does nothing with no frame
@@ -2937,6 +3133,26 @@ end;
 exported routine GetLetterboxRect(const AWindowWidth: int32; const AWindowHeight: int32; const ABaseWidth: int32; const ABaseHeight: int32): Rectangle;
 begin
   return RaylibExtDoLetterbox(AWindowWidth, AWindowHeight, ABaseWidth, ABaseHeight);
+end;
+
+/// The integer letterbox rule itself, for any size (no window needed): the
+/// rectangle, in window units (taken as pixels), of the largest WHOLE
+/// multiple of the base size that fits the window, centred on whole pixels
+/// (the left / top bar rounds down), bars around it. A window smaller than
+/// the base size gets GetLetterboxRect's fit rule instead; a size of 0 or
+/// less, the whole window. The frame uses it with SetFrameIntegerScale on.
+/// @param AWindowWidth the window's width
+/// @param AWindowHeight the window's height
+/// @param ABaseWidth the frame's base width
+/// @param ABaseHeight the frame's base height
+/// @returns the frame's rectangle in the window
+/// @example `LBox := GetIntegerLetterboxRect(1366, 768, 320, 180); // 4x: 1280x720 at (43, 24)`
+/// @see GetLetterboxRect
+/// @see SetFrameIntegerScale
+/// @since 0.3
+exported routine GetIntegerLetterboxRect(const AWindowWidth: int32; const AWindowHeight: int32; const ABaseWidth: int32; const ABaseHeight: int32): Rectangle;
+begin
+  return RaylibExtDoIntegerLetterbox(AWindowWidth, AWindowHeight, ABaseWidth, ABaseHeight, 1.0f);
 end;
 
 /// The DPI rule itself (no window needed): the window size InitFrameWindow

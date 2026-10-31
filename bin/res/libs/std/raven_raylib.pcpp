@@ -825,8 +825,9 @@ begin
 end;
 
 // Inside the frame window: the frame's base size in base units, drawn
-// through its letterbox (the window's size now, raylib_ext's rule), text at
-// the letterbox's real pixel density, the mouse in base units
+// through its letterbox (GetFrameLetterbox: the window's size now under the
+// frame's own rule, fit or integer scale, so the UI never drifts off the
+// frame), text at the letterbox's real pixel density, the mouse in base units
 routine RavenRaylibDoFrameLayout(): RavenRaylibDoLayout;
 var
   LResult: RavenRaylibDoLayout;
@@ -836,7 +837,7 @@ var
 begin
   LResult.Width := GetFrameWidth();
   LResult.Height := GetFrameHeight();
-  LBox := GetLetterboxRect(GetScreenWidth(), GetScreenHeight(), LResult.Width, LResult.Height);
+  LBox := GetFrameLetterbox();
   LZoom := LBox.width / float32(LResult.Width);
   // A minimized window has an empty letterbox: the last real density is
   // as good as any, 1 is never wrong

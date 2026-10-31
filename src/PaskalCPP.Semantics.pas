@@ -428,6 +428,8 @@ const
   PC_ERR_SEM_431 = 'SM0431';   // several declared operators take the operands alike (O11)
   { PC_ERR_SEM_432 }
   PC_ERR_SEM_432 = 'SM0432';   // a method named as a value (O13, F-A5a)
+  { PC_ERR_SEM_433 }
+  PC_ERR_SEM_433 = 'SM0433';   // ProjectPassword() outside a project build (PLAN-PROJECTS atom 6)
   { PC_ERR_SEM_500 }
   PC_ERR_SEM_500 = 'SM0500';   // PRINT: a format string that is not a string literal (clang's check, the Compiler reports; PLAN-VENDOR 1e)
   { PC_ERR_SEM_502 }
@@ -14352,6 +14354,11 @@ begin
   // (statements.md :152-153): an except list on the context stack
   if ((ACall.IntrinsicKind = ikExcCode) or (ACall.IntrinsicKind = ikExcMsg)) and not DoInFlow(fwExcept) then
     DoError(ACall, PC_ERR_SEM_615, RSSemStmtExcOutside, [DoCalleeText(ACall)]);
+  // PLAN-PROJECTS atom 6: ProjectPassword() is project.toml's password, so
+  // only a project build has one (TPCAst.ProjectSecret, the Compiler's); the
+  // call keeps its string type, nothing cascades
+  if (ACall.IntrinsicKind = ikProjectPassword) and not FAst.ProjectSecret.InProject then
+    DoError(ACall, PC_ERR_SEM_433, RSSemCallNoProject, [DoCalleeText(ACall)]);
   // Of the intrinsics only size gets a TypeArg: the parser makes one for the
   // name size alone (TPCParser.DoTypeArgSlot)
   if ACall.IntrinsicKind = ikSize then

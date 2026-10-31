@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dir_addmodulepath_err_project.pcpp - Directive: a $R: path in a build with no project
+
+  Break step of dir_addmodulepath: $R: names the project root (the folder
+  holding project.toml), and this file has no project.toml above it, so the
+  path names nothing. Every path directive resolves through one routine, so
+  this row stands for all of them.
+*******************************************************************************/
+
+module exe dir_addmodulepath_err_project;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$R:src"; // ERROR PR0065@16: has no project
+
+begin
+end.

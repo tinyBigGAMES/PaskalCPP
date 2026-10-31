@@ -1,0 +1,62 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  LlamaChat.pcpp - llama.cpp example (import llama_ext): a console chat in a
+  few lines. The model is loaded straight from bin\assets.zip (entry
+  res/assets/models/stories260K.gguf, password PaskalCPP) with
+  LoadLlamaModelZip, on the GPU through Vulkan when one is there, else on
+  the CPU. Each line typed is one turn of the chat; the chat keeps the
+  history, so later turns see the earlier ones. An empty line or the end of
+  input quits. stories260K is a tiny story model: expect short tales, not
+  answers.
+==============================================================================*/
+
+module exe LlamaChat;
+
+import
+  llama_ext,
+  Console;
+
+var
+  LModel: LlamaModel;
+  LChat: LlamaChat;
+  LLine: string;
+  LReply: string;
+
+begin
+  if not LoadLlamaModelZip("$P:../../assets.zip", "res/assets/models/stories260K.gguf", "PaskalCPP", LModel) then
+    println("cannot load the model: {}", LModel.ErrorMessage);
+    return;
+  end;
+  if not CreateLlamaChat(LModel, "You are a friendly storyteller.", LChat) then
+    println("cannot start the chat: {}", LChat.ErrorMessage);
+    UnloadLlamaModel(LModel);
+    return;
+  end;
+
+  println("Chat with the model; an empty line or the end of input quits.");
+  WriteText("> ");
+  while ReadLn(LLine) and (len(LLine) > 0) do
+    if SayLlamaChat(LChat, LLine, LReply) then
+      println("{}", LReply);
+    else
+      println("error: {}", LChat.ErrorMessage);
+    end;
+    WriteText("> ");
+  end;
+
+  FreeLlamaChat(LChat);
+  UnloadLlamaModel(LModel);
+end.

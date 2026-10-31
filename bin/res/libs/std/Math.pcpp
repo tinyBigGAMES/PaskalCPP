@@ -2201,4 +2201,77 @@ begin
   return LResult;
 end;
 
+// The cosine from a dot product and the two squared norms: 0 when either
+// vector is all zeros (it points nowhere, so it is like nothing), clamped
+// to -1 .. 1 (rounding can step just past them)
+routine MathDoCosine(const ADot: float64; const ANormA: float64; const ANormB: float64): float64;
+var
+  LCosine: float64;
+begin
+  if (ANormA = 0.0) or (ANormB = 0.0) then
+    return 0.0;
+  end;
+  LCosine := ADot / (std::sqrt(ANormA) * std::sqrt(ANormB));
+  return std::clamp(LCosine, -1.0, 1.0);
+end;
+
+/// How alike two vectors point: the cosine of the angle between them, 1
+/// for the same direction, 0 at right angles, -1 for opposite ones; their
+/// lengths do not count. Two text embeddings (EmbedLlama) are alike as
+/// their texts' meanings are. A vector of zeros (or two empty ones) gives 0.
+/// The sums run in float64.
+/// @param AFirst the first vector
+/// @param ASecond the second vector, as long as AFirst
+/// @returns the cosine, -1 to 1
+/// @raises EXC_SOFTWARE (1) when the vectors differ in length
+/// @example `LScore := CosineSimilarity(LEmbeddingA, LEmbeddingB);`
+/// @since 0.3
+exported routine CosineSimilarity(const AFirst: array of float32; const ASecond: array of float32): float64;
+var
+  LIndex: int64;
+  LDot: float64;
+  LNormFirst: float64;
+  LNormSecond: float64;
+begin
+  if len(AFirst) <> len(ASecond) then
+    raisecode(::pcpp::EXC_SOFTWARE, "CosineSimilarity: the vectors differ in length");
+  end;
+  LDot := 0.0;
+  LNormFirst := 0.0;
+  LNormSecond := 0.0;
+  for LIndex := 0 to int64(len(AFirst)) - 1 do
+    LDot := LDot + float64(AFirst[LIndex]) * float64(ASecond[LIndex]);
+    LNormFirst := LNormFirst + float64(AFirst[LIndex]) * float64(AFirst[LIndex]);
+    LNormSecond := LNormSecond + float64(ASecond[LIndex]) * float64(ASecond[LIndex]);
+  end;
+  return MathDoCosine(LDot, LNormFirst, LNormSecond);
+end;
+
+/// CosineSimilarity for float64 vectors.
+/// @param AFirst the first vector
+/// @param ASecond the second vector, as long as AFirst
+/// @returns the cosine, -1 to 1
+/// @raises EXC_SOFTWARE (1) when the vectors differ in length
+/// @since 0.3
+exported routine CosineSimilarity(const AFirst: array of float64; const ASecond: array of float64): float64;
+var
+  LIndex: int64;
+  LDot: float64;
+  LNormFirst: float64;
+  LNormSecond: float64;
+begin
+  if len(AFirst) <> len(ASecond) then
+    raisecode(::pcpp::EXC_SOFTWARE, "CosineSimilarity: the vectors differ in length");
+  end;
+  LDot := 0.0;
+  LNormFirst := 0.0;
+  LNormSecond := 0.0;
+  for LIndex := 0 to int64(len(AFirst)) - 1 do
+    LDot := LDot + AFirst[LIndex] * ASecond[LIndex];
+    LNormFirst := LNormFirst + AFirst[LIndex] * AFirst[LIndex];
+    LNormSecond := LNormSecond + ASecond[LIndex] * ASecond[LIndex];
+  end;
+  return MathDoCosine(LDot, LNormFirst, LNormSecond);
+end;
+
 end.

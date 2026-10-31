@@ -1,0 +1,179 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_sysutils_files.pcpp - Std library compliance: SysUtils' file and
+  folder routines (res\libs\std\SysUtils.pcpp)
+
+  ForceDirectories makes a folder and every missing one above it (one there
+  already is a success; a file in the way and "" are refused). FileSize
+  gives a file's bytes (0 for an empty file; -1 for a folder, a missing
+  file, ""). RenameFile gives a file its new name and never replaces a file
+  there (both are kept then); a missing file, a folder, a missing target
+  folder and "" are refused. ExtractFileName and ChangeFileExt work on the
+  text: the name after the last separator ("/" on both targets; "\" and a
+  drive's ":" on Windows too), the extension from the name's last "."
+  replaced or added. TempDir is an existing folder in ResolvePath's form
+  with no trailing separator. The scratch folder in repo\bin\output is
+  removed again ("cleaned"). Each row prints "ok <case>", or "FAIL <case>"
+  with what came back and what the rule says.
+*******************************************************************************/
+
+module exe std_sysutils_files;
+
+/*
+  @@test
+    kind run
+    expect
+    | ok   force
+    | ok   force again
+    | ok   force made
+    | ok   force file made
+    | ok   force on file
+    | ok   force below file
+    | ok   force empty
+    | ok   size
+    | ok   size empty file
+    | ok   size folder
+    | ok   size missing
+    | ok   size empty path
+    | ok   rename
+    | ok   rename old gone
+    | ok   rename new there
+    | ok   rename no replace
+    | ok   rename target kept
+    | ok   rename source kept
+    | ok   rename missing
+    | ok   rename folder
+    | ok   rename missing folder
+    | ok   rename empty
+    | ok   rename empty target
+    | ok   cleaned
+    | ok   name
+    | ok   name bare
+    | ok   name trailing
+    | ok   name empty
+    | ok   name backslash
+    | ok   name drive
+    | ok   ext drop
+    | ok   ext change
+    | ok   ext last dot
+    | ok   ext none
+    | ok   ext dot in folder
+    | ok   ext empty
+    | ok   temp
+    | ok   temp resolved
+    | ok   temp no trailing
+    | ok   temp is folder
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  SysUtils;
+
+routine Check(const AName: string; const AGot: string; const AWant: string);
+begin
+  if AGot = AWant then
+    println("ok   {}", AName);
+  else
+    println("FAIL {}: got [{}] want [{}]", AName, AGot, AWant);
+  end;
+end;
+
+routine CheckBool(const AName: string; const AGot: bool; const AWant: bool);
+begin
+  if AGot = AWant then
+    println("ok   {}", AName);
+  else
+    println("FAIL {}: got [{}] want [{}]", AName, AGot, AWant);
+  end;
+end;
+
+var
+  LDir: string;
+  LFile: string;
+  LMoved: string;
+  LBack: string;
+  LTemp: string;
+begin
+  // ForceDirectories on a folder in repo\bin\output, removed at the end:
+  // every missing level made, one there already a success, a file in the
+  // way refused
+  LDir := "$P:../std_sysutils_files_dir";
+  LFile := LDir + "/f.txt";
+  CheckBool("force", ForceDirectories(LDir + "/a/b"), true);
+  CheckBool("force again", ForceDirectories(LDir + "/a/b"), true);
+  CheckBool("force made", CreateDir(LDir + "/a/b/c"), true);
+  RemoveDir(LDir + "/a/b/c");
+  CheckBool("force file made", WriteAllText(LFile, "hello"), true);
+  CheckBool("force on file", ForceDirectories(LFile), false);
+  CheckBool("force below file", ForceDirectories(LFile + "/sub"), false);
+  CheckBool("force empty", ForceDirectories(""), false);
+
+  // FileSize: a file's bytes; -1 for a folder, a missing file, ""
+  CheckBool("size", FileSize(LFile) = 5, true);
+  WriteAllText(LFile, "");
+  CheckBool("size empty file", FileSize(LFile) = 0, true);
+  CheckBool("size folder", FileSize(LDir) = -1, true);
+  CheckBool("size missing", FileSize("$P:no_such_file.txt") = -1, true);
+  CheckBool("size empty path", FileSize("") = -1, true);
+
+  // RenameFile: the file under its new name; a file at the new name is
+  // never replaced; a missing file, a folder, a missing target folder and
+  // "" refused
+  LMoved := LDir + "/g.txt";
+  CheckBool("rename", RenameFile(LFile, LMoved), true);
+  CheckBool("rename old gone", FileExists(LFile), false);
+  CheckBool("rename new there", FileExists(LMoved), true);
+  WriteAllText(LFile, "other");
+  CheckBool("rename no replace", RenameFile(LFile, LMoved), false);
+  ReadAllText(LMoved, LBack);
+  CheckBool("rename target kept", LBack = "", true);
+  CheckBool("rename source kept", FileExists(LFile), true);
+  CheckBool("rename missing", RenameFile("$P:no_such_file.txt", LDir + "/h.txt"), false);
+  CheckBool("rename folder", RenameFile(LDir + "/a", LDir + "/a2"), false);
+  CheckBool("rename missing folder", RenameFile(LFile, LDir + "/none/x.txt"), false);
+  CheckBool("rename empty", RenameFile("", LMoved), false);
+  CheckBool("rename empty target", RenameFile(LFile, ""), false);
+  CheckBool("cleaned", DeleteFile(LFile) and DeleteFile(LMoved) and RemoveDir(LDir + "/a/b") and
+    RemoveDir(LDir + "/a") and RemoveDir(LDir), true);
+
+  // ExtractFileName / ChangeFileExt work on the text (nothing resolved)
+  Check("name", ExtractFileName("models/tiny.gguf"), "tiny.gguf");
+  Check("name bare", ExtractFileName("tiny.gguf"), "tiny.gguf");
+  Check("name trailing", ExtractFileName("models/"), "");
+  Check("name empty", ExtractFileName(""), "");
+@ifdef TARGET_X86_64_WINDOWS_GNU
+  Check("name backslash", ExtractFileName("a\\b.txt"), "b.txt");
+  Check("name drive", ExtractFileName("C:b.txt"), "b.txt");
+@else
+  Check("name backslash", ExtractFileName("a\\b.txt"), "a\\b.txt");
+  Check("name drive", ExtractFileName("C:b.txt"), "C:b.txt");
+@endif
+  Check("ext drop", ChangeFileExt("tiny.gguf", ""), "tiny");
+  Check("ext change", ChangeFileExt("models/tiny.gguf", ".bin"), "models/tiny.bin");
+  Check("ext last dot", ChangeFileExt("a.tar.gz", ""), "a.tar");
+  Check("ext none", ChangeFileExt("models/tiny", ".gguf"), "models/tiny.gguf");
+  Check("ext dot in folder", ChangeFileExt("v1.2/tiny", ".x"), "v1.2/tiny.x");
+  Check("ext empty", ChangeFileExt("", ".x"), ".x");
+
+  // TempDir: an existing folder (ForceDirectories makes nothing there) in
+  // ResolvePath's form, no trailing separator
+  LTemp := TempDir();
+  CheckBool("temp", LTemp <> "", true);
+  Check("temp resolved", ResolvePath(LTemp), LTemp);
+  CheckBool("temp no trailing", not LTemp.ends_with("/"), true);
+  CheckBool("temp is folder", ForceDirectories(LTemp), true);
+end.

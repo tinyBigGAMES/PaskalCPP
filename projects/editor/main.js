@@ -26,12 +26,13 @@
 const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, screen, shell } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const { createLspHost } = require('./lsp-host');
 const { createLspWatch } = require('./lsp-watch');
 const { createDapHost, checkLaunchArgs, isHostExe, debugHostKey, validDebugHosts, hostFor } = require('./dap-host');
 const { writeFileAtomic } = require('./atomic-write');
 const { createRunTerminal } = require('./run-term');
+const { queryProjectInfo, projectOf, isProjectFile, debugProgramFor, PC_PROJECT_KINDS } = require('./project-host');
 const IssueReport = require('./issue-report');
 
 const PC_FILE_FILTERS = [
@@ -327,7 +328,7 @@ function sendMenu(ACommand) {
 }
 
 function buildMenu() {
-  // Accelerators for new/open/save/saveAs/build/run/stop/gotoSymbol/
+  // Accelerators for new/open/save/saveAs/build/run/stop/pack/gotoSymbol/
   // callHierarchy are also bound on
   // the Monaco editor (src/renderer.js PC_APP_KEYS) - keep the two in step
   const LTemplate = [
@@ -337,6 +338,7 @@ function buildMenu() {
         { label: 'New', accelerator: 'CmdOrCtrl+N', click: () => sendMenu('new') },
         { label: 'Open...', accelerator: 'CmdOrCtrl+O', click: () => sendMenu('open') },
         { label: 'Open Folder...', click: () => sendMenu('openFolder') },
+        { label: 'New Project...', click: () => sendMenu('newProject') },
         { label: 'Close All Folders', click: () => sendMenu('closeAllFolders') },
         // Tick follows gState.showExamples: rebuildMenu() after every change
         { label: 'Show Examples', type: 'checkbox', checked: gState.showExamples,
@@ -375,7 +377,12 @@ function buildMenu() {
       submenu: [
         { label: 'Build', accelerator: 'CmdOrCtrl+B', click: () => sendMenu('build') },
         { label: 'Run', accelerator: 'CmdOrCtrl+F5', click: () => sendMenu('run') },
-        { label: 'Stop', accelerator: 'Shift+F5', click: () => sendMenu('stop') }
+        { label: 'Stop', accelerator: 'Shift+F5', click: () => sendMenu('stop') },
+        { type: 'separator' },
+        // Only while the active file is in a project (gPackEnabled:
+        // rebuildMenu() after every change)
+        { label: 'Pack', accelerator: 'CmdOrCtrl+Alt+B', enabled: gPackEnabled,
+          click: () => sendMenu('pack') }
       ]
     },
     {
@@ -741,9 +748,15 @@ function noteFolderChange(ARoot, AFilename) {
     // AFilename is relative to the watched root; its parent is the
     // directory whose listing changed
     gChangedDirs.add(path.dirname(path.join(ARoot, AFilename.toString())));
+    // The root's own project.toml: is it (still) a project?
+    if (isProjectFile(ARoot, path.join(ARoot, AFilename.toString()))) {
+      refreshProject(ARoot);
+    }
   } else {
-    // No name given (watcher error, event overflow): re-list the root
+    // No name given (watcher error, event overflow): re-list the root,
+    // and ask about its project again
     gChangedDirs.add(ARoot);
+    refreshProject(ARoot);
   }
   // Fixed window, not a sliding debounce: the first change arms the timer
   // and later ones join the set, so a steady stream of writes (a build)
@@ -811,6 +824,9 @@ ipcMain.handle('folder:watch', async (AEvent, ARoots) => {
       }
     }
   }
+  // Every root shown, watched or not (a root whose watch failed is still
+  // a project; only its project.toml edits go unseen)
+  refreshProjects(Array.from(LWanted));
   return { ok: LErrors.length === 0, watching: Array.from(gWatchers.keys()), errors: LErrors };
 });
 
@@ -974,6 +990,9 @@ ipcMain.on('doc:state', (AEvent, AState) => {
   if (gWindow) {
     gWindow.setTitle((gDirty ? '* ' : '') + AState.title + ' - PaskalCPP Editor');
   }
+  // The active tab's file ('' = an untitled tab): Pack follows it
+  gActiveDocPath = typeof AState.path === 'string' && path.isAbsolute(AState.path) ? AState.path : '';
+  updatePackEnabled();
 });
 
 // The logo button in the custom title bar opens the (hidden) application
@@ -1153,6 +1172,8 @@ const PC_ESC_TAIL_RE = /\x1b(\[[0-9;?]*|\](?:[^\x07\x1b]|\x1b(?!\\))*)?$/;
 
 // { proc, stopped } while a build/run is active, else null
 let gBuild = null;
+// pcpp init writes a few small files: a run that long has hung
+const PC_INIT_TIMEOUT_MS = 60000;
 
 // One filter per stream: pipe chunks split anywhere, so an escape or a
 // \r\n pair can straddle two chunks. The unfinished tail is held back and
@@ -1215,6 +1236,74 @@ function stopBuild() {
     return false;
   }
   return true;
+}
+
+// Projects (project-host.js): what pcpp --project-info said about each
+// shown root (root key -> info), asked again when the roots change and
+// when a root's project.toml changes. The renderer gets the whole list
+// (project:changed) and never decides what a project is itself
+const gProjects = new Map();
+// Newest refresh per root: an older answer arriving late is dropped
+const gProjectSeq = new Map();
+// The roots shown (root key): an answer for a root no longer shown is dropped
+const gProjectRoots = new Set();
+// The active tab's file (doc:state): Pack is enabled while it is in a project
+let gActiveDocPath = '';
+let gPackEnabled = false;
+
+function projectInfos() {
+  return Array.from(gProjects.values());
+}
+
+// Pack's menu state follows the active file and the projects
+function updatePackEnabled() {
+  const LEnabled = projectOf(projectInfos(), gActiveDocPath) !== null;
+  if (LEnabled !== gPackEnabled) {
+    gPackEnabled = LEnabled;
+    rebuildMenu();
+  }
+}
+
+function sendProjects() {
+  sendWindow('project:changed', projectInfos());
+  updatePackEnabled();
+}
+
+// Asks pcpp about ARoot again; the answer replaces the old one when it is
+// still the newest asked and the root is still shown
+async function refreshProject(ARoot) {
+  const LKey = ARoot.toLowerCase();
+  const LSeq = (gProjectSeq.get(LKey) || 0) + 1;
+  let LInfo;
+
+  gProjectSeq.set(LKey, LSeq);
+  LInfo = await queryProjectInfo(PC_COMPILER, ARoot);
+  if (gProjectSeq.get(LKey) !== LSeq || !gProjectRoots.has(LKey)) {
+    return;
+  }
+  gProjects.set(LKey, LInfo);
+  sendProjects();
+}
+
+// The shown roots changed: forget the ones gone, ask about every one (a
+// root shown again may have changed while it was not shown)
+function refreshProjects(ARoots) {
+  const LKeys = new Set(ARoots.map((ARoot) => ARoot.toLowerCase()));
+
+  gProjectRoots.clear();
+  for (const LKey of LKeys) {
+    gProjectRoots.add(LKey);
+  }
+  for (const LKey of Array.from(gProjects.keys())) {
+    if (!LKeys.has(LKey)) {
+      gProjects.delete(LKey);
+      gProjectSeq.delete(LKey);
+    }
+  }
+  sendProjects();
+  for (const LRoot of ARoots) {
+    refreshProject(LRoot);
+  }
 }
 
 // LSP: one server for the editor's lifetime (lsp-host.js runs pcpp.exe
@@ -1389,14 +1478,148 @@ ipcMain.handle('dap:forgetHost', (AEvent, ASource) => {
   return true;
 });
 
-// AOpts = { file, mode, target, run, cols, rows }; everything is validated
-// here, the renderer is not trusted with the command line. A Run's program
-// gets the TERMINAL tab as its terminal (run-term.js: cols / rows its size
-// now): its output comes as run:output after run:connect, keys and sizes go
-// back by run:input / run:resize; pcpp's own lines stay in OUTPUT
+// The projects as main knows them (the explorer asks once at start; later
+// changes come as project:changed)
+ipcMain.handle('project:list', () => projectInfos());
+
+// What a debug session launches for ASource: { ok, program, error } (the
+// main module in a project, a lib project refused; the dll host is then
+// remembered for the main module, so per project)
+ipcMain.handle('project:debugProgram', (AEvent, ASource) => {
+  if (!isSourceArg(ASource)) {
+    return { ok: false, program: '', error: 'Not a source path: ' + String(ASource) };
+  }
+  return debugProgramFor(projectInfos(), ASource);
+});
+
+// pcpp --no-banner init AName AKind in AParent: { code, output } (escapes
+// stripped: OUTPUT is plain text). Never rejects; a failure to start is
+// code -1 with its reason as the output
+function runInit(AParent, AName, AKind) {
+  return new Promise((AResolve) => {
+    try {
+      execFile(PC_COMPILER, ['--no-banner', 'init', AName, AKind],
+        { cwd: AParent, windowsHide: true, encoding: 'utf8', timeout: PC_INIT_TIMEOUT_MS },
+        (AError, AStdout, AStderr) => {
+          const LOutput = (String(AStdout) + String(AStderr)).replace(PC_OSC_RE, '').replace(PC_ESC_RE, '');
+          let LCode = 0;
+          if (AError) {
+            LCode = typeof AError.code === 'number' ? AError.code : -1;
+          }
+          AResolve({ code: LCode, output: LCode === -1 && LOutput === '' ? AError.message + '\n' : LOutput });
+        });
+    } catch (AError) {
+      AResolve({ code: -1, output: AError.message + '\n' });
+    }
+  });
+}
+
+// The New Project dialog's folder to start with: where the last dialog was
+ipcMain.handle('project:defaultParent', () => dialogDir() || '');
+
+// The New Project dialog's Browse: { ok, path } (ok false = canceled)
+ipcMain.handle('project:pickParent', async (AEvent, ACurrent) => {
+  const LStart = typeof ACurrent === 'string' && ACurrent !== '' && isDir(ACurrent) ? ACurrent : dialogDir();
+  const LRes = await dialog.showOpenDialog(gWindow, {
+    title: 'Folder to make the project in',
+    defaultPath: LStart || undefined,
+    properties: ['openDirectory', 'createDirectory']
+  });
+
+  if (LRes.canceled || LRes.filePaths.length === 0) {
+    return { ok: false, path: '' };
+  }
+  return { ok: true, path: LRes.filePaths[0] };
+});
+
+// File > New Project: { name, kind, parent } from the dialog; pcpp init
+// makes the folder in parent (its own checks: the name, a folder already
+// there), which then opens as a root. Every failure comes back with its
+// reason and pcpp's lines: the dialog shows them, never nothing.
+// { ok, root, main, output, folders, error }
+ipcMain.handle('project:new', async (AEvent, AOpts) => {
+  const LOpts = AOpts || {};
+  let LParent;
+  let LInit;
+  let LRoot;
+  let LInfo;
+
+  if (typeof LOpts.name !== 'string' || LOpts.name.trim() === '' || /[\r\n]/.test(LOpts.name)) {
+    return { ok: false, error: 'No project name.' };
+  }
+  if (!PC_PROJECT_KINDS.includes(LOpts.kind)) {
+    return { ok: false, error: 'Not a project type: ' + String(LOpts.kind) };
+  }
+  if (typeof LOpts.parent !== 'string' || !path.isAbsolute(LOpts.parent.trim()) || !isDir(LOpts.parent.trim())) {
+    return { ok: false, error: 'Not an existing folder: ' + String(LOpts.parent) };
+  }
+  if (!fs.existsSync(PC_COMPILER)) {
+    return { ok: false, error: 'Compiler not found: ' + PC_COMPILER };
+  }
+  LParent = path.resolve(LOpts.parent.trim());
+  LInit = await runInit(LParent, LOpts.name.trim(), LOpts.kind);
+  if (LInit.code !== 0) {
+    return { ok: false, output: LInit.output, error: 'pcpp init failed (exit ' + LInit.code + '):' };
+  }
+  LRoot = path.join(LParent, LOpts.name.trim());
+  if (!isDir(LRoot)) {
+    return { ok: false, output: LInit.output, error: 'pcpp init made no folder ' + LRoot };
+  }
+  if (folderIndex(LRoot) < 0) {
+    gState.folders.push(LRoot);
+  }
+  // rememberDialogDir saves the state, folders included
+  rememberDialogDir(LParent);
+  // The main module pcpp init wrote, from pcpp itself (the renderer opens it)
+  LInfo = await queryProjectInfo(PC_COMPILER, LRoot);
+  return { ok: true, root: LRoot, main: LInfo.valid ? LInfo.main : '',
+    output: LInit.output, folders: existingFolders(), error: '' };
+});
+
+// The pcpp line for AOpts, or { error }: a file in a project builds the
+// project (`pcpp build <root>`, whichever of its files is active), any
+// other .pcpp builds as itself; Pack is `pcpp pack <root>` and needs a
+// project. A lib project has nothing to run
+function buildArgs(AOpts) {
+  const LPack = AOpts.pack === true;
+  const LProject = projectOf(projectInfos(), AOpts.file);
+
+  if (LPack) {
+    if (!LProject) {
+      return { error: 'Pack: the active file is not in a project.' };
+    }
+    return { args: ['pack', LProject.root] };
+  }
+  if (!LProject && path.extname(AOpts.file).toLowerCase() !== '.pcpp') {
+    return { error: 'Not a saved .pcpp file: ' + AOpts.file };
+  }
+  if (!PC_BUILD_MODES.includes(AOpts.mode) || !PC_BUILD_TARGETS.includes(AOpts.target)) {
+    return { error: 'Invalid optimize level or target.' };
+  }
+  if (LProject && AOpts.run === true && LProject.kind === 'lib') {
+    return { error: 'Project ' + LProject.name + ' is a lib: there is nothing to run.' };
+  }
+  // --defaults: the toolbar's level / target only stand in where the source
+  // has no @optimize / @target (the source wins in the editor; from the
+  // command line -opt / -t override it). --progress: pcpp draws its
+  // 'Building <name>... Ns' line in place over the pipe, as on a console
+  // (OUTPUT redraws it: PC_LINE_RE)
+  return {
+    args: (LProject ? ['build', LProject.root] : [AOpts.file])
+      .concat(['-opt', AOpts.mode, '-t', AOpts.target, '--defaults', '--progress'])
+  };
+}
+
+// AOpts = { file, mode, target, run, pack, cols, rows }; everything is
+// validated here, the renderer is not trusted with the command line. A
+// Run's program gets the TERMINAL tab as its terminal (run-term.js: cols /
+// rows its size now): its output comes as run:output after run:connect,
+// keys and sizes go back by run:input / run:resize; pcpp's own lines stay
+// in OUTPUT. Pack shows in OUTPUT the same way, and ends with build:exit
 ipcMain.handle('build:start', async (AEvent, AOpts) => {
   const LOpts = AOpts || {};
-  const LArgs = [];
+  let LArgs;
+  let LLine;
   let LProc;
   let LFinished = false;
   let LOutFilter;
@@ -1409,24 +1632,19 @@ ipcMain.handle('build:start', async (AEvent, AOpts) => {
   if (dapRunning()) {
     return { ok: false, error: 'A debug session is active: stop it first (Shift+F5).' };
   }
-  if (typeof LOpts.file !== 'string' || !path.isAbsolute(LOpts.file) ||
-      path.extname(LOpts.file).toLowerCase() !== '.pcpp' || !fs.existsSync(LOpts.file)) {
-    return { ok: false, error: 'Not a saved .pcpp file: ' + String(LOpts.file) };
+  if (typeof LOpts.file !== 'string' || !path.isAbsolute(LOpts.file) || !fs.existsSync(LOpts.file)) {
+    return { ok: false, error: 'Not a saved file: ' + String(LOpts.file) };
   }
-  if (!PC_BUILD_MODES.includes(LOpts.mode) || !PC_BUILD_TARGETS.includes(LOpts.target)) {
-    return { ok: false, error: 'Invalid optimize level or target.' };
+  LLine = buildArgs(LOpts);
+  if (LLine.error) {
+    return { ok: false, error: LLine.error };
   }
+  LArgs = LLine.args;
   if (!fs.existsSync(PC_COMPILER)) {
     return { ok: false, error: 'Compiler not found: ' + PC_COMPILER };
   }
 
-  // --defaults: the toolbar's level / target only stand in where the source
-  // has no @optimize / @target (the source wins in the editor; from the
-  // command line -opt / -t override it). --progress: pcpp draws its
-  // 'Building <name>... Ns' line in place over the pipe, as on a console
-  // (OUTPUT redraws it: PC_LINE_RE)
-  LArgs.push(LOpts.file, '-opt', LOpts.mode, '-t', LOpts.target, '--defaults', '--progress');
-  if (LOpts.run === true) {
+  if (LOpts.run === true && LOpts.pack !== true) {
     LTerminal = createRunTerminal({
       onConnect: () => sendWindow('run:connect'),
       onOutput: (AText) => sendWindow('run:output', AText)

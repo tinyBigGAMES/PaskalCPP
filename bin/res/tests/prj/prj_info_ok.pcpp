@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  prj_info_ok.pcpp - Projects: pcpp --project-info on a valid project
+
+  The editor's project query: one JSON line, the project valid, its name, kind
+  (a dll here), main module and the output, bin and .dat paths project.toml
+  gives (fixtures\ok: output = build/out), no reports, exit 0. A cli test
+  (pcpp itself, in the suite's output root); this file itself is never
+  compiled.
+*******************************************************************************/
+
+module exe prj_info_ok;
+
+/*
+  @@test
+    kind cli
+    args "--project-info <DIR>/fixtures/ok"
+    exitcode 0
+    expect
+    | {"format":1,"project":true,"valid":true,"root":"<DIR>/fixtures/ok","file":"<DIR>/fixtures/ok/project.toml","name":"prj_ok","kind":"dll","main":"<DIR>/fixtures/ok/src/prj_ok.pcpp","output":"<DIR>/fixtures/ok/build/out","bin":"<DIR>/fixtures/ok/build/out/bin","dat":"<DIR>/fixtures/ok/build/out/bin/prj_ok.dat","reports":[]}
+  @@end
+*/
+
+begin
+end.

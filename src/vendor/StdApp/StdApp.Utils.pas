@@ -70,6 +70,13 @@ const
   // This is the explicit spelling of the default behavior.
   PATH_PREFIX_SOURCE = '$S:';
 
+  { PATH_PREFIX_PROJECT }
+  // Resolve the remainder against the caller-supplied project root (the
+  // folder holding project.toml). A build-time prefix: the Delphi side only;
+  // SysUtils.pcpp's run-time ResolvePath rejects it (a program has no
+  // project). No root given = an exception, never a silent fallback.
+  PATH_PREFIX_PROJECT = '$R:';
+
   { PATH_LONG_PREFIX }
   // The Win32 long-path spelling: \\?\C:\... is passed to the OS without the
   // MAX_PATH limit. Backslashes only: //?/ is not honoured (probed, R28).
@@ -433,6 +440,12 @@ type
     // access and no exception. ResolvePath's spelling (the long-path spelling
     // past PATH_PLAIN_MAX): equal to ResolvePath(ARelPath, AResolvedDir)
     class function  JoinResolvedPath(const AResolvedDir: string; const ARelPath: string): string; static;
+    // Deletes the tree ADir (a resolved path): children first, then ADir. A
+    // junction or symbolic link inside it is removed as a link and never
+    // entered (TDirectory.Delete walks into one and empties its target); a
+    // read-only entry is made writable first. Raises nothing: what could not
+    // be deleted stays, so a caller checks TDirectory.Exists afterwards
+    class procedure DeleteTree(const ADir: string); static;
     // One argument of a Windows command line (CreateProcess), quoted only when
     // it must be, by the rule the C runtime and LLVM split argv with:
     // backslashes are literal except before a '"' (R49)
@@ -443,7 +456,6 @@ type
     // a quoted run), leading blanks of the tail dropped; '' when there are not
     // that many arguments. Program arguments are forwarded raw (pcpp -- args)
     class function  CommandLineTail(const ACommandLine: string; const AIndex: Integer): string; static;
-    class function  DisplayPath(const APath: string): string; static;
 
     class function  GetEnv(const AName: string): string; static;
     class procedure SetEnv(const AName: string; const AValue: string); static;
@@ -452,8 +464,10 @@ type
     class function  RunFromIDE(): Boolean; static;
     class function  CountLines(const APath, APattern: string; const ARecursive: Boolean = True): Int64; static;
     class function  GetAppType(): TAppType; static;
+    // AProjectRoot: the folder '$R:' resolves against ('' = no project:
+    // a '$R:' path raises, RSUtlNoProjectRoot); other paths ignore it
     class function  ResolvePath(const APath: string;
-      const ABaseDir: string = ''): string; static;
+      const ABaseDir: string = ''; const AProjectRoot: string = ''): string; static;
     class procedure CopyDirectory(const ASrcDir: string;
       const ADestDir: string); static;
 
@@ -1315,9 +1329,10 @@ var
   LFullPath: string;
   LDrive: Char;
 begin
-  // A long-path spelling names the same drive path (ResolvePath returns it
-  // past PATH_PLAIN_MAX): read without its prefix
-  LFullPath := StripLongPathPrefix(TPath.GetFullPath(APath));
+  // The one resolver; a long-path spelling names the same drive path
+  // (ResolvePath returns it past PATH_PLAIN_MAX): read without its prefix,
+  // in backslashes (ResolvePath's plain form uses forward slashes)
+  LFullPath := StripLongPathPrefix(ResolvePath(APath)).Replace('/', '\');
 
   // Convert Windows path to WSL path: C:\foo\bar -> /mnt/c/foo/bar
   if (Length(LFullPath) >= 3) and (LFullPath[2] = ':') and (LFullPath[3] = '\') then
@@ -3129,6 +3144,70 @@ begin
   Result := DoFinishResolvedPath(LDir + '\' + ARelPath.Replace('/', '\'));
 end;
 
+class procedure TUtils.DeleteTree(const ADir: string);
+var
+  LSearch: TSearchRec;
+  LEntry: string;
+  LIsDir: Boolean;
+  LIsLink: Boolean;
+  LKeep: Integer;
+  LAttr: Integer;
+begin
+  // ADir itself a link (its own attributes, FollowLink False): the link
+  // goes, its target is never entered
+  LAttr := FileGetAttr(ADir, False);
+  if LAttr = faInvalid then
+    Exit;
+  if (LAttr and System.SysUtils.faSymLink) <> 0 then
+  begin
+    if (LAttr and System.SysUtils.faDirectory) <> 0 then
+      RemoveDir(ADir)
+    else
+      System.SysUtils.DeleteFile(ADir);
+    Exit;
+  end;
+
+  // Children first, then ADir (empty by then unless something stayed).
+  // SearchRec.Attr holds the entry's own attributes: a junction or a
+  // directory symbolic link is faDirectory + faSymLink and is removed with
+  // RemoveDir, which deletes the link and never its target; a file symbolic
+  // link is removed with DeleteFile, the link alone as well
+  if FindFirst(JoinResolvedPath(ADir, '*'), System.SysUtils.faAnyFile, LSearch) = 0 then
+  begin
+    try
+      repeat
+        if (LSearch.Name = '.') or (LSearch.Name = '..') then
+          Continue;
+        LEntry := JoinResolvedPath(ADir, LSearch.Name);
+        LIsDir := (LSearch.Attr and System.SysUtils.faDirectory) <> 0;
+        LIsLink := (LSearch.Attr and System.SysUtils.faSymLink) <> 0;
+
+        // A read-only entry refuses deletion: clear that bit on the entry
+        // itself (FollowLink False: a link's target is not changed), keeping
+        // only the bits SetFileAttributes takes
+        if (LSearch.Attr and System.SysUtils.faReadOnly) <> 0 then
+        begin
+          LKeep := LSearch.Attr and (System.SysUtils.faHidden or
+            System.SysUtils.faSysFile or System.SysUtils.faArchive);
+          if LKeep = 0 then
+            LKeep := System.SysUtils.faNormal;
+          FileSetAttr(LEntry, LKeep, False);
+        end;
+
+        if LIsDir and (not LIsLink) then
+          DeleteTree(LEntry)
+        else if LIsDir then
+          RemoveDir(LEntry)
+        else
+          System.SysUtils.DeleteFile(LEntry);
+      until FindNext(LSearch) <> 0;
+    finally
+      FindClose(LSearch);
+    end;
+  end;
+  RemoveDir(ADir);
+end;
+
 class function TUtils.QuoteCommandArg(const AArg: string): string;
 var
   LI: Integer;
@@ -3223,14 +3302,9 @@ begin
   Result := ACommandLine.Substring(LPos - 1);
 end;
 
-class function TUtils.DisplayPath(const APath: string): string;
-begin
-  Result := TPath.GetFullPath(APath).Replace('\', '/');
-end;
-
 { ResolvePath }
 class function TUtils.ResolvePath(const APath: string;
-  const ABaseDir: string): string;
+  const ABaseDir: string; const AProjectRoot: string): string;
 var
   LPath: string;
   LBase: string;
@@ -3258,6 +3332,16 @@ begin
   begin
     // Explicit spelling of the default: keep the caller-supplied base.
     LPath := LPath.Substring(Length(PATH_PREFIX_SOURCE));
+  end
+  else if LPath.StartsWith(PATH_PREFIX_PROJECT, True) then
+  begin
+    // The project root, handed in by the caller (never global state). No
+    // root is the caller's error to report: raised like any path that
+    // cannot be resolved, so every caller's existing except reports it
+    if AProjectRoot.Trim().IsEmpty() then
+      raise Exception.CreateFmt(RSUtlNoProjectRoot, [APath]);
+    LPath := LPath.Substring(Length(PATH_PREFIX_PROJECT));
+    LBase := AProjectRoot.Trim();
   end;
 
   LPath := LPath.Trim();
@@ -3301,11 +3385,18 @@ end;
 class procedure TUtils.AddToEnvPath(const APath: string);
 var
   LPath: string;
+  LDir: string;
 begin
+  // The folder in PATH's own spelling: plain (no long-path prefix),
+  // backslashes. Appended as a new entry after a ';' (it used to be glued
+  // onto the last entry); the entries already there are left as written
+  LDir := StripLongPathPrefix(ResolvePath(APath)).Replace('/', '\');
+  if LDir.IsEmpty() then
+    Exit;
   LPath := GetEnv('PATH');
-  LPath := LPath + ResolvePath(APath);
-  LPath := LPath.Replace('/', '\');
-  SetEnv('PATH', LPath);
+  if (not LPath.IsEmpty()) and (not LPath.EndsWith(';')) then
+    LPath := LPath + ';';
+  SetEnv('PATH', LPath + LDir);
 end;
 
 class function TUtils.RunFromIDE(): Boolean;
@@ -3376,12 +3467,16 @@ begin
   if not TDirectory.Exists(ADestDir) then
     ForceDirectories(ADestDir);
 
-  LSrcFull := TPath.GetFullPath(ASrcDir);
-  LFiles := TDirectory.GetFiles(ASrcDir, '*',
+  // Listed from the one resolved spelling, so every entry starts with that
+  // text (listing ASrcDir as given and cutting by the resolved length broke
+  // a relative source). The separators between the folder and the rest are
+  // dropped, however many the listing put there
+  LSrcFull := ResolvePath(ASrcDir);
+  LFiles := TDirectory.GetFiles(LSrcFull, '*',
     TSearchOption.soAllDirectories);
   for LI := 0 to Length(LFiles) - 1 do
   begin
-    LRelPath := LFiles[LI].Substring(Length(LSrcFull) + 1);
+    LRelPath := LFiles[LI].Substring(Length(LSrcFull)).TrimLeft(['/', '\']);
     LDestFile := TPath.Combine(ADestDir, LRelPath);
 
     LDestSubDir := TPath.GetDirectoryName(LDestFile);

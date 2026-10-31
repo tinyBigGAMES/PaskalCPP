@@ -1,0 +1,75 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  LlamaStreaming.pcpp - llama.cpp example (import llama_ext): text streamed
+  as it is generated. The model comes from bin\assets.zip (entry
+  res/assets/models/stories260K.gguf, password PaskalCPP). GenerateLlama
+  calls OnPiece for every piece of text the moment the model makes it, so
+  the story appears word by word instead of all at the end; the AUserData
+  pointer carries the program's own record into the callback, here a piece
+  counter. The options record caps the length and fixes the seed, so a run
+  repeats the same story.
+==============================================================================*/
+
+module exe LlamaStreaming;
+
+import
+  llama_ext,
+  Console;
+
+type
+  // What OnPiece keeps between calls
+  StreamStats = record
+    Pieces: int32;
+  end;
+
+// Called once per generated piece: show it at once and count it
+routine OnPiece(const AUserData: ptr; const APiece: string);
+var
+  LStats: ptr to StreamStats;
+begin
+  LStats := ptr to StreamStats(AUserData);
+  LStats->Pieces := LStats->Pieces + 1;
+  WriteText(APiece);
+end;
+
+var
+  LModel: LlamaModel;
+  LOptions: LlamaOptions;
+  LStats: StreamStats;
+  LText: string;
+
+begin
+  if not LoadLlamaModelZip("$P:../../assets.zip", "res/assets/models/stories260K.gguf", "PaskalCPP", LModel) then
+    println("cannot load the model: {}", LModel.ErrorMessage);
+    return;
+  end;
+
+  LOptions := DefaultLlamaOptions();
+  LOptions.MaxTokens := 120;
+  LOptions.Seed := 42;
+  LStats.Pieces := 0;
+
+  WriteText("Once upon a time");
+  if GenerateLlama(LModel, "Once upon a time", LOptions, LText, OnPiece, address of LStats) then
+    println("");
+    println("-- {} pieces, {} bytes of text", LStats.Pieces, len(LText));
+  else
+    println("");
+    println("generate failed: {}", LModel.ErrorMessage);
+  end;
+
+  UnloadLlamaModel(LModel);
+end.

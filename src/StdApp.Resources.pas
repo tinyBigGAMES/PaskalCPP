@@ -113,6 +113,11 @@ resourcestring
   RSCrySecKeyComment     = 'apppacker secret key %s';
   RSCrySigDefaultComment = 'signature from apppacker secret key %s';
 
+  // StdApp.Utils
+  { RSUtlNoProjectRoot }
+  // the path as written: $R: names the project root and the caller gave none
+  RSUtlNoProjectRoot = 'The path ''%s'' starts with $R: (the project root), and no project root was given';
+
   //--------------------------------------------------------------------------
   // Packer Messages
   //--------------------------------------------------------------------------
@@ -130,6 +135,9 @@ resourcestring
   RSPakSecKeyInArchive  = 'FATAL: the configured secret key file is matched by include rules: %s';
   RSPakZipError         = 'Archive build failed: %s';
   RSPakNoSecKey         = 'sign: block present but seckey: is missing';
+  { RSPakPathResolve }
+  // the path as written, the reason (PAK008)
+  RSPakPathResolve      = 'Manifest path ''%s'' cannot be resolved: %s';
 
   //--------------------------------------------------------------------------
   // AppPacker CLI Messages
@@ -524,6 +532,9 @@ resourcestring
   RSParPathResolve = '''@%s'' path ''%s'' cannot be resolved: %s';
   { RSParModulePathResolve }
   RSParModulePathResolve = 'module path ''%s'' cannot be resolved: %s';
+  { RSParNoProjectRoot }
+  // the directive, the path as written (PR0065: $R: in a build with no project)
+  RSParNoProjectRoot = '''@%s'' path ''%s'' uses $R: (the project root), and this build has no project (no project.toml above the main module)';
   { RSParMainOnly }
   RSParMainOnly = '''@%s'' is set by the main module only; a unit cannot set it';
   { RSParCppTarget }
@@ -1226,6 +1237,9 @@ resourcestring
   RSSemCallIntrinsicStmt = '''%s'' is a statement, not a value';
   { RSSemCallIntrinsicSig }
   RSSemCallIntrinsicSig = '''%s'' takes %s';
+  { RSSemCallNoProject }
+  // SM0433: ProjectPassword() in a build that is not a project's (%s = the callee)
+  RSSemCallNoProject = '''%s'' is only in a project build: the main module of a project.toml and the units it imports';
   { RSSemCallSizeValue }
   RSSemCallSizeValue = 'size needs a type, got the value ''%s''';
   { RSSemCallTypeArg }
@@ -1443,6 +1457,9 @@ resourcestring
 
   { RSCmpSourceNotFound }
   RSCmpSourceNotFound = 'source file not found: %s';
+  { RSCmpProjectKind }
+  // project.toml's type, the main module (CMP0009)
+  RSCmpProjectKind = 'project.toml says the project is a %s, but its main module %s is not';
 
   { RSCmpPathFailed }
   RSCmpPathFailed = 'cannot use the path %s: %s';
@@ -1509,6 +1526,90 @@ resourcestring
   RSCmpCleanHoldsSource = 'it holds the source %s (the project''s own folder or above it)';
   { RSCmpCleanTargetLink }
   RSCmpCleanTargetLink = '%s is a link (junction or symbolic link)';
+
+  // PaskalCPP.Project (project.toml)
+
+  { RSPrjReadFailed }
+  // the project file, the reason
+  RSPrjReadFailed = 'Cannot read the project file ''%s'': %s';
+  { RSPrjKeyMissing }
+  // the project file, the key
+  RSPrjKeyMissing = 'The project file ''%s'' has no ''%s'' key';
+  { RSPrjKeyType }
+  // the project file, the key, the kind it must be
+  RSPrjKeyType = 'In the project file ''%s'', ''%s'' must be %s';
+  { RSPrjKindString }
+  RSPrjKindString = 'a string';
+  { RSPrjKindInteger }
+  RSPrjKindInteger = 'an integer';
+  { RSPrjKeyUnknown }
+  // the project file, the key as written (section.key)
+  RSPrjKeyUnknown = 'The project file ''%s'' has an unknown key ''%s'' (ignored)';
+  { RSPrjNameInvalid }
+  // the name, the reason
+  RSPrjNameInvalid = 'The project name ''%s'' is not valid: %s';
+  { RSPrjNameNotIdent }
+  RSPrjNameNotIdent = 'it must start with a letter or _ and hold only letters, digits and _';
+  { RSPrjNameReserved }
+  RSPrjNameReserved = 'it is a reserved word';
+  { RSPrjNameDevice }
+  RSPrjNameDevice = 'it is a reserved Windows device name';
+  { RSPrjTypeInvalid }
+  // the type as written
+  RSPrjTypeInvalid = 'The project type ''%s'' is not valid: use exe, dll or lib';
+  { RSPrjMainInvalid }
+  // the main module as written, the reason
+  RSPrjMainInvalid = 'The main module ''%s'' is not valid: %s';
+  { RSPrjMainExt }
+  // the source extension
+  RSPrjMainExt = 'it must be a .%s file';
+  { RSPrjMainMissing }
+  // the main module as written, its full path
+  RSPrjMainMissing = 'The main module ''%s'' does not exist (%s)';
+  { RSPrjOutputInvalid }
+  // the output folder as written, the reason
+  RSPrjOutputInvalid = 'The output folder ''%s'' is not valid: %s';
+  { RSPrjOutputRoot }
+  RSPrjOutputRoot = 'it must not be the project folder itself';
+  { RSPrjOutputReserved }
+  // the project folder it must stay out of
+  RSPrjOutputReserved = 'it must not be inside the project''s %s folder';
+  { RSPrjPathEmpty }
+  RSPrjPathEmpty = 'it is empty';
+  { RSPrjPathRooted }
+  RSPrjPathRooted = 'it must be a path relative to the project folder';
+  { RSPrjPathParent }
+  RSPrjPathParent = 'it must not leave the project folder (..)';
+  { RSPrjPasswordInvalid }
+  // the position (1-based) of the first character that is not printable ASCII
+  RSPrjPasswordInvalid = 'The pack password holds a character that is not printable ASCII (at position %d)';
+  { RSPrjFormatInvalid }
+  // the project file, its format, the newest format this compiler reads
+  RSPrjFormatInvalid = 'The project file ''%s'' is format %d; this compiler reads formats 1 to %d';
+  { RSPrjSaveFailed }
+  // the project file, the reason
+  RSPrjSaveFailed = 'Cannot save the project file ''%s'': %s';
+  { RSPrjFindFailed }
+  // the folder the search started from, the reason
+  RSPrjFindFailed = 'Cannot look for a project file above ''%s'': %s';
+  { RSPrjFileComment }
+  // project.toml's header comment
+  RSPrjFileComment = 'PaskalCPP project (https://paskalcpp.org)';
+  { RSPrjProjectComment }
+  // the [project] table's comment
+  RSPrjProjectComment = 'type: exe | dll | lib; main and output are relative to this folder';
+  { RSPrjPackComment }
+  // the [pack] table's comment
+  RSPrjPackComment = 'password: printable ASCII; empty or absent = the .dat is not encrypted';
+  { RSPrjFolderExists }
+  // the folder pcpp init would make
+  RSPrjFolderExists = 'The folder ''%s'' already exists: a new project needs a folder of its own';
+  { RSPrjScaffoldFailed }
+  // the folder or file that cannot be made, the reason
+  RSPrjScaffoldFailed = 'Cannot create ''%s'': %s';
+  { RSPrjPasswordFailed }
+  // the reason
+  RSPrjPasswordFailed = 'Cannot make a pack password: %s';
 
   // PaskalCPP.CLI (PLAN-COMPILER A-CLI)
 
@@ -1654,6 +1755,51 @@ resourcestring
   RSPcCliDryRunWithoutClean = 'Error: --dry-run is used with --clean only';
   { RSPcCliCleanWithOption }
   RSPcCliCleanWithOption = 'Error: --clean builds nothing and takes no %s';
+  { RSPcCliHelpInit }
+  RSPcCliHelpInit = 'Make a new project folder <name> here: project.toml, src\<name>.pcpp, assets\, pack.cmd (type: exe, dll or lib)';
+  { RSPcCliHelpBuild }
+  RSPcCliHelpBuild = 'Build the project whose project.toml is in <folder> (default: the current folder); takes the build options';
+  { RSPcCliVerbOption }
+  // the verb, the flag it does not take
+  RSPcCliVerbOption = 'Error: %s takes no %s';
+  { RSPcCliInitArgs }
+  // the exe's name
+  RSPcCliInitArgs = 'Error: init needs a project name and a type: %s init <name> <exe|dll|lib>';
+  { RSPcCliInitBadType }
+  RSPcCliInitBadType = 'Error: Unknown project type: %s (use exe, dll or lib)';
+  { RSPcCliInitDone }
+  // the type, the name, the new folder
+  RSPcCliInitDone = 'Created %s project %s in %s';
+  { RSPcCliInitNext }
+  // the exe's name, the project name
+  RSPcCliInitNext = 'Build it with: %s build %s';
+  { RSPcCliNoProject }
+  // project.toml, the folder
+  RSPcCliNoProject = 'Error: No %s in %s';
+  { RSPcCliBadProjectDir }
+  RSPcCliBadProjectDir = 'Error: Cannot use the project folder %s: %s';
+  { RSPcCliHelpPack }
+  RSPcCliHelpPack = 'Zip the project''s assets\ into <output>\bin\<name>.dat with project.toml''s password (<folder>: as build)';
+  { RSPcCliPackNoAssets }
+  // the assets folder
+  RSPcCliPackNoAssets = 'Error: The project has no assets folder: %s';
+  { RSPcCliPackFolder }
+  // the folder, the OS's words
+  RSPcCliPackFolder = 'Error: Cannot make the folder %s: %s';
+  { RSPcCliPackStart }
+  // the assets folder, the archive
+  RSPcCliPackStart = 'Packing %s into %s';
+  { RSPcCliPackBuildFailed }
+  RSPcCliPackBuildFailed = 'Error: The packer did not build';
+  { RSPcCliPackRun }
+  // the packer, the OS's words
+  RSPcCliPackRun = 'Error: Cannot run the packer %s: %s';
+  { RSPcCliPackExit }
+  // the packer's exit code
+  RSPcCliPackExit = 'Error: The packer failed (exit code %d)';
+  { RSPcCliPackDone }
+  // the archive
+  RSPcCliPackDone = 'Packed %s';
   { RSPcCliCleanHeader }
   RSPcCliCleanHeader = 'pcpp output folder %s. To delete:';
   { RSPcCliCleanTarget }
@@ -1674,6 +1820,12 @@ resourcestring
   RSPcCliCleanFailed = 'Clean failed.';
   { RSPcCliDapAlone }
   RSPcCliDapAlone = 'Error: --dap takes no other argument';
+  { RSPcCliHelpProjectInfo }
+  RSPcCliHelpProjectInfo = 'Print the project in <folder> as one JSON line (the editor runs it; takes no other argument)';
+  { RSPcCliProjectInfoArgs }
+  RSPcCliProjectInfoArgs = 'Error: --project-info takes one folder and no other argument';
+  { RSPcCliProjectInfoFailed }
+  RSPcCliProjectInfoFailed = 'Cannot read the project in "%s": %s';
 
   //--------------------------------------------------------------------------
   // LSP server (PaskalCPP.LSP.Server)
@@ -2242,6 +2394,8 @@ resourcestring
   RSTstDiscoveryFailed = 'Test discovery found %d error(s): nothing was run';
   { RSTstResultsWriteFailed }
   RSTstResultsWriteFailed = 'Cannot write the results file %s: %s';
+  { RSTstOutputCreateFailed }
+  RSTstOutputCreateFailed = 'Cannot make the output folder %s: %s';
   { RSTstNoResultsFile }
   RSTstNoResultsFile = 'No results of a last run to take the failed cells from: %s';
   { RSTstListLine }

@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  prj_build_err_option.pcpp - Projects: pcpp build with --clean
+
+  build takes the build options only; --clean is the clean line's own: a bad
+  argument (exit 2), nothing read or built. A cli test (pcpp itself, in the
+  suite's output root); this file itself is never compiled.
+*******************************************************************************/
+
+module exe prj_build_err_option;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner build <DIR> --clean"
+    exitcode 2
+    expect
+    | Error: build takes no --clean
+    |
+    | Run pcpp -h to see available options
+  @@end
+*/
+
+begin
+end.

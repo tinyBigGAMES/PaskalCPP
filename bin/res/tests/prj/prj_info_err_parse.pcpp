@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  prj_info_err_parse.pcpp - Projects: pcpp --project-info on a project.toml
+  that does not parse
+
+  The file is there but cannot be read: "project" true, "valid" false, its
+  PJ0001 report, exit 0 (fixtures\bad_parse). The editor opens the folder as
+  a plain one. A cli test (pcpp itself, in the suite's output root); this
+  file itself is never compiled.
+*******************************************************************************/
+
+module exe prj_info_err_parse;
+
+/*
+  @@test
+    kind cli
+    args "--project-info <DIR>/fixtures/bad_parse"
+    exitcode 0
+    expect
+    | {"format":1,"project":true,"valid":false,"root":"<DIR>/fixtures/bad_parse","reports":[{"severity":"error","code":"PJ0001","message":"Cannot read the project file '<DIR>/fixtures/bad_parse/project.toml': Failed to parse TOML: Expected ']' at line 4, column 9","file":"","line":0,"column":0}]}
+  @@end
+*/
+
+begin
+end.

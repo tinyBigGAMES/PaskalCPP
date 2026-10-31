@@ -47,19 +47,12 @@ import
 // rlImGui's backend calls: its frame start, its events and its renderer
 #include "imgui_impl_raylib.h"
 
-// The frame's letterbox in window units: where the frame's camera puts its
-// base area (BeginFrame sets it each frame)
+// The frame's letterbox in window units: raylib_ext's own (GetFrameLetterbox,
+// the window's size now under the frame's rule, fit or integer scale), so
+// ImGui never works it out a second way
 routine RlImGuiExtDoLetterbox(): Rectangle;
-var
-  LCamera: Camera2D;
-  LResult: Rectangle;
 begin
-  LCamera := GetFrameCamera();
-  LResult.x := LCamera.offset.x;
-  LResult.y := LCamera.offset.y;
-  LResult.width := float32(GetFrameWidth()) * LCamera.zoom;
-  LResult.height := float32(GetFrameHeight()) * LCamera.zoom;
-  return LResult;
+  return GetFrameLetterbox();
 end;
 
 // raylib's window units to framebuffer pixels: 1, or the monitor's scale

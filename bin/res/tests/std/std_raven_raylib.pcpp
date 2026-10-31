@@ -29,13 +29,20 @@
   InitRaven starts it again. raylib_ext's frame window: the Raven window is
   the frame's base size, its UI scale the letterbox's density, and the
   button is drawn inside BeginFrame at its base-unit place through the
-  letterbox. CreateRavenTexture: refused before InitRaven and for a texture
-  of id 0; a render texture cleared by raylib shows in a Viewport, cleared
-  again it shows the new colour at once (Raven draws raylib's texture, no
-  copy); SetRavenTexture points it at another render texture, refuses a
-  texture Raven made from its own pixels and a texture of id 0; after
-  Rtexture_destroy and after CloseRaven, raylib's textures still draw
-  (Raven never unloads them).
+  letterbox; with SetFrameIntegerScale in a window between multiples (fit
+  would be 3.125x) the UI scale is the frame's whole 3x and the button is
+  drawn through that letterbox. CreateRavenTexture: refused before
+  InitRaven and for a texture of id 0; a render texture cleared by raylib
+  shows in a Viewport, cleared again it shows the new colour at once (Raven
+  draws raylib's texture, no copy); SetRavenTexture points it at another
+  render texture, refuses a texture Raven made from its own pixels and a
+  texture of id 0; after Rtexture_destroy and after CloseRaven, raylib's
+  textures still draw (Raven never unloads them). Filters: a texture Raven
+  loads from an image file starts with R_FILTER_MIPMAP, which this backend
+  draws as LINEAR; it loads every texture with one mip level, so a mipmap
+  filter reaching GL would leave the texture incomplete and draw it black
+  when shrunk. A file texture shrunk into a small Viewport shows its own
+  colour, and again after Rtexture_set_filter(R_FILTER_MIPMAP) by hand.
 
   The keyboard and the mouse from raylib need a focused window, which a
   hidden test window never is; the examples (raven RavenRaylib and
@@ -69,6 +76,8 @@ module exe std_raven_raylib;
     | ok frame: size is the base size
     | ok frame: scale is the letterbox density
     | ok frame: button drawn through the letterbox
+    | ok frame integer: scale is the whole multiple
+    | ok frame integer: button drawn through the letterbox
     | ok texture: refused without Raven
     | ok texture: id 0 refused
     | ok texture: made
@@ -80,6 +89,10 @@ module exe std_raven_raylib;
     | ok texture: id 0 not re-pointed
     | ok texture: destroyed, raylib's texture still draws
     | ok texture: CloseRaven leaves raylib's texture
+    | ok filter: image file written
+    | ok filter: file texture made
+    | ok filter: file texture shrunk shows its colour
+    | ok filter: MIPMAP set by hand shows its colour
     | done 0
     | [Heap] Allocs: 0, Frees: 0, Leaked: 0
   @@end
@@ -289,6 +302,7 @@ var
   LAt: ::Vector2;
   LColor: Color;
   LFrame: int32;
+  LTry: int32;
 begin
   SetConfigFlags(FLAG_WINDOW_HIDDEN);
   Check("frame window opens", InitFrameWindow(320, 180, "std_raven_raylib"));
@@ -319,6 +333,39 @@ begin
   LColor := Pixel(LBox.x + LAt.x * LZoom, LBox.y + LAt.y * LZoom);
   EndDrawing();
   Check("frame: button drawn through the letterbox", not SameColor(LColor, GClear));
+
+  // Integer scale in a 1000 x 600 window: the fit rule would be 3.125x,
+  // the frame (and so the UI) is 3x at (20, 30)
+  SetWindowSize(1000, 600);
+  LTry := 0;
+  while ((GetScreenWidth() <> 1000) or (GetScreenHeight() <> 600) or (GetRenderWidth() <> 1000) or
+    (GetRenderHeight() <> 600)) and (LTry < 120) do
+    BeginDrawing();
+    EndDrawing();
+    LTry := LTry + 1;
+  end;
+  SetFrameIntegerScale(true);
+  for LFrame := 1 to 3 do
+    UpdateRaven(LUi);
+    BeginDrawing();
+    BeginFrame();
+    DrawRaven(LUi);
+    EndFrame();
+    EndDrawing();
+  end;
+  LBox := GetFrameLetterbox();
+  LZoom := LBox.width / 320.0f;
+  Check("frame integer: scale is the whole multiple", Near(LZoom, 3.0f) and Near(Rget_ui_scale(), LZoom));
+  LAt := Middle(LButton);
+  UpdateRaven(LUi);
+  BeginDrawing();
+  BeginFrame();
+  DrawRaven(LUi);
+  EndFrame();
+  LColor := Pixel(LBox.x + LAt.x * LZoom, LBox.y + LAt.y * LZoom);
+  EndDrawing();
+  Check("frame integer: button drawn through the letterbox", not SameColor(LColor, GClear));
+  SetFrameIntegerScale(false);
   CloseRaven();
   CloseWindow();
 end;
@@ -424,6 +471,50 @@ begin
   CloseWindow();
 end;
 
+// A texture Raven loads from an image file, shrunk into a small Viewport.
+// This backend loads every texture with one mip level, so a mipmap filter
+// reaching GL would make the shrunk texture incomplete and draw it black;
+// LINEAR draws the image's own colour
+routine TestFilter();
+var
+  LUi: Rid;
+  LBox: Rid;
+  LView: Rid;
+  LTexture: Rid;
+  LImage: Image;
+  LScale: float32;
+begin
+  SetConfigFlags(FLAG_WINDOW_HIDDEN);
+  InitWindow(320, 240, "std_raven_raylib");
+  // Written beside the program (its own folder in the test output)
+  LImage := GenImageColor(256, 256, GREEN);
+  Check("filter: image file written", ExportImage(LImage, "std_raven_raylib_filter.png"));
+  UnloadImage(LImage);
+
+  InitRaven("std_raven_raylib");
+  LUi := Rwindow_create("std_raven_raylib", 320, 240, R_WINDOW_DEFAULT);
+  LBox := Rwidget_create(R_WIDGET_VBOX);
+  Rwindow_set_content(LUi, LBox);
+  LView := Rwidget_add_child(LBox, Rwidget_create(R_WIDGET_VIEWPORT));
+  // 256 image pixels into 16 logical units: shrunk at any DPI scale
+  Rwidget_set_size(LView, 16.0f, 16.0f);
+  LTexture := Rtexture_create_from_file("std_raven_raylib_filter.png");
+  Check("filter: file texture made", LTexture <> R_INVALID_ID);
+  Rviewport_set_texture(LView, LTexture);
+  Frames(LUi, 3);
+  LScale := Rget_ui_scale();
+  Check("filter: file texture shrunk shows its colour", SameColor(ViewPixel(LUi, LView, LScale), GREEN));
+
+  Rtexture_set_filter(LTexture, R_FILTER_MIPMAP);
+  Frames(LUi, 3);
+  Check("filter: MIPMAP set by hand shows its colour", SameColor(ViewPixel(LUi, LView, LScale), GREEN));
+
+  Rviewport_set_texture(LView, R_INVALID_ID);
+  Rtexture_destroy(LTexture);
+  CloseRaven();
+  CloseWindow();
+end;
+
 begin
   GFails := 0;
   GClear.r := 255;
@@ -437,5 +528,6 @@ begin
   end;
   TestFrame();
   TestTexture();
+  TestFilter();
   println("done {}", GFails);
 end.

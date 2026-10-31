@@ -50,6 +50,9 @@ type
   private
     procedure DoBanner();
     procedure DoUsage();
+    // The command's error owner (PROJECT.md error handling): status lines
+    // print to the console; the caller wires it, prints it, frees it
+    function DoNewErrors(): TErrors;
     function DoPack(const AManifest: string): Integer;
     function DoKeygen(const ABasePath: string): Integer;
     function DoVerify(const AFilename, APublicKey: string): Integer;
@@ -81,41 +84,51 @@ begin
   TConsole.PrintLn(RSCliUsage);
 end;
 
+function TPackerCLI.DoNewErrors(): TErrors;
+begin
+  Result := TErrors.Create();
+  Result.SetStatusCallback(
+    procedure(const AText: string; const AUserData: Pointer)
+    begin
+      TConsole.PrintLn(AText);
+    end);
+end;
+
 function TPackerCLI.DoPack(const AManifest: string): Integer;
 var
+  LErrors: TErrors;
   LPacker: TPacker;
 begin
+  LErrors := DoNewErrors();
   LPacker := TPacker.Create();
   try
-    LPacker.SetStatusCallback(
-      procedure(const AText: string; const AUserData: Pointer)
-      begin
-        TConsole.PrintLn(AText);
-      end);
+    LPacker.SetErrors(LErrors);
     if not LPacker.LoadManifest(AManifest) then
     begin
-      LPacker.PrintErrors();
+      LErrors.PrintErrors();
       Exit(1);
     end;
     TConsole.PrintLn(RSCliPacking, [LPacker.PackName, LPacker.Version]);
     if not LPacker.DiscoverFiles() then
     begin
-      LPacker.PrintErrors();
+      LErrors.PrintErrors();
       Exit(2);
     end;
     if not LPacker.Build() then
     begin
-      LPacker.PrintErrors();
+      LErrors.PrintErrors();
       Exit(3);
     end;
     Result := 0;
   finally
     LPacker.Free();
+    LErrors.Free();
   end;
 end;
 
 function TPackerCLI.DoKeygen(const ABasePath: string): Integer;
 var
+  LErrors: TErrors;
   LMini: TMinisign;
   LPair: TMiniKeyPair;
   LKeyFile: string;
@@ -135,18 +148,20 @@ begin
     TConsole.PrintLn(RSCliKeyExists, [LKeyFile]);
     Exit;
   end;
+  LErrors := DoNewErrors();
   LMini := TMinisign.Create();
   try
+    LMini.SetErrors(LErrors);
     if not LMini.GenerateKeyPair(LPair) then
     begin
-      LMini.PrintErrors();
+      LErrors.PrintErrors();
       Exit;
     end;
     TUtils.CreateDirInPath(LKeyFile);
     if (not LMini.SaveSecretKey(LKeyFile, LPair)) or
        (not LMini.SavePublicKey(LPubFile, LPair)) then
     begin
-      LMini.PrintErrors();
+      LErrors.PrintErrors();
       Exit;
     end;
     TConsole.PrintLn(RSCliKeygenDone, [LKeyFile, LPubFile]);
@@ -156,11 +171,13 @@ begin
     Result := 0;
   finally
     LMini.Free();
+    LErrors.Free();
   end;
 end;
 
 function TPackerCLI.DoVerify(const AFilename, APublicKey: string): Integer;
 var
+  LErrors: TErrors;
   LMini: TMinisign;
   LPair: TMiniKeyPair;
   LLoaded: Boolean;
@@ -171,8 +188,10 @@ begin
     DoUsage();
     Exit;
   end;
+  LErrors := DoNewErrors();
   LMini := TMinisign.Create();
   try
+    LMini.SetErrors(LErrors);
     // Public key argument: a key file path, or the raw base64 key string
     if TFile.Exists(APublicKey) then
       LLoaded := LMini.LoadPublicKey(APublicKey, LPair)
@@ -180,7 +199,7 @@ begin
       LLoaded := LMini.LoadPublicKeyString(APublicKey, LPair);
     if not LLoaded then
     begin
-      LMini.PrintErrors();
+      LErrors.PrintErrors();
       Exit;
     end;
     if LMini.VerifyFile(AFilename, LPair) then
@@ -190,11 +209,12 @@ begin
     end
     else
     begin
-      LMini.PrintErrors();
+      LErrors.PrintErrors();
       Result := 3;
     end;
   finally
     LMini.Free();
+    LErrors.Free();
   end;
 end;
 

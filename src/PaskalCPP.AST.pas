@@ -191,7 +191,7 @@ type
     ikTestAssert, ikTestAssertTrue, ikTestAssertFalse, ikTestAssertNil,
     ikTestAssertNotNil, ikTestFail, ikTestAssertEqualInt,
     ikTestAssertEqualUInt, ikTestAssertEqualFloat, ikTestAssertEqualStr,
-    ikTestAssertEqualBool, ikTestAssertEqualPtr, ikAlive, ikLock);
+    ikTestAssertEqualBool, ikTestAssertEqualPtr, ikAlive, ikLock, ikProjectPassword);
 
   { TPCIntrinsicKinds }
   TPCIntrinsicKinds = set of TPCIntrinsicKind;
@@ -248,7 +248,7 @@ const
     'testAssert', 'testAssertTrue', 'testAssertFalse', 'testAssertNil',
     'testAssertNotNil', 'testFail', 'testAssertEqualInt',
     'testAssertEqualUInt', 'testAssertEqualFloat', 'testAssertEqualStr',
-    'testAssertEqualBool', 'testAssertEqualPtr', 'alive', 'lock'
+    'testAssertEqualBool', 'testAssertEqualPtr', 'alive', 'lock', 'ProjectPassword'
   );
 
   { PC_RUNTIME_INTRINSICS }
@@ -256,7 +256,7 @@ const
   // (::pcpp::utf8 ... ::pcpp::exc_msg, the test family's test_* / assert_*);
   // print / println only with a ptr to char argument (TPCAst.ModuleNamesRuntime)
   PC_RUNTIME_INTRINSICS: TPCIntrinsicKinds = [ikUtf8, ikParamCount, ikParamStr, ikGetMem, ikFreeMem,
-    ikResizeMem, ikSetLength, ikCreate, ikDestroy, ikRaise, ikRaiseCode, ikExcCode, ikExcMsg, ikTestAssert..ikTestAssertEqualPtr, ikAlive, ikLock];
+    ikResizeMem, ikSetLength, ikCreate, ikDestroy, ikRaise, ikRaiseCode, ikExcCode, ikExcMsg, ikTestAssert..ikTestAssertEqualPtr, ikAlive, ikLock, ikProjectPassword];
 
   { PC_RUNTIME_SPELLING }
   // The runtime's C++ scope as C++ text spells it (TPCAst.TextNamesRuntime)
@@ -298,7 +298,8 @@ const
     (ArgCount: 2; Args: (iaBool, iaBool); Value: ivStatement),         // ikTestAssertEqualBool
     (ArgCount: 2; Args: (iaPointer, iaPointer); Value: ivStatement),   // ikTestAssertEqualPtr
     (ArgCount: 1; Args: (iaWeak, iaNone); Value: ivBool),              // ikAlive
-    (ArgCount: 1; Args: (iaWeak, iaNone); Value: ivLocked)             // ikLock
+    (ArgCount: 1; Args: (iaWeak, iaNone); Value: ivLocked),            // ikLock
+    (ArgCount: 0; Args: (iaNone, iaNone); Value: ivString)             // ikProjectPassword
   );
 
 type
@@ -2217,6 +2218,21 @@ type
     procedure EnumChildren(const AVisit: TPCNodeVisitor); override;
   end;
 
+  { TPCProjectSecret }
+  // PLAN-PROJECTS atom 6: what ProjectPassword() reads, data from outside
+  // the source (project.toml) that the Compiler writes on the AST before
+  // SEM. InProject: the build is its project's (the main module of a
+  // project.toml and every module it imports); without it ProjectPassword()
+  // is SM0433. Data: the password scrambled with the keystream Key seeds
+  // (TPCProject.ScramblePassword, undone by the runtime's
+  // ::pcpp::project_password), so the plain text never reaches the C++ or
+  // the exe; empty for a project with no password
+  TPCProjectSecret = record
+    InProject: Boolean;
+    Data: TBytes;
+    Key: UInt64;
+  end;
+
   { TPCAst }
   // The arena: owns every node (including orphans from abandoned parses),
   // the module list (completed modules, dependency order) and one instance
@@ -2254,6 +2270,9 @@ type
     class function DoNarrowestAt(const AModule: TPCModule; const ALine: UInt64;
       const AColumn: UInt64; out ANode: TPCNode; out ASpan: TPCEmitSpan): Boolean; static;
   public
+    // The build's project password (TPCProjectSecret): the Compiler sets it
+    // before SEM; SEM reads InProject, the emitter Data and Key
+    ProjectSecret: TPCProjectSecret;
     constructor Create(); override;
     destructor Destroy(); override;
     // The only ways to create a node; the arena owns the result
@@ -2431,7 +2450,7 @@ begin
       Result := RSAstSigType;
     ikUtf8:
       Result := RSAstSigWString;
-    ikParamCount, ikExcCode, ikExcMsg:
+    ikParamCount, ikExcCode, ikExcMsg, ikProjectPassword:
       Result := RSAstSigNone;
     ikParamStr:
       Result := RSAstSigInt32;
@@ -8082,25 +8101,17 @@ end;
 
 class function TPCAst.DoNamesSourceFile(const ADirective: TPCDirective;
   const ASourceFile: string): Boolean;
-var
-  LResolved: string;
 begin
-  // An @addsourcefile the build was handed (TPCCompiler.DoApplyDirective:
-  // its value, resolved by the build as here) naming ASourceFile
+  // An @addsourcefile the build was handed (TPCCompiler.DoApplyDirective)
+  // naming ASourceFile
   Result := False;
   if (ADirective.DirectiveKind <> bdAddSourceFile) or ADirective.ResolvedNoEffect or
     (ADirective.Args.Count = 0) or (ADirective.Args[0].ResolvedText = '') then
     Exit;
 
-  // A value no path routine takes was refused by the build (ZB0020): it
-  // names no TU
-  try
-    LResolved := TUtils.ResolvePath(ADirective.Args[0].ResolvedText);
-  except
-    on Exception do
-      Exit(False);
-  end;
-  Result := TUtils.SamePath(LResolved, ASourceFile);
+  // The parser resolved the value once (ResolvedText): compared as is, never
+  // resolved again; a value it could not resolve is '' (skipped above)
+  Result := TUtils.SamePath(ADirective.Args[0].ResolvedText, ASourceFile);
 end;
 
 function TPCAst.LocateSourceFile(const ASourceFile: string; out AOutFilename: string;

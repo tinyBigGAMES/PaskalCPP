@@ -243,6 +243,7 @@ type
     class function DoAssignOpText(const AOp: TPCAssignOp; const AIsSet: Boolean): string; static;
     class function DoFoldedText(const AExpr: TPCExpr; out AText: string): Boolean; static;
     class function DoTestKindName(const AKind: TPCIntrinsicKind): string; static;
+    class function DoProjectPasswordText(const ASecret: TPCProjectSecret): string; static;
     class function DoBitField(const AExpr: TPCExpr): TPCField; static;
     class function DoChoicesBitField(const AExpr: TPCExpr): TPCField; static;
     class function DoTextNamesWord(const AText: string; const AWord: string): Boolean; static;
@@ -3532,6 +3533,30 @@ begin
   end;
 end;
 
+class function TPCEmitter.DoProjectPasswordText(const ASecret: TPCProjectSecret): string;
+var
+  LBuilder: TStringBuilder;
+  LByte: Byte;
+begin
+  // ::pcpp::project_password("\xHH...", <count>, 0x<key>ULL): every
+  // scrambled byte a \x escape of two hex digits (an escape ends at the
+  // next backslash, so no byte runs into the one after it), its count (the
+  // literal's own terminator is not one) and the keystream key. One
+  // expression on the call's line; the plain password is never written
+  LBuilder := TStringBuilder.Create();
+  try
+    LBuilder.Append('::pcpp::project_password("');
+    for LByte in ASecret.Data do
+      LBuilder.Append('\x').Append(IntToHex(LByte, 2));
+    LBuilder.Append('", ');
+    LBuilder.Append(IntToStr(Length(ASecret.Data)));
+    LBuilder.Append(', 0x').Append(IntToHex(ASecret.Key, 16)).Append('ULL)');
+    Result := LBuilder.ToString();
+  finally
+    LBuilder.Free();
+  end;
+end;
+
 class function TPCEmitter.DoBitField(const AExpr: TPCExpr): TPCField;
 begin
   // The bit field an argument reads (x.f, or f in a method body); nil = none
@@ -3910,6 +3935,10 @@ begin
       DoText(AFile, '::pcpp::exc_msg()');
     ikPrint, ikPrintLn:
       DoWritePrint(AFile, ACall);
+    ikProjectPassword:
+      // PLAN-PROJECTS atom 6: the scrambled password the Compiler put on
+      // the AST, written as bytes; the runtime undoes it at run time only
+      DoText(AFile, DoProjectPasswordText(FAst.ProjectSecret));
     ikAlive:
       // PLAN-OBJECT O6 (Q3): the object a weak watches still exists
       DoWriteRuntimeCall(AFile, '::pcpp::alive', ACall);

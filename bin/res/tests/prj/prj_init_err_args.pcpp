@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  prj_init_err_args.pcpp - Projects: pcpp init without its type
+
+  init takes a name and a type: one alone is a bad argument (exit 2), with
+  the usage. A cli test (pcpp itself, in the suite's output root); this file
+  itself is never compiled.
+*******************************************************************************/
+
+module exe prj_init_err_args;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner init prj_cli_args"
+    exitcode 2
+    expect
+    | Error: init needs a project name and a type: pcpp init <name> <exe|dll|lib>
+    |
+    | Run pcpp -h to see available options
+  @@end
+*/
+
+begin
+end.

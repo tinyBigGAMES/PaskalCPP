@@ -127,6 +127,19 @@ contextBridge.exposeInMainWorld('host', {
   dapHostFor: (ASource) => ipcRenderer.invoke('dap:hostFor', ASource),
   dapPickHost: (ASource) => ipcRenderer.invoke('dap:pickHost', ASource),
   dapForgetHost: (ASource) => ipcRenderer.invoke('dap:forgetHost', ASource),
+  // Projects (main.js asks pcpp --project-info): the list now, every change
+  // after, the program a debug session launches for a file ({ ok, program,
+  // error }), and File > New Project's dialog: its starting folder, Browse
+  // ({ ok, path }), Create ({ name, kind, parent } -> { ok, root, main,
+  // output, folders, error })
+  projectList: () => ipcRenderer.invoke('project:list'),
+  projectDefaultParent: () => ipcRenderer.invoke('project:defaultParent'),
+  pickProjectParent: (ACurrent) => ipcRenderer.invoke('project:pickParent', ACurrent),
+  onProjectsChanged: (ACallback) => {
+    ipcRenderer.on('project:changed', (AEvent, AList) => ACallback(AList));
+  },
+  projectDebugProgram: (ASource) => ipcRenderer.invoke('project:debugProgram', ASource),
+  newProject: (AOpts) => ipcRenderer.invoke('project:new', AOpts),
   onDapMessage: (ACallback) => {
     ipcRenderer.on('dap:message', (AEvent, AMsg) => ACallback(AMsg));
   },

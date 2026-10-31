@@ -102,12 +102,13 @@ With no `@optimize` a build is `debug`, and a debug build prints the runtime's h
 - **C++ is the surface.** `#include` a header and call it. A C++ type (`std::string`, `std::vector<int>`) can be the type of a PaskalCPP variable, and C++ declarations (a struct, a function, a template) stand at module level.
 - **Errors speak PaskalCPP.** A mistake on a PaskalCPP construct is reported in PaskalCPP's words and types. What only C++ can judge is clang's or the linker's own message, mapped back to the `.pcpp` file, line and column.
 - **The toolchain is in the box.** Zig and clang ship in the `res` folder beside `pcpp.exe`: one `pcpp` command turns a source file into a native binary.
-- **Libraries in the box.** The standard library holds PaskalCPP's own units (`SysUtils`, `Math`, `Diagnostics`, `Console`, `ResData`, `CustomIO`, `HookIO`, `HookABI`, `raylib_ext`, `rlimgui_ext`, `raven_raylib`, `sfml_ext`, `mojoal_ext`, `sqlite_ext`, `tmxlite_ext`, `ldtk_ext`, `mir_ext`) and vendor units for `box2d`, `cgltf`, `enet`, `flecs`, `glfw`, `ldtkloader`, `lua`, `miniaudio`, `minizip`, `mir`, `mojoal`, `pl_mpeg`, `pugixml`, `raven`, `raylib`, `rlgl`, `rlimgui`, `sdl3`, `sdl_gp`, `sfml`, `sqlite`, `tmxlite`, `yyjson`, `zlib`, `zstd` and fifteen stb libraries: `import sfml;` and the library is ready on both targets. The bundled examples (`res\examples`) build on both.
+- **Libraries in the box.** The standard library holds PaskalCPP's own units (`SysUtils`, `StrUtils`, `Math`, `Diagnostics`, `Console`, `ResData`, `CustomIO`, `HookIO`, `HookABI`, `raylib_ext`, `rlimgui_ext`, `raven_raylib`, `sfml_ext`, `mojoal_ext`, `sqlite_ext`, `tmxlite_ext`, `ldtk_ext`, `mir_ext`, `llama_ext`) and vendor units for `box2d`, `cgltf`, `enet`, `flecs`, `glfw`, `ldtkloader`, `llama`, `lua`, `miniaudio`, `minizip`, `mir`, `mojoal`, `pl_mpeg`, `pugixml`, `raven`, `raylib`, `rlgl`, `rlimgui`, `sdl3`, `sdl_gp`, `sfml`, `sqlite`, `tmxlite`, `yyjson`, `zlib`, `zstd` and fifteen stb libraries: `import sfml;` and the library is ready on both targets. The bundled examples (`res\examples`) build on both.
 - **Two targets, one source.** `@target` or `pcpp -t` picks x86_64-windows-gnu or x86_64-linux-gnu; `pcpp <file> -r` runs a Linux build through WSL.
+- **Projects when you want them.** A single file needs no project file. For a program with assets, `pcpp init MyProject exe` makes a project folder, `pcpp build MyProject -r` builds it into its own output folder, and `pcpp pack MyProject` zips its `assets\` into a password-protected `MyProject.dat` beside the exe, which the program opens with `ProjectPassword()`.
 
 ## 🛠️ Tools
 
-- **`pcpp`**, the compiler: `pcpp <source> [OPTIONS]`; `pcpp -h` lists every option.
+- **`pcpp`**, the compiler: `pcpp <source> [OPTIONS]`, and `pcpp init` / `build` / `pack` for a project folder; `pcpp -h` lists every option.
 - **The PaskalCPP Editor** (`pcpp editor [files]`): an Electron application whose editing surface is Monaco, with build, run and debug.
 - **A language server** (`pcpp --lsp`): the Language Server Protocol server the editor runs, and any LSP client can.
 - **A debugger** for the x86_64-windows-gnu target: the console debugger (`pcpp <file> -d`) and the debug adapter (`pcpp --dap`) the editor runs, both on one engine.
@@ -210,6 +211,21 @@ WESTON_RDP_FRACTIONAL_HI_DPI_SCALING=true
 then run `wsl --shutdown` (WSLg reads the file when it starts). The Linux window then opens at the size Windows scales it to on that monitor. The program itself still reads a scale of 1: Windows enlarges the window, the program does not draw at the higher resolution.
 
 Leave out `WESTON_RDP_DEBUG_DESKTOP_SCALING_FACTOR`: it forces one factor on every monitor instead of each monitor's own.
+
+</details>
+
+<details>
+<summary><b>A Linux build finds no GPU for Vulkan under WSL2 (llama.cpp runs on the CPU)</b></summary>
+
+WSL2 passes the GPU through for CUDA and DirectX 12 (`/dev/dxg`), and WSLg's OpenGL runs on it through Mesa's d3d12 driver. There is no Vulkan driver for the GPU inside WSL2: NVIDIA's WSL driver (`/usr/lib/wsl/lib`) ships CUDA but no Vulkan, and Ubuntu's `mesa-vulkan-drivers` does not include Mesa's Vulkan-on-DirectX 12 driver (Dozen). The only Vulkan device a Linux program sees is lavapipe (`llvmpipe`), which runs on the CPU.
+
+So a Linux build of a Vulkan program runs on the CPU under WSL2. llama.cpp's Vulkan backend also skips CPU-type Vulkan devices such as lavapipe, so it reports no Vulkan device and runs the model on its CPU backend. To make it use lavapipe anyway, set the device by number:
+
+```text
+GGML_VK_VISIBLE_DEVICES=0
+```
+
+This is a WSL2 limit, not a Linux one: on Linux installed on the machine itself, the GPU vendor's driver provides Vulkan and the same build runs on the GPU. A Windows build run on the same machine uses the GPU through Vulkan too.
 
 </details>
 

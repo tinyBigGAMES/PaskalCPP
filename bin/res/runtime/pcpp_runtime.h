@@ -94,8 +94,16 @@ std::int32_t enter(std::int32_t (*AEntry)()) noexcept;
 // The number of program arguments (argc - 1, 0 when none)
 std::int32_t param_count();
 
-// Argument index (0 = the program); "" out of range
+// Argument index (0 = the program), UTF-8 on every target (Windows: split
+// from the wide command line by the C runtime's rules); "" out of range
 std::string param_str(std::int32_t index);
+
+// ProjectPassword(), in a project build only: project.toml's pack password
+// from the length bytes at data, which the compiler wrote scrambled
+// (TPCProject.ScramblePassword: the password's UTF-8 XOR the SplitMix64
+// stream key seeds, a word per 8 bytes, low byte first), so the plain text
+// is in the program only once it runs; "" for a project with no password
+std::string project_password(const char* data, std::size_t length, std::uint64_t key);
 
 /*******************************************************************************
  * Exceptions

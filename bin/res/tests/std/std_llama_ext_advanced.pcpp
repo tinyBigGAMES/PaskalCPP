@@ -1,0 +1,268 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_llama_ext_advanced.pcpp - Std library compliance: the llama_ext
+  unit's advanced layer (res\libs\std\llama_ext.pcpp)
+
+  The device list holds the CPU, every device named and with memory (the
+  GPUs differ by machine, so no row counts them). The fixture model
+  (stories260K.gguf) tokenizes a text and gives it back; the same text
+  gives the same tokens; no tokens give ""; an id the model does not have
+  is refused. An embedding has the model's size and length 1, a text is
+  as like itself as can be (cosine 1) and less like another; an empty
+  text is refused. A grammar holds a greedy continuation to one of two
+  words; a grammar that does not parse and both forms at once are refused
+  by generate and by load. A JSON schema gives text that yyjson parses as
+  the schema says; a chat with the schema gives two replies that both
+  parse (the grammar starts over for each); a schema that is no JSON is
+  refused. Closed models refuse every call.
+*******************************************************************************/
+
+module exe std_llama_ext_advanced;
+
+/*
+  @@test
+    kind run
+    expect
+    | devices true
+    | devices cpu true
+    | devices named true
+    | tokenize true
+    | tokens some true
+    | round trip true
+    | round trip text [Once upon a time]
+    | tokenize same true
+    | detokenize none true
+    | detokenize none text []
+    | detokenize bad false
+    | detokenize bad error a token is no id of the model
+    | detokenize negative false
+    | embed true
+    | embed error []
+    | embed size true
+    | embed length one true
+    | embed itself 1.000000
+    | embed other less true
+    | embed empty false
+    | embed empty error the text is empty
+    | embed empty vector true
+    | grammar true
+    | grammar word true
+    | bad grammar false
+    | bad grammar error the option Grammar is no grammar llama.cpp can read
+    | bad grammar load false
+    | bad grammar load error the option Grammar is no grammar llama.cpp can read
+    | both false
+    | both error the options Grammar and JsonSchema are both set
+    | json true
+    | json parses true
+    | json answer is bool true
+    | chat json true
+    | chat json first parses true
+    | chat json second parses true
+    | bad schema false
+    | bad schema error the option JsonSchema is no JSON schema llama.cpp can convert: [json.exception.parse_error.101] parse error at line 1, column 3: syntax error while parsing object key - invalid literal; last read: '{no'; expected string literal
+    | closed tokenize false
+    | closed tokenize error no model is loaded
+    | closed detokenize false
+    | closed embed false
+    | closed embed error no model is loaded
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  llama_ext,
+  Math,
+  yyjson;
+
+// Whether AText is a JSON object whose "answer" is a bool (yyjson's read)
+routine AnswerIsBool(const AText: string): bool;
+var
+  LDoc: ptr to yyjson_doc;
+  LAnswer: ptr to yyjson_val;
+  LResult: bool;
+begin
+  LDoc := yyjson_read(AText.c_str(), size_t(len(AText)), 0);
+  if LDoc = nil then
+    return false;
+  end;
+  LAnswer := yyjson_obj_get(yyjson_doc_get_root(LDoc), "answer");
+  LResult := (LAnswer <> nil) and yyjson_is_bool(LAnswer);
+  yyjson_doc_free(LDoc);
+  return LResult;
+end;
+
+// Whether AText is JSON yyjson reads
+routine Parses(const AText: string): bool;
+var
+  LDoc: ptr to yyjson_doc;
+begin
+  LDoc := yyjson_read(AText.c_str(), size_t(len(AText)), 0);
+  if LDoc = nil then
+    return false;
+  end;
+  yyjson_doc_free(LDoc);
+  return true;
+end;
+
+// Whether the device list holds the CPU, and every device is named and has memory
+routine DeviceRows();
+var
+  LDevices: array of LlamaDevice;
+  LIndex: int32;
+  LCpu: bool;
+  LNamed: bool;
+begin
+  println("devices {}", ListLlamaDevices(LDevices));
+  LCpu := false;
+  LNamed := len(LDevices) > 0;
+  for LIndex := 0 to int32(len(LDevices)) - 1 do
+    if LDevices[LIndex].Kind = LlamaDeviceKind.Cpu then
+      LCpu := true;
+    end;
+    if (LDevices[LIndex].DeviceName = "") or (LDevices[LIndex].Description = "") or
+      (LDevices[LIndex].TotalMemory = 0) then
+      LNamed := false;
+    end;
+  end;
+  println("devices cpu {}", LCpu);
+  println("devices named {}", LNamed);
+end;
+
+// The length of a vector (its Euclidean norm)
+routine VectorLength(const AVector: array of float32): float64;
+var
+  LIndex: int64;
+  LSum: float64;
+begin
+  LSum := 0.0;
+  for LIndex := 0 to int64(len(AVector)) - 1 do
+    LSum := LSum + float64(AVector[LIndex]) * float64(AVector[LIndex]);
+  end;
+  return Sqrt(LSum);
+end;
+
+const
+  // A JSON object with one bool, "answer", and nothing else
+  KSchema: string = "{\"type\": \"object\", \"properties\": {\"answer\": {\"type\": \"boolean\"}}, \"required\": [\"answer\"], \"additionalProperties\": false}";
+
+var
+  LModel: LlamaModel;
+  LClosed: LlamaModel;
+  LBadModel: LlamaModel;
+  LChat: LlamaChat;
+  LOptions: LlamaOptions;
+  LGreedy: LlamaOptions;
+  LTokens: array of int32;
+  LAgain: array of int32;
+  LBad: array of int32;
+  LText: string;
+  LReply: string;
+  LFirst: array of float32;
+  LSecond: array of float32;
+  LOther: array of float32;
+  LSame: bool;
+  LIndex: int64;
+  LResult: bool;
+begin
+  DeviceRows();
+
+  // Greedy, a small context; no token limit (the grammar ends the text)
+  LGreedy := DefaultLlamaOptions();
+  LGreedy.ContextSize := 256;
+  LGreedy.Temperature := float32(0);
+  LGreedy.MaxTokens := 0;
+  LoadLlamaModel("$P:../../res/assets/models/stories260K.gguf", LGreedy, LModel);
+
+  // Tokens: a text and back; the same text twice gives the same tokens
+  println("tokenize {}", TokenizeLlama(LModel, "Once upon a time", LTokens));
+  println("tokens some {}", len(LTokens) > 1);
+  println("round trip {}", DetokenizeLlama(LModel, LTokens, LText));
+  println("round trip text [{}]", LText);
+  TokenizeLlama(LModel, "Once upon a time", LAgain);
+  LSame := len(LAgain) = len(LTokens);
+  for LIndex := 0 to int64(len(LTokens)) - 1 do
+    if LSame and (LAgain[LIndex] <> LTokens[LIndex]) then
+      LSame := false;
+    end;
+  end;
+  println("tokenize same {}", LSame);
+  setlength(LBad, 0);
+  println("detokenize none {}", DetokenizeLlama(LModel, LBad, LText));
+  println("detokenize none text [{}]", LText);
+  setlength(LBad, 1);
+  LBad[0] := 999999;
+  println("detokenize bad {}", DetokenizeLlama(LModel, LBad, LText));
+  println("detokenize bad error {}", LModel.ErrorMessage);
+  LBad[0] := -1;
+  println("detokenize negative {}", DetokenizeLlama(LModel, LBad, LText));
+
+  // Embeddings: the model's size, length 1; a text is as like itself as can be
+  println("embed {}", EmbedLlama(LModel, "The cat sat on the mat.", LFirst));
+  println("embed error [{}]", LModel.ErrorMessage);
+  println("embed size {}", len(LFirst) > 0);
+  println("embed length one {}", Abs(VectorLength(LFirst) - 1.0) < 0.0001);
+  EmbedLlama(LModel, "The cat sat on the mat.", LSecond);
+  println("embed itself {:.6f}", CosineSimilarity(LFirst, LSecond));
+  EmbedLlama(LModel, "Numbers and taxes are hard to read in winter.", LOther);
+  println("embed other less {}", CosineSimilarity(LFirst, LOther) < 0.9999);
+  println("embed empty {}", EmbedLlama(LModel, "", LOther));
+  println("embed empty error {}", LModel.ErrorMessage);
+  println("embed empty vector {}", len(LOther) = 0);
+
+  // A grammar: the continuation is one of its two words
+  LOptions := LGreedy;
+  LOptions.Grammar := "root ::= \"yes\" | \"no\"";
+  println("grammar {}", GenerateLlama(LModel, "Once upon a time", LOptions, LText));
+  println("grammar word {}", (LText = "yes") or (LText = "no"));
+  LOptions.Grammar := "root ::= (";
+  println("bad grammar {}", GenerateLlama(LModel, "Once upon a time", LOptions, LText));
+  println("bad grammar error {}", LModel.ErrorMessage);
+  println("bad grammar load {}", LoadLlamaModel("$P:../../res/assets/models/stories260K.gguf", LOptions, LBadModel));
+  println("bad grammar load error {}", LBadModel.ErrorMessage);
+  LOptions.Grammar := "root ::= \"yes\"";
+  LOptions.JsonSchema := KSchema;
+  println("both {}", GenerateLlama(LModel, "Once upon a time", LOptions, LText));
+  println("both error {}", LModel.ErrorMessage);
+
+  // A JSON schema: the text is an object whose answer is a bool
+  LOptions := LGreedy;
+  LOptions.JsonSchema := KSchema;
+  println("json {}", GenerateLlama(LModel, "Once upon a time", LOptions, LText));
+  println("json parses {}", Parses(LText));
+  println("json answer is bool {}", AnswerIsBool(LText));
+
+  // A chat held to the schema: every reply is a value of it
+  println("chat json {}", CreateLlamaChat(LModel, "You answer in JSON.", LOptions, LChat));
+  LResult := SayLlamaChat(LChat, "Is the sky blue?", LReply);
+  println("chat json first parses {}", LResult and AnswerIsBool(LReply));
+  LResult := SayLlamaChat(LChat, "Is grass red?", LReply);
+  println("chat json second parses {}", LResult and AnswerIsBool(LReply));
+  FreeLlamaChat(LChat);
+
+  LOptions.JsonSchema := "{not json";
+  println("bad schema {}", GenerateLlama(LModel, "Once upon a time", LOptions, LText));
+  println("bad schema error {}", LModel.ErrorMessage);
+
+  // A record with no model refuses every call
+  println("closed tokenize {}", TokenizeLlama(LClosed, "Once", LTokens));
+  println("closed tokenize error {}", LClosed.ErrorMessage);
+  println("closed detokenize {}", DetokenizeLlama(LClosed, LAgain, LText));
+  println("closed embed {}", EmbedLlama(LClosed, "Once", LFirst));
+  println("closed embed error {}", LClosed.ErrorMessage);
+
+  UnloadLlamaModel(LModel);
+end.

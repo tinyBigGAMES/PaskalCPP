@@ -910,11 +910,13 @@ var PcDebug = (function () {
   }
 
   // F5 while idle: save as Build does, run the adapter, launch the active
-  // .pcpp, send the breakpoints, then let the program go
+  // .pcpp (in a project: its main module), send the breakpoints, then let
+  // the program go
   async function startSession() {
     var LSession;
     var LOk;
     var LPath;
+    var LProgram;
     var LResult;
     var LFiles;
     var LIndex;
@@ -952,7 +954,19 @@ var PcDebug = (function () {
       endSession();
       return;
     }
-    LPath = gDeps.activeTab().path;
+    // In a project the program is its main module, whichever of its files
+    // is active (main.js decides; a lib project has nothing to debug)
+    LProgram = await gDeps.debugProgramFor(gDeps.activeTab().path);
+    if (LSession !== gSession) {
+      return;
+    }
+    if (!LProgram || !LProgram.ok) {
+      gDeps.showPanel('output');
+      gDeps.outputLine('Debug: ' + ((LProgram && LProgram.error) || 'no program to debug'));
+      endSession();
+      return;
+    }
+    LPath = LProgram.program;
     gDeps.clearOutput();
     gDeps.terminalReset();
     gDeps.clearProblems();
@@ -1192,7 +1206,8 @@ var PcDebug = (function () {
   // finishProblems() (the last partial line, markers), showPanel(name),
   // setStatus(text), setDebugState(state) (toolbar), buildBusy(),
   // getTarget(), debugHostFor(source) -> host ('' none), pickDebugHost(source)
-  // -> { ok, canceled, host, error }, forgetDebugHost(source) (all awaitable),
+  // -> { ok, canceled, host, error }, forgetDebugHost(source),
+  // debugProgramFor(source) -> { ok, program, error } (all awaitable),
   // terminalWrite(text), terminalReset(), terminalSize() -> { cols, rows }
   // (PcTerminal: the program's terminal)
   function init(AMonaco, AEditor, ADeps) {

@@ -1,0 +1,63 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  AssetPacker.pcpp - the program behind pcpp pack
+
+  pcpp pack builds this program into the project's <output>\pack folder and
+  runs it as AssetPacker <archive> <folder> <password>: every file under
+  <folder> goes into a new zip <archive> through CustomIO's
+  ZipDirectoryContents (the one zip writer: deflated at the best level,
+  ZipCrypto with <password> unless it is empty), each entry named by its
+  path below <folder>. pcpp passes <root>\assets, <output>\bin\<name>.dat
+  and project.toml's password.
+
+  Prints each entry as it is written ("  <entry>"), then "entries <n>";
+  exit 0. On failure it prints ZipLastError()'s reason, exit 1; any other
+  number of arguments prints its usage, exit 2.
+*******************************************************************************/
+
+module exe AssetPacker;
+
+@optimize fast;
+
+import
+  CustomIO,
+  SysUtils;
+
+var
+  GEntries: int32;
+
+// ZipDirectoryContents' progress: each entry's name once, on its first call
+routine ShowEntry(const AUserData: ptr; const AEntry: string; const APercent: int32; const ANewFile: bool);
+begin
+  if ANewFile then
+    println("  {}", AEntry);
+    GEntries := GEntries + 1;
+  end;
+end;
+
+begin
+  if paramcount() <> 3 then
+    println("usage: AssetPacker <archive> <folder> <password>");
+    Halt(2);
+  end;
+
+  GEntries := 0;
+  if not ZipDirectoryContents(paramstr(1), paramstr(2), paramstr(3), "", ShowEntry, nil) then
+    println("{}", ZipLastError());
+    Halt(1);
+  end;
+  println("entries {}", GEntries);
+end.

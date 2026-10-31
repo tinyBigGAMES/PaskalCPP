@@ -1,0 +1,239 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_customio_zipinfo.pcpp - Std: CustomIO GetZipEntryInfo and IOCopy
+
+  The test writes a folder in repo\bin\output (a 5-byte text, an empty file,
+  a 300000-byte file of noise that deflate cannot shrink, so its entry is
+  read in place) and packs it twice with ZipDirectoryContents: with no
+  password and with one. GetZipEntryInfo reads each entry's size and CRC
+  from the directory ("hello" has CRC 3610A686, an empty file 0); the
+  encrypted archive gives the same info with the right, a wrong or no
+  password (the directory is never encrypted). A missing entry, a folder, a
+  refused path, "", a missing archive and a file that is no zip fail and
+  leave the record as it was. IOCopy copies an entry whole into a memory IO
+  (the count returned, the bytes equal to the file's), the empty entry (0),
+  the encrypted entry with its password, and a file into a file; nil on
+  either side and a read-only destination give -1. A copy of the noise
+  entry after bytes inside its data were overwritten gives -1 (the decode
+  or CRC check fails its read) while its info still reads. Everything the
+  test wrote is removed at the end ("cleaned"). Each row prints ok or FAIL
+  with its name.
+*******************************************************************************/
+
+module exe std_customio_zipinfo;
+
+/*
+  @@test
+    kind run
+    expect
+    | ok made
+    | ok packed
+    | ok packed secret
+    | ok info text
+    | ok info text size
+    | ok info text crc
+    | ok info empty
+    | ok info empty crc
+    | ok info noise size
+    | ok info secret right
+    | ok info secret wrong
+    | ok info secret none
+    | ok info secret same
+    | ok info missing
+    | ok info missing kept
+    | ok info folder
+    | ok info refused
+    | ok info empty path
+    | ok info missing archive
+    | ok info no zip
+    | ok copy entry
+    | ok copy entry bytes
+    | ok copy empty entry
+    | ok copy secret entry
+    | ok copy file
+    | ok copy file bytes
+    | ok copy nil source
+    | ok copy nil dest
+    | ok copy read only
+    | ok damaged
+    | ok copy damaged
+    | ok info damaged
+    | ok cleaned
+    | [Heap] Allocs: 57, Frees: 57, Leaked: 0
+  @@end
+*/
+
+import
+  CustomIO,
+  SysUtils;
+
+#include <string>
+
+// ACount bytes of a fixed pseudo-random sequence (an LCG's high bytes):
+// deflate cannot shrink them, so the entry stays larger than the 256 KB a
+// zip entry IO reads whole when opened
+std::string NoiseBytes(const int ACount)
+{
+  std::string LBytes;
+  LBytes.reserve(static_cast<std::size_t>(ACount));
+  unsigned int LSeed = 12345u;
+  for (int LIndex = 0; LIndex < ACount; ++LIndex)
+  {
+    LSeed = LSeed * 1103515245u + 12345u;
+    LBytes.push_back(static_cast<char>((LSeed >> 16) & 0xFF));
+  }
+  return LBytes;
+}
+
+routine Check(const AName: string; const AGot: bool);
+begin
+  if AGot then
+    println("ok {}", AName);
+  else
+    println("FAIL {}", AName);
+  end;
+end;
+
+// True when AIO, read from its start, holds the same bytes as the file AFile
+routine SameAsFile(const AIO: IO; const AFile: string): bool;
+var
+  LFile: IO;
+  LSame: bool;
+begin
+  LFile := CreateFileIO(AFile, FileMode.Read);
+  if LFile = nil then
+    return false;
+  end;
+  IOSeek(AIO, 0, SeekOrigin.FromStart);
+  LSame := IOSameContent(AIO, LFile);
+  IOClose(LFile);
+  return LSame;
+end;
+
+// Overwrites 64 bytes of a file at AOffset (inside an entry's data)
+routine Damage(const APath: string; const AOffset: int64): bool;
+var
+  LIO: IO;
+  LJunk: string;
+  LOk: bool;
+begin
+  LIO := CreateFileIO(APath, FileMode.ReadWrite);
+  if LIO = nil then
+    return false;
+  end;
+  LJunk := "UUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUUU";
+  LOk := IOSeek(LIO, AOffset, SeekOrigin.FromStart) = AOffset;
+  LOk := LOk and (IOWriteFull(LIO, LJunk.data(), 64) = 64);
+  return IOClose(LIO) and LOk;
+end;
+
+var
+  LDir: string;
+  LZip: string;
+  LSecret: string;
+  LInfo: ZipEntryInfo;
+  LSecretInfo: ZipEntryInfo;
+  LSource: IO;
+  LDest: IO;
+  LCopied: int64;
+  LCopy: string;
+begin
+  LDir := "$P:../std_customio_zipinfo_dir";
+  LZip := "$P:../std_customio_zipinfo.zip";
+  LSecret := "$P:../std_customio_zipinfo_secret.zip";
+  LCopy := "$P:../std_customio_zipinfo_copy.bin";
+
+  // The folder: a text, an empty file, noise one folder down
+  Check("made", ForceDirectories(LDir + "/sub") and WriteAllText(LDir + "/a.txt", "hello") and
+    WriteAllText(LDir + "/empty.txt", "") and WriteAllText(LDir + "/sub/noise.bin", NoiseBytes(300000)));
+  Check("packed", ZipDirectoryContents(LZip, LDir, ""));
+  Check("packed secret", ZipDirectoryContents(LSecret, LDir, "secret"));
+
+  // GetZipEntryInfo: the directory's size and CRC
+  Check("info text", GetZipEntryInfo(LZip, "a.txt", "", LInfo));
+  Check("info text size", LInfo.Size = 5);
+  Check("info text crc", LInfo.Crc = uint32(0x3610A686));
+  Check("info empty", GetZipEntryInfo(LZip, "empty.txt", "", LInfo) and (LInfo.Size = 0));
+  Check("info empty crc", LInfo.Crc = uint32(0));
+  Check("info noise size", GetZipEntryInfo(LZip, "sub/noise.bin", "", LInfo) and (LInfo.Size = 300000));
+  Check("info secret right", GetZipEntryInfo(LSecret, "sub/noise.bin", "secret", LSecretInfo));
+  Check("info secret wrong", GetZipEntryInfo(LSecret, "sub/noise.bin", "wrong", LSecretInfo));
+  Check("info secret none", GetZipEntryInfo(LSecret, "sub/noise.bin", "", LSecretInfo));
+  Check("info secret same", (LSecretInfo.Size = LInfo.Size) and (LSecretInfo.Crc = LInfo.Crc));
+  LInfo.Size := -7;
+  Check("info missing", not GetZipEntryInfo(LZip, "none.txt", "", LInfo));
+  Check("info missing kept", LInfo.Size = -7);
+  Check("info folder", not GetZipEntryInfo(LZip, "sub", "", LInfo));
+  Check("info refused", not GetZipEntryInfo(LZip, "../a.txt", "", LInfo));
+  Check("info empty path", not GetZipEntryInfo(LZip, "", "", LInfo));
+  Check("info missing archive", not GetZipEntryInfo("$P:../no_such_archive.zip", "a.txt", "", LInfo));
+  Check("info no zip", not GetZipEntryInfo(LDir + "/a.txt", "a.txt", "", LInfo));
+
+  // IOCopy: an entry into memory, read in place and CRC checked
+  LSource := CreateZipFileIO(LZip, "sub/noise.bin");
+  LDest := CreateMemoryIO();
+  LCopied := IOCopy(LSource, LDest);
+  IOClose(LSource);
+  Check("copy entry", LCopied = 300000);
+  Check("copy entry bytes", SameAsFile(LDest, LDir + "/sub/noise.bin"));
+  IOClose(LDest);
+  LSource := CreateZipFileIO(LZip, "empty.txt");
+  LDest := CreateMemoryIO();
+  Check("copy empty entry", IOCopy(LSource, LDest) = 0);
+  IOClose(LSource);
+  IOClose(LDest);
+  LSource := CreateZipFileIO(LSecret, "sub/noise.bin", "secret");
+  LDest := CreateMemoryIO();
+  Check("copy secret entry", (IOCopy(LSource, LDest) = 300000) and SameAsFile(LDest, LDir + "/sub/noise.bin"));
+  IOClose(LSource);
+  IOClose(LDest);
+
+  // A file into a file
+  LSource := CreateFileIO(LDir + "/sub/noise.bin", FileMode.Read);
+  LDest := CreateFileIO(LCopy, FileMode.Write);
+  Check("copy file", IOCopy(LSource, LDest) = 300000);
+  IOClose(LSource);
+  IOClose(LDest);
+  LDest := CreateFileIO(LCopy, FileMode.Read);
+  Check("copy file bytes", SameAsFile(LDest, LDir + "/sub/noise.bin"));
+  IOClose(LDest);
+
+  // nil on either side, and a destination that takes no writes
+  LDest := CreateMemoryIO();
+  Check("copy nil source", IOCopy(nil, LDest) = -1);
+  IOClose(LDest);
+  LSource := CreateFileIO(LDir + "/a.txt", FileMode.Read);
+  Check("copy nil dest", IOCopy(LSource, nil) = -1);
+  LDest := CreateFileIO(LCopy, FileMode.Read);
+  Check("copy read only", IOCopy(LSource, LDest) = -1);
+  IOClose(LSource);
+  IOClose(LDest);
+
+  // The noise entry's data overwritten (its entry is the zip's last, so
+  // 100000 bytes before the directory is well inside it): the copy fails,
+  // the directory still reads
+  Check("damaged", Damage(LZip, FileSize(LZip) - 100000));
+  LSource := CreateZipFileIO(LZip, "sub/noise.bin");
+  LDest := CreateMemoryIO();
+  Check("copy damaged", (LSource <> nil) and (IOCopy(LSource, LDest) = -1));
+  IOClose(LSource);
+  IOClose(LDest);
+  Check("info damaged", GetZipEntryInfo(LZip, "sub/noise.bin", "", LInfo) and (LInfo.Size = 300000));
+
+  Check("cleaned", DeleteFile(LZip) and DeleteFile(LSecret) and DeleteFile(LCopy) and
+    DeleteFile(LDir + "/a.txt") and DeleteFile(LDir + "/empty.txt") and DeleteFile(LDir + "/sub/noise.bin") and
+    RemoveDir(LDir + "/sub") and RemoveDir(LDir));
+end.

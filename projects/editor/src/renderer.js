@@ -125,8 +125,9 @@ var PcEditor = (function () {
     LDirty = isDirty(LTab);
     PcShell.setTitle((LDirty ? '* ' : '') + tabLabel(LTab) + ' - PaskalCPP Editor');
     PcShell.setFileState(LDirty, anyDirty(), !!LTab.path);
-    // main.js guards the window close with this: any tab unsaved
-    window.host.setDocState({ title: tabLabel(LTab), dirty: anyDirty() });
+    // main.js guards the window close with this: any tab unsaved; Pack's
+    // menu state follows the active file ('' = untitled)
+    window.host.setDocState({ title: tabLabel(LTab), dirty: anyDirty(), path: LTab.path || '' });
     PcExplorer.setActive(LTab.path);
     syncSession();
     syncFileWatch();
@@ -1388,18 +1389,81 @@ var PcEditor = (function () {
       rows: LSize.rows
     });
     if (!LRes.ok) {
-      // Nothing was spawned, so no build:exit will follow
-      gBuildActive = false;
-      gBuildRun = false;
-      PcShell.setBusy(false);
-      PcShell.outputLine(LRes.error);
-      PcShell.setBuildState('failed');
+      buildRefused(LRes.error);
     }
+  }
+
+  // main.js refused to start a build / run / pack: nothing was spawned, so
+  // no build:exit will follow
+  function buildRefused(AError) {
+    gBuildActive = false;
+    gBuildRun = false;
+    PcShell.setBusy(false);
+    PcShell.outputLine(AError);
+    PcShell.setBuildState('failed');
   }
 
   function doStop() {
     if (gBuildActive) {
       window.host.buildStop();
+    }
+  }
+
+  // Build > Pack (Ctrl+Alt+B): pcpp pack on the active file's project
+  // (main.js finds it and refuses a file outside one), shown as a build
+  // is: OUTPUT, the build state, build:exit. Nothing is saved first: pack
+  // reads assets\, never the open sources
+  async function doPack() {
+    var LTab = activeTab();
+    var LRes;
+
+    if (gBuildActive) {
+      return;
+    }
+    if (PcDebug.isActive()) {
+      PcShell.outputLine('Pack: a debug session is active: stop it first (Shift+F5).');
+      return;
+    }
+    if (!LTab || !LTab.path) {
+      PcShell.showPanel('output');
+      PcShell.outputLine('Pack: the active file is not in a project.');
+      return;
+    }
+    gBuildActive = true;
+    gBuildRun = false;
+    PcShell.clearOutput();
+    clearProblems();
+    PcShell.showPanel('output');
+    PcShell.setBusy(true);
+    PcShell.setBuildState('packing');
+    LRes = await window.host.buildStart({ file: LTab.path, pack: true });
+    if (!LRes.ok) {
+      buildRefused(LRes.error);
+    }
+  }
+
+  // File > New Project: the dialog (src/newproject.js) takes the name, the
+  // type and the folder, and main.js runs pcpp init; a failure stays in
+  // the dialog. Made: the project folder opens in the explorer, its main
+  // module in a tab (which reveals it in the tree), pcpp's lines in OUTPUT
+  function doNewProject() {
+    PcNewProject.open(onProjectCreated, function () {
+      gEditor.focus();
+    });
+  }
+
+  async function onProjectCreated(ARes) {
+    PcExplorer.setFolders(ARes.folders);
+    PcShell.clearOutput();
+    PcShell.showPanel('output');
+    if (ARes.output) {
+      PcShell.output(ARes.output);
+    }
+    // The starter module pcpp init wrote (main.js asked pcpp for it)
+    if (ARes.main) {
+      await openPath(ARes.main);
+    } else {
+      PcShell.outputLine('New Project: ' + ARes.root + ' made, but pcpp named no main module.');
     }
   }
 
@@ -1613,6 +1677,8 @@ var PcEditor = (function () {
       doOpen();
     } else if (ACommand === 'openFolder') {
       doOpenFolder();
+    } else if (ACommand === 'newProject') {
+      doNewProject();
     } else if (ACommand === 'closeAllFolders') {
       doCloseAllFolders();
     } else if (ACommand === 'toggleExamples') {
@@ -1635,6 +1701,8 @@ var PcEditor = (function () {
       doBuild(false);
     } else if (ACommand === 'run') {
       doBuild(true);
+    } else if (ACommand === 'pack') {
+      doPack();
     } else if (ACommand === 'stop') {
       // One Stop: the debug session's, else the build / run's
       if (PcDebug.isActive()) {
@@ -1671,6 +1739,9 @@ var PcEditor = (function () {
     // F5 is the debugger's (W2); run without debugging = Ctrl+F5 (VS / VS Code)
     { cmd: 'run', ctrl: true, shift: false, key: 'F5' },
     { cmd: 'stop', ctrl: false, shift: true, key: 'F5' },
+    // Pack: only a project's; main.js refuses outside one (the menu item
+    // is disabled there, a key binding cannot be)
+    { cmd: 'pack', ctrl: true, shift: false, alt: true, key: 'KeyB' },
     { cmd: 'debugStart', ctrl: false, shift: false, key: 'F5' },
     { cmd: 'debugStepOver', ctrl: false, shift: false, key: 'F10' },
     { cmd: 'debugStepIn', ctrl: false, shift: false, key: 'F11' },
@@ -1824,6 +1895,7 @@ var PcEditor = (function () {
       debugHostFor: window.host.dapHostFor,
       pickDebugHost: window.host.dapPickHost,
       forgetDebugHost: window.host.dapForgetHost,
+      debugProgramFor: window.host.projectDebugProgram,
       terminalWrite: PcTerminal.write,
       terminalReset: PcTerminal.reset,
       terminalSize: PcTerminal.size

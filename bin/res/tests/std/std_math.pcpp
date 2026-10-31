@@ -38,7 +38,9 @@
   the seeds themselves differ every run). The Easing and Random
   rows are scripts\vendor\math\math_expected.py's (the prior art's Penner
   forms; an MT19937 of its own, checked against the C++ standard's value),
-  the other rows were computed by hand.
+  the other rows were computed by hand. CosineSimilarity: parallel,
+  right-angled, opposite, zero, empty and 45-degree vectors (1 / sqrt(2)),
+  float64 too, and two lengths raising EXC_SOFTWARE.
 *******************************************************************************/
 
 module exe std_math;
@@ -171,6 +173,9 @@ module exe std_math;
     | round 2 4 -2 -3 3 0
     | trunc floor ceil -2 -3 -2 2 2 3 2
     | trunc lowest -9223372036854775808
+    | cosine 1.000000 0.000000 -1.000000 0.000000 0.000000 0.707107
+    | cosine float64 0.000000 0.960000
+    | cosine mismatch 1 CosineSimilarity: the vectors differ in length
     | round nan 5 Round: the value is outside the int64 range
     | floor inf 5 Floor: the value is outside the int64 range
     | trunc big 5 Trunc: the value is outside the int64 range
@@ -186,6 +191,59 @@ import Math;
 routine Volume(const ALevel: float64);
 begin
   println("volume {} -> {:.4f}", ALevel, PerceivedVolume(ALevel, 100.0));
+end;
+
+// A float32 vector of three values
+routine Vec3(const AX: float32; const AY: float32; const AZ: float32): array of float32;
+var
+  LVector: array of float32;
+begin
+  setlength(LVector, 3);
+  LVector[0] := AX;
+  LVector[1] := AY;
+  LVector[2] := AZ;
+  return LVector;
+end;
+
+// A float64 vector of two values
+routine Vec2d(const AX: float64; const AY: float64): array of float64;
+var
+  LVector: array of float64;
+begin
+  setlength(LVector, 2);
+  LVector[0] := AX;
+  LVector[1] := AY;
+  return LVector;
+end;
+
+// CosineSimilarity: the same direction (length does not count) 1, right
+// angles 0, opposite -1, a zero vector 0, two empty ones 0, 45 degrees
+// 1 / sqrt(2); float64 too; vectors of two lengths raise
+routine CosineRows();
+var
+  LEmpty: array of float32;
+  LShort: array of float32;
+  LScore: float64;
+begin
+  setlength(LEmpty, 0);
+  setlength(LShort, 2);
+  LShort[0] := 1.0f;
+  LShort[1] := 2.0f;
+  println("cosine {:.6f} {:.6f} {:.6f} {:.6f} {:.6f} {:.6f}",
+    CosineSimilarity(Vec3(1.0f, 2.0f, 3.0f), Vec3(2.0f, 4.0f, 6.0f)),
+    CosineSimilarity(Vec3(1.0f, 2.0f, 3.0f), Vec3(-2.0f, 1.0f, 0.0f)),
+    CosineSimilarity(Vec3(1.0f, 2.0f, 3.0f), Vec3(-1.0f, -2.0f, -3.0f)),
+    CosineSimilarity(Vec3(1.0f, 2.0f, 3.0f), Vec3(0.0f, 0.0f, 0.0f)),
+    CosineSimilarity(LEmpty, LEmpty),
+    CosineSimilarity(Vec3(1.0f, 0.0f, 0.0f), Vec3(1.0f, 1.0f, 0.0f)));
+  println("cosine float64 {:.6f} {:.6f}", CosineSimilarity(Vec2d(1.0, 0.0), Vec2d(0.0, 1.0)),
+    CosineSimilarity(Vec2d(3.0, 4.0), Vec2d(4.0, 3.0)));
+  guard
+    LScore := CosineSimilarity(Vec3(1.0f, 2.0f, 3.0f), LShort);
+    println("cosine mismatch none {}", LScore);
+  except
+    println("cosine mismatch {} {}", exccode(), excmsg());
+  end;
 end;
 
 routine RoundTrip(const ALevel: float64);
@@ -564,6 +622,7 @@ begin
     Floor(2.5), Ceil(2.1), Floor(LWrap32));
   // -2^63 is the one float64 at the bottom edge that still fits int64
   println("trunc lowest {}", Trunc(-9223372036854775808.0));
+  CosineRows();
   // The refusals: no integer stands for these, so each raises rather than
   // giving C++'s undefined conversion
   guard

@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  prj_pack_err_cwd.pcpp - Projects: pcpp pack with no folder, in a folder
+  with no project.toml
+
+  With no folder named, pack takes the current one (never searched above),
+  as pcpp build does: the suite's output root holds no project.toml, a bad
+  argument (exit 2). A cli test (pcpp itself, in the suite's output root);
+  this file itself is never compiled.
+*******************************************************************************/
+
+module exe prj_pack_err_cwd;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner pack"
+    exitcode 2
+    expect
+    | Error: No project.toml in <OUT>
+  @@end
+*/
+
+begin
+end.

@@ -1,0 +1,49 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  prj_inside.pcpp - Projects: $R: in a project build
+
+  This file is the main module of the project.toml in the folder above it, so
+  it builds as a project and $R: names that folder (the project root). Its
+  @addmodulepath "$R:units" is the only way the import below is found:
+  prj_inside_unit lives in the project's units\, not beside this file. A
+  .pcpp in the project that is not its main module builds as a plain file
+  (prj_inside_err_other, prj_inside_err_password).
+  ProjectPassword() is project.toml's pack password in a project build, in
+  the main module and in the units it imports alike; this project.toml has
+  no [pack] password, so it is "" in both.
+*******************************************************************************/
+
+module exe prj_inside;
+
+/*
+  @@test
+    kind run
+    expect
+    | prj_inside_unit.Value() = 7
+    | len(ProjectPassword()) = 0
+    | len(prj_inside_unit.Secret()) = 0
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addmodulepath "$R:units";
+import prj_inside_unit;
+
+begin
+  println("prj_inside_unit.Value() = {}", prj_inside_unit.Value());
+  println("len(ProjectPassword()) = {}", len(ProjectPassword()));
+  println("len(prj_inside_unit.Secret()) = {}", len(prj_inside_unit.Secret()));
+end.

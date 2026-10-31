@@ -25,14 +25,19 @@
   long-path spelling past it (\\?\, \\?\UNC\), both slash forms read alike.
   Linux: the plain /... path at any length. Resolving a result again gives it
   back. Overloads take a string or a ptr to const char (nil = ""); an empty
-  path gives "". ExeDir is the executable's folder, no trailing separator.
+  path gives "". $R: (the compiler's project root, a build-time prefix)
+  gives "" too: a program has no project. ExeDir is the executable's folder,
+  no trailing separator.
   FileExists is true for an existing file only (not a folder, a missing
   path, "" or nil), the string and the ptr to const char overload alike; it
   resolves its path itself, so "$P:..." works as written. CreateDir
   makes one folder (not one that exists, not below a missing parent, not
   ""); RemoveDir removes an empty folder only (not one holding a folder,
   not a file, not a missing one, not ""). DeleteFile deletes a file the
-  program wrote (not twice, not a folder, not ""). Delay(N) waits at
+  program wrote (not twice, not a folder, not ""). WriteAllText and
+  ReadAllText round trip a file's bytes (CR LF and UTF-8 kept, a file
+  replaced whole, "" written and read; not a folder, not a missing file or
+  folder, not ""). Delay(N) waits at
   least N milliseconds (steady clock, whole milliseconds); 0 or less returns
   at once (well under a second).
   The names are called bare (only SysUtils exports them); the "qualified"
@@ -69,6 +74,9 @@ module exe std_sysutils;
     | ok   blanks
     | ok   prefix only
     | ok   again
+    | ok   R prefix
+    | ok   R prefix base
+    | ok   R prefix ptr
     | ok   ptr
     | ok   ptr base
     | ok   ptr nil
@@ -102,6 +110,21 @@ module exe std_sysutils;
     | ok   delete again
     | ok   delete folder
     | ok   delete empty
+    | ok   write text
+    | ok   read text
+    | ok   read bytes
+    | ok   write replaces
+    | ok   read replaced
+    | ok   write empty text
+    | ok   read empty text
+    | ok   read missing
+    | ok   read missing text
+    | ok   read folder
+    | ok   write folder
+    | ok   write missing folder
+    | ok   read empty path
+    | ok   write empty path
+    | ok   text deleted
     | ok   utf8
     | ok   at 247
     | ok   past 247
@@ -181,6 +204,7 @@ var
   LFile: string;
   LStart: int64;
   LDir: string;
+  LBack: string;
 
 begin
   LExe := ExeDir();
@@ -221,6 +245,12 @@ begin
   Check("blanks", ResolvePath("   "), "");
   Check("prefix only", ResolvePath("$P:  "), "");
   Check("again", ResolvePath(ResolvePath("$P:a/../b")), ResolvePath("$P:a/../b"));
+  // $R: (the project root) is the compiler's build-time prefix only: a
+  // program has no project, so it fails plainly, base given or not
+  Check("R prefix", ResolvePath("$R:f.txt"), "");
+  Check("R prefix base", ResolvePath("$r:f.txt", LBase), "");
+  LCPath := "$R:c.txt";
+  Check("R prefix ptr", ResolvePath(LCPath), "");
 
   LCPath := "$P:c.txt";
   Check("ptr", ResolvePath(LCPath), LExe + "/c.txt");
@@ -300,6 +330,27 @@ begin
   CheckBool("delete again", DeleteFile(LDir), false);
   CheckBool("delete folder", DeleteFile(LExe), false);
   CheckBool("delete empty", DeleteFile(""), false);
+
+  // ReadAllText / WriteAllText on the same file: bytes as written (CR LF
+  // and UTF-8 kept), a file replaced whole, "" written and read; a folder,
+  // a missing file or folder, "" refused
+  CheckBool("write text", WriteAllText(LDir, "one\r\nzwei ö\n"), true);
+  CheckBool("read text", ReadAllText(LDir, LBack), true);
+  CheckBool("read bytes", LBack = "one\r\nzwei ö\n", true);
+  CheckBool("write replaces", WriteAllText(LDir, "x"), true);
+  ReadAllText(LDir, LBack);
+  CheckBool("read replaced", LBack = "x", true);
+  CheckBool("write empty text", WriteAllText(LDir, ""), true);
+  CheckBool("read empty text", ReadAllText(LDir, LBack) and (LBack = ""), true);
+  LBack := "stale";
+  CheckBool("read missing", ReadAllText("$P:no_such_file.txt", LBack), false);
+  CheckBool("read missing text", LBack = "", true);
+  CheckBool("read folder", ReadAllText(LExe, LBack), false);
+  CheckBool("write folder", WriteAllText(LExe, "x"), false);
+  CheckBool("write missing folder", WriteAllText("$P:../no_such_folder_sysutils/f.txt", "x"), false);
+  CheckBool("read empty path", ReadAllText("", LBack), false);
+  CheckBool("write empty path", WriteAllText("", "x"), false);
+  CheckBool("text deleted", DeleteFile(LDir), true);
 
 @ifdef TARGET_X86_64_WINDOWS_GNU
   Check("utf8", ResolvePath("C:\\ünï\\..\\ö.txt"), "C:/ö.txt");

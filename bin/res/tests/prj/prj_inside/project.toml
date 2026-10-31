@@ -1,0 +1,7 @@
+# prj test project: prj_inside (its main module builds as a project: $R: is this folder)
+format = 1
+
+[project]
+name = "prj_inside"
+type = "exe"
+main = "src/prj_inside.pcpp"

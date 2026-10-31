@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  prj_init_err_name.pcpp - Projects: pcpp init with a name that cannot be one
+
+  The name follows the project's rule (an identifier, no reserved word, no
+  device name): PJ0005 before any file is written, exit 1. A cli test (pcpp
+  itself, in the suite's output root); this file itself is never compiled.
+*******************************************************************************/
+
+module exe prj_init_err_name;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner init my-game exe"
+    exitcode 1
+    expect
+    | [ERROR] PJ0005: The project name 'my-game' is not valid: it must start with a letter or _ and hold only letters, digits and _
+    | Failed.
+  @@end
+*/
+
+begin
+end.

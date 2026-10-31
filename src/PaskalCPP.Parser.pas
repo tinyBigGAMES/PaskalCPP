@@ -184,6 +184,8 @@ const
   PC_ERR_PAR_063 = 'PR0063';   // a balanced group's opener never closed before EOF, reported at the opener (PLAN-COMPLIANCE F56)
   { PC_ERR_PAR_064 }
   PC_ERR_PAR_064 = 'PR0064';   // char literal warning (esWarning), value kept (F65)
+  { PC_ERR_PAR_065 }
+  PC_ERR_PAR_065 = 'PR0065';   // a path directive uses $R: and the build has no project
 
 type
 
@@ -302,6 +304,7 @@ type
     FModulePaths: TArray<string>;    // module search folders, resolved, in the order added, no duplicates (AddModulePath)
     FSourceProvider: TPCSourceProvider; // texts that win over the disk (nil = disk only); every import gets it
     FUnitMainAllowed: Boolean;       // the main file is checked, not built: a unit is fine (no PR0004)
+    FProjectRoot: string;            // the project's folder $R: resolves against ('' = no project: $R: is PR0065); every import gets it
     FModule: TPCModule;
     FKindAssumed: Boolean;           // the header gave no kind: DoAssumedKind() stands in
     FLastToken: TPCToken;            // the last token DoAdvance consumed
@@ -686,6 +689,9 @@ type
     // built: "a unit cannot be the main module" (PR0004) is a build rule.
     // Imports are not main files; this parser alone is affected
     procedure SetUnitMainAllowed(const AAllowed: Boolean);
+    // The project root a $R: path directive resolves against, for this file
+    // and every import ('' = the build has no project: $R: is PR0065)
+    procedure SetProjectRoot(const ARoot: string);
     function Parse(): TPCModule;
     // True when AToken can begin an operand: a prefix operator, a primary
     // form's first token, a primitive (a type cast when '(' follows). Pure;
@@ -703,10 +709,12 @@ type
 // none). Imports are parsed by the parser itself (DoParseImportFile).
 // ASourceProvider: texts that win over the disk (nil = disk only).
 // AUnitMainAllowed: the main file is checked, not built (SetUnitMainAllowed).
+// AProjectRoot: the project's folder for $R: ('' = no project; SetProjectRoot).
 function ParseModuleFile(const AAst: TPCAst; const AErrors: TErrors; const AFilename: string;
   const AImportChain: TArray<string>; const AMainTarget: TPCTargetTriple;
   const AOverrideTarget: TPCTargetTriple; const ADefaultTarget: TPCTargetTriple; const AModulePaths: TArray<string>;
-  const ASourceProvider: TPCSourceProvider = nil; const AUnitMainAllowed: Boolean = False): TPCModule;
+  const ASourceProvider: TPCSourceProvider = nil; const AUnitMainAllowed: Boolean = False;
+  const AProjectRoot: string = ''): TPCModule;
 
 implementation
 
@@ -930,7 +938,8 @@ const
 function ParseModuleFile(const AAst: TPCAst; const AErrors: TErrors; const AFilename: string;
   const AImportChain: TArray<string>; const AMainTarget: TPCTargetTriple;
   const AOverrideTarget: TPCTargetTriple; const ADefaultTarget: TPCTargetTriple; const AModulePaths: TArray<string>;
-  const ASourceProvider: TPCSourceProvider; const AUnitMainAllowed: Boolean): TPCModule;
+  const ASourceProvider: TPCSourceProvider; const AUnitMainAllowed: Boolean;
+  const AProjectRoot: string): TPCModule;
 var
   LParser: TPCParser;
   LPath: string;
@@ -943,6 +952,7 @@ begin
       LParser.AddModulePath(LPath);
     LParser.SetSourceProvider(ASourceProvider);
     LParser.SetUnitMainAllowed(AUnitMainAllowed);
+    LParser.SetProjectRoot(AProjectRoot);
     Result := LParser.Parse();
   finally
     LParser.Free();
@@ -967,6 +977,7 @@ begin
   FModule := nil;
   FSourceProvider := nil;
   FUnitMainAllowed := False;
+  FProjectRoot := '';
   FLastToken.Clear();
   FTemplateFails := TDictionary<string, Boolean>.Create();
 end;
@@ -1963,10 +1974,18 @@ function TPCParser.DoResolveDirectivePath(const ADirectiveName: string;
   const AToken: TPCToken; const AValue: string; out APath: string): Boolean;
 begin
   // Every path directive resolves here, once, no base (an unprefixed relative
-  // path resolves against the CWD); nothing resolves it again (PROJECT.md).
-  // False = PR0022 reported, APath ''
+  // path resolves against the CWD; $R: against the project root); nothing
+  // resolves it again (PROJECT.md). False = PR0022 / PR0065 reported, APath ''
+  if AValue.Trim().StartsWith(PATH_PREFIX_PROJECT, True) and FProjectRoot.Trim().IsEmpty() then
+  begin
+    // A PaskalCPP rule of its own, not "cannot be resolved": the build has
+    // no project.toml above its main module, so $R: names nothing
+    DoError(AToken, PC_ERR_PAR_065, RSParNoProjectRoot, [ADirectiveName, AValue]);
+    APath := '';
+    Exit(False);
+  end;
   try
-    APath := TUtils.ResolvePath(AValue);
+    APath := TUtils.ResolvePath(AValue, '', FProjectRoot);
     Result := True;
   except
     on E: Exception do
@@ -2027,6 +2046,8 @@ begin
     for LPath in FModulePaths do
       LParser.DoAddSearchPath(LPath);
     LParser.SetSourceProvider(FSourceProvider);
+    // One project per build: an import's $R: names the same root
+    LParser.SetProjectRoot(FProjectRoot);
     Result := LParser.Parse();
   finally
     LParser.Free();
@@ -2044,6 +2065,11 @@ end;
 procedure TPCParser.SetUnitMainAllowed(const AAllowed: Boolean);
 begin
   FUnitMainAllowed := AAllowed;
+end;
+
+procedure TPCParser.SetProjectRoot(const ARoot: string);
+begin
+  FProjectRoot := ARoot;
 end;
 
 function TPCParser.DoTokenizeSource(): Boolean;

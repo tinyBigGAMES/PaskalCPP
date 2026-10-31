@@ -1,0 +1,59 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_llama.pcpp - Std library compliance: the llama unit
+  (res\libs\std\llama.pcpp)
+
+  A smoke row for the thin import: the program links libllama.a and its
+  system libraries on the target, routes llama's log to a PaskalCPP
+  callback (llama_log_set), starts llama's backend (the ggml backend
+  registry, Vulkan included, comes up with or without a GPU), finds the CPU
+  backend by name, reads a build fact of the CPU backend (the x86-64-v3
+  baseline has AVX2) and a constant from llama.h, then frees the backend.
+  Model loading and generation are llama_ext's rows.
+*******************************************************************************/
+
+module exe std_llama;
+
+/*
+  @@test
+    kind run
+    expect
+    | mmap true
+    | cpu backend CPU
+    | avx2 1
+    | default seed 4294967295
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  llama;
+
+// llama's and ggml's log reports the machine (which Vulkan devices it
+// found), so the row routes it here and drops it: only fixed facts print
+routine clink QuietLog(ALevel: ggml_log_level; AText: ptr to const char; AUserData: ptr);
+begin
+end;
+
+begin
+  llama_log_set(QuietLog, nil);
+  llama_backend_init();
+  println("mmap {}", llama_supports_mmap());
+  println("cpu backend {}", ggml_backend_reg_name(ggml_backend_reg_by_name("CPU")));
+  println("avx2 {}", ggml_cpu_has_avx2());
+  println("default seed {}", LLAMA_DEFAULT_SEED);
+  llama_backend_free();
+end.

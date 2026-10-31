@@ -1,0 +1,2431 @@
+/*===============================================================================
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0 WITH AdditionRef-PaskalCPP-Runtime-Exception
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+
+  This file is covered by the PaskalCPP Runtime Exception
+  (RUNTIME-EXCEPTION.md).
+-------------------------------------------------------------------------------
+  llama_ext.pcpp - the llama_ext unit: `import llama_ext;` runs a GGUF
+  language model with llama.cpp in a few lines: load a model, then chat
+  with it or have it continue a prompt, its text streamed piece by piece
+  when the caller wants it as it comes.
+
+  LoadLlamaModel loads a model from a file with as many of its layers on
+  the GPU (the Vulkan backend, any vendor) as fit the free device memory,
+  and a context as large as fits: llama.cpp's own fit (common_fit_params,
+  what llama-cli's --fit does). Without a Vulkan driver the CPU runs it.
+  LoadLlamaModelZip loads one from a zip entry (a password for an
+  encrypted archive), so a family of models can ship in one zip: the
+  entry is streamed once into a cache file (LlamaOptions.CacheDir, the
+  temporary folder by default) that later loads reuse while the entry's
+  CRC and size match.
+
+  GenerateLlama continues a prompt as written (no chat template) in a
+  context of its own, until the model ends its text or the context is
+  full. A LlamaChat holds a conversation: a system prompt, the turns so far
+  and the context they fill. SayLlamaChat adds a message and gives back the
+  reply, the history rendered by the model's own chat template (Jinja,
+  through llama.cpp's common chat code; chatml for a model that has none).
+  Sampling is llama.cpp's default: top-k 40, top-p 0.95, min-p 0.05,
+  temperature 0.8, a random seed.
+
+  The advanced layer: EmbedLlama gives a text's embedding (compare two
+  with Math's CosineSimilarity), TokenizeLlama / DetokenizeLlama turn
+  text into the model's tokens and back, LlamaOptions' Grammar (GBNF) or
+  JsonSchema hold the output to a form, and ListLlamaDevices names the
+  GPUs and the CPU llama.cpp can run on.
+
+  llama.cpp's log comes to this unit, which prints none of it: the first
+  error line of a load or a context becomes the ErrorMessage of the call
+  that failed. A program that wants llama.cpp's log sets its own callback
+  (llama_log_set) after its first load. The raw API (`import llama;`) stays
+  usable on the same models and contexts.
+==============================================================================*/
+
+module unit llama_ext;
+
+import
+  llama,
+  SysUtils,
+  CustomIO;
+
+// llama.cpp's C++ side, kept out of the API: the log that becomes
+// ErrorMessage, the fit's buffers, a token's text, a chat's template
+// state, the JSON-schema converter, tokens, embeddings and the device list
+// (common's types never reach an importer). Every helper is named
+// LlamaExtDo*.
+cpp source;
+
+#include <atomic>
+#include <climits>
+#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <memory>
+#include <mutex>
+#include <new>
+#include <string>
+#include <vector>
+
+#include "common/chat.h"
+#include "common/common.h"
+#include "common/fit.h"
+#include "common/json.h"
+#include "common/json-schema-to-grammar.h"
+#include "common/log.h"
+
+namespace {
+
+// Once per process: common's log off, llama.cpp's log routed to
+// LlamaExtDoLog, the backends registered
+std::once_flag GLlamaExtInitOnce;
+
+// While a capture is on (a load, a context being made), the first error
+// line llama.cpp logs on this thread
+thread_local bool GLlamaExtCapture = false;
+thread_local std::string GLlamaExtError;
+
+// A message in an error string; no exception leaves (out of memory keeps
+// what the string held)
+void LlamaExtDoSetError(std::string& AError, const char* AText) noexcept
+{
+  try
+  {
+    AError.assign(AText);
+  }
+  catch (...)
+  {
+  }
+}
+
+// llama.cpp's and ggml's log: nothing is printed; while a capture is on,
+// the first error line is kept, its line break dropped
+void LlamaExtDoLog(enum ggml_log_level ALevel, const char* AText, void* AUserData)
+{
+  (void)AUserData;
+  if ((ALevel != GGML_LOG_LEVEL_ERROR) || !GLlamaExtCapture || (AText == nullptr))
+    return;
+  if (!GLlamaExtError.empty())
+    return;
+  // No exception may leave into llama.cpp's C frames
+  try
+  {
+    GLlamaExtError.assign(AText);
+    while (!GLlamaExtError.empty() &&
+      ((GLlamaExtError.back() == '\n') || (GLlamaExtError.back() == '\r') || (GLlamaExtError.back() == ' ')))
+      GLlamaExtError.pop_back();
+  }
+  catch (...)
+  {
+  }
+}
+
+void LlamaExtDoInitOnce()
+{
+  // common's LOG_* macros print only at a verbosity at or below this
+  // threshold: below every level, common's log thread never starts
+  common_log_set_verbosity_thold(-1);
+  llama_log_set(LlamaExtDoLog, nullptr);
+  llama_backend_init();
+}
+
+// Runs LlamaExtDoInitOnce the first time; false when it could not run
+bool LlamaExtDoInit()
+{
+  try
+  {
+    std::call_once(GLlamaExtInitOnce, LlamaExtDoInitOnce);
+    return true;
+  }
+  catch (...)
+  {
+    return false;
+  }
+}
+
+void LlamaExtDoCaptureBegin()
+{
+  GLlamaExtError.clear();
+  GLlamaExtCapture = true;
+}
+
+// Ends the capture: the first error line logged since it began ("" for none)
+const std::string& LlamaExtDoCaptureEnd()
+{
+  GLlamaExtCapture = false;
+  return GLlamaExtError;
+}
+
+// The buffers a fitted llama_model_params points into (tensor_split,
+// tensor_buft_overrides): kept with the model, which reads them as it loads
+struct LlamaExtDoFitData
+{
+  std::vector<float> Split;
+  std::vector<llama_model_tensor_buft_override> Overrides;
+  std::vector<std::size_t> Margins;
+};
+
+// Fits AModelParams and AContextParams to the free device memory as
+// llama-cli's --fit does, with common.h's defaults (1 GiB left free per
+// device, a context cut down to no less than 4096). A fit that fails
+// leaves the parameters at llama.cpp's defaults, and the load after it
+// reports the reason, so its status is not needed. The buffers it writes
+// into are returned (LlamaExtDoFitFree frees them); nullptr when there is
+// no memory for them.
+void* LlamaExtDoFit(const std::string& APath, llama_model_params* AModelParams,
+  llama_context_params* AContextParams)
+{
+  LlamaExtDoFitData* LData = new (std::nothrow) LlamaExtDoFitData();
+  if (LData == nullptr)
+    return nullptr;
+  try
+  {
+    LData->Split.assign(llama_max_devices(), 0.0f);
+    // Value-initialized: a null pattern ends the list
+    LData->Overrides.assign(llama_max_tensor_buft_overrides(), llama_model_tensor_buft_override{});
+    LData->Margins.assign(llama_max_devices(), static_cast<std::size_t>(1024) * 1024 * 1024);
+  }
+  catch (...)
+  {
+    delete LData;
+    return nullptr;
+  }
+  // common_fit_params catches its own runtime errors; anything else
+  // (out of memory) leaves the parameters as they are
+  try
+  {
+    common_fit_params(APath.c_str(), AModelParams, AContextParams, LData->Split.data(),
+      LData->Overrides.data(), LData->Margins.data(), 4096, nullptr, GGML_LOG_LEVEL_ERROR);
+  }
+  catch (...)
+  {
+  }
+  return LData;
+}
+
+void LlamaExtDoFitFree(void* AData)
+{
+  delete static_cast<LlamaExtDoFitData*>(AData);
+}
+
+// A token's text, special tokens rendered (as llama.cpp's examples do);
+// "" when it has none or there is no memory for it
+std::string LlamaExtDoPiece(const llama_vocab* AVocab, const llama_token AToken)
+{
+  try
+  {
+    char LBuf[256];
+    std::int32_t LCount = llama_token_to_piece(AVocab, AToken, LBuf, static_cast<std::int32_t>(sizeof(LBuf)), 0, true);
+    if (LCount >= 0)
+      return std::string(LBuf, static_cast<std::size_t>(LCount));
+    // A negative count is the size the piece needs
+    std::string LText(static_cast<std::size_t>(-LCount), '\0');
+    LCount = llama_token_to_piece(AVocab, AToken, LText.data(), static_cast<std::int32_t>(LText.size()), 0, true);
+    if (LCount < 0)
+      return std::string();
+    LText.resize(static_cast<std::size_t>(LCount));
+    return LText;
+  }
+  catch (...)
+  {
+    return std::string();
+  }
+}
+
+// AText's tokens appended to ATokens; false when it cannot be tokenized
+// (ATokens is then as it was). AAddSpecial: the vocabulary's BOS / EOS
+// when the model wants them; AParseSpecial: special tokens written in the
+// text are read as such.
+bool LlamaExtDoTokenizeAppend(const llama_vocab* AVocab, const std::string& AText, const bool AAddSpecial,
+  const bool AParseSpecial, std::vector<llama_token>& ATokens)
+{
+  // llama_tokenize takes an int32 length
+  if (AText.size() > static_cast<std::size_t>(INT32_MAX / 2))
+    return false;
+  const std::int32_t LLength = static_cast<std::int32_t>(AText.size());
+  const std::int32_t LAsk = llama_tokenize(AVocab, AText.c_str(), LLength, nullptr, 0, AAddSpecial, AParseSpecial);
+  if (LAsk == INT32_MIN)
+    return false;
+  // A negative result is the count the text needs; 0 = no tokens
+  const std::int32_t LNeed = (LAsk < 0) ? -LAsk : LAsk;
+  if (LNeed == 0)
+    return true;
+  const std::size_t LStart = ATokens.size();
+  ATokens.resize(LStart + static_cast<std::size_t>(LNeed));
+  const std::int32_t LGot = llama_tokenize(AVocab, AText.c_str(), LLength, ATokens.data() + LStart, LNeed,
+    AAddSpecial, AParseSpecial);
+  if (LGot < 0)
+  {
+    ATokens.resize(LStart);
+    return false;
+  }
+  ATokens.resize(LStart + static_cast<std::size_t>(LGot));
+  return true;
+}
+
+// Tokens a call holds for llama_decode, with their storage (a prompt for
+// GenerateLlama, a turn for SayLlamaChat)
+struct LlamaExtDoTokens
+{
+  std::vector<llama_token> Items;
+};
+
+// AText's tokens, BOS added when the model wants one and special tokens in
+// the text read as such (a raw prompt is the caller's to write); nullptr
+// when it cannot be tokenized or there is no memory for it
+void* LlamaExtDoPromptTokens(const llama_vocab* AVocab, const std::string& AText)
+{
+  LlamaExtDoTokens* LTokens = new (std::nothrow) LlamaExtDoTokens();
+  if (LTokens == nullptr)
+    return nullptr;
+  try
+  {
+    if (LlamaExtDoTokenizeAppend(AVocab, AText, true, true, LTokens->Items))
+      return LTokens;
+  }
+  catch (...)
+  {
+  }
+  delete LTokens;
+  return nullptr;
+}
+
+llama_token* LlamaExtDoTokenData(void* ATokens)
+{
+  return static_cast<LlamaExtDoTokens*>(ATokens)->Items.data();
+}
+
+std::int32_t LlamaExtDoTokenCount(void* ATokens)
+{
+  return static_cast<std::int32_t>(static_cast<LlamaExtDoTokens*>(ATokens)->Items.size());
+}
+
+void LlamaExtDoTokensFree(void* ATokens)
+{
+  delete static_cast<LlamaExtDoTokens*>(ATokens);
+}
+
+// ACount tokens at AData appended to ATokens (a LlamaExtDoTokens); false
+// when there is no memory for them (ATokens is then as it was)
+bool LlamaExtDoTokensAppend(void* ATokens, const llama_token* AData, const std::int32_t ACount)
+{
+  std::vector<llama_token>& LItems = static_cast<LlamaExtDoTokens*>(ATokens)->Items;
+  const std::size_t LCount = LItems.size();
+  try
+  {
+    LItems.insert(LItems.end(), AData, AData + ACount);
+    return true;
+  }
+  catch (...)
+  {
+    LItems.resize(LCount);
+    return false;
+  }
+}
+
+// A chat's template state: the model's templates and the turns so far;
+// Held = the tokens the context holds, from position 0 (what was decoded,
+// prompts and replies); Full = the newest turn's rendered history as
+// tokens; Pending = the part of Full the turn decodes (Full from Keep on,
+// Keep being how much of Held the turn keeps). Comparing tokens, not text,
+// lets the template's own closing text after a reply (its end-of-turn
+// marker, never sampled) reach the context with the next turn, and a
+// template that renders a past reply differently costs only a re-decode
+// from where it differs (llama-server's prompt reuse CONCEPT).
+struct LlamaExtDoChatData
+{
+  common_chat_templates_ptr Templates;
+  std::vector<common_chat_msg> Messages;
+  LlamaExtDoTokens Held;
+  std::vector<llama_token> Full;
+  std::size_t Keep = 0;
+  std::vector<llama_token> Pending;
+};
+
+// A new chat state for AModel's own chat template (chatml when it has
+// none), opened by ASystemPrompt unless it is ""; nullptr when the
+// template cannot be read (AError says why)
+void* LlamaExtDoChatNew(const llama_model* AModel, const std::string& ASystemPrompt, std::string& AError)
+{
+  try
+  {
+    std::unique_ptr<LlamaExtDoChatData> LData(new LlamaExtDoChatData());
+    // "" = no override: the template the model carries
+    LData->Templates = common_chat_templates_init(AModel, "");
+    if (!ASystemPrompt.empty())
+    {
+      common_chat_msg LMessage;
+      LMessage.role = "system";
+      LMessage.content = ASystemPrompt;
+      LData->Messages.push_back(LMessage);
+    }
+    return LData.release();
+  }
+  catch (const std::exception& E)
+  {
+    LlamaExtDoSetError(AError, E.what());
+  }
+  catch (...)
+  {
+    LlamaExtDoSetError(AError, "unknown error");
+  }
+  return nullptr;
+}
+
+void LlamaExtDoChatFree(void* AData)
+{
+  delete static_cast<LlamaExtDoChatData*>(AData);
+}
+
+// The history rendered by the chat template; AGenerationPrompt ends it
+// with the opening of the assistant's reply
+common_chat_params LlamaExtDoChatRender(const LlamaExtDoChatData& AData, const bool AGenerationPrompt)
+{
+  common_chat_templates_inputs LInputs;
+  LInputs.messages = AData.Messages;
+  LInputs.add_generation_prompt = AGenerationPrompt;
+  LInputs.use_jinja = true;
+  return common_chat_templates_apply(AData.Templates.get(), LInputs);
+}
+
+// Adds the user's message and tokenizes the whole rendered history into
+// Full: template text with its special tokens read as such, the user's
+// own text as plain text (a "<|im_end|>" the user types stays text); the
+// first part gets the vocabulary's BOS when the model wants one (common's
+// render then leaves the template's own BOS text out). Keep = how much of
+// Held matches Full, short of Full's last token (a turn decodes at least
+// one token, so there are logits to sample from). Held and the context
+// are not touched: LlamaExtDoChatCut does that. False when the template
+// fails (AError says why); the message is then not added.
+bool LlamaExtDoChatPrompt(void* AData, const llama_vocab* AVocab, const std::string& AMessage,
+  std::string& AError)
+{
+  LlamaExtDoChatData* LData = static_cast<LlamaExtDoChatData*>(AData);
+  const std::size_t LCount = LData->Messages.size();
+  try
+  {
+    common_chat_msg LMessage;
+    LMessage.role = "user";
+    LMessage.content = AMessage;
+    LData->Messages.push_back(LMessage);
+    const common_chat_params LParams = LlamaExtDoChatRender(*LData, true);
+    LData->Full.clear();
+    bool LAddSpecial = true;
+    for (const common_chat_prompt_part& LPart : LParams.prompt.parts)
+    {
+      if (!LlamaExtDoTokenizeAppend(AVocab, LPart.text, LAddSpecial, !LPart.is_input, LData->Full))
+      {
+        LlamaExtDoSetError(AError, "the turn could not be tokenized");
+        LData->Messages.resize(LCount);
+        return false;
+      }
+      LAddSpecial = false;
+    }
+    if (LData->Full.empty())
+    {
+      LlamaExtDoSetError(AError, "the chat template gave no text for the turn");
+      LData->Messages.resize(LCount);
+      return false;
+    }
+    // The longest run of Held that Full starts with
+    const std::vector<llama_token>& LHeld = LData->Held.Items;
+    const std::size_t LLimit = (LHeld.size() < LData->Full.size()) ? LHeld.size() : LData->Full.size();
+    std::size_t LKeep = 0;
+    while ((LKeep < LLimit) && (LHeld[LKeep] == LData->Full[LKeep]))
+      LKeep++;
+    if (LKeep == LData->Full.size())
+      LKeep--;
+    LData->Keep = LKeep;
+    return true;
+  }
+  catch (const std::exception& E)
+  {
+    LlamaExtDoSetError(AError, E.what());
+  }
+  catch (...)
+  {
+    LlamaExtDoSetError(AError, "unknown error");
+  }
+  LData->Messages.resize(LCount);
+  return false;
+}
+
+// Cuts the context and Held back to the Keep tokens of the turn (before
+// the turn: what it reuses; after a turn that failed: what it began with)
+// and sets Pending to Full from there. A memory that cannot cut a
+// sequence (a recurrent model's) is emptied instead, Keep then 0: the turn
+// decodes the whole history. False when there is no memory for Pending.
+bool LlamaExtDoChatCut(llama_context* AContext, void* AData)
+{
+  LlamaExtDoChatData* LData = static_cast<LlamaExtDoChatData*>(AData);
+  llama_memory_t LMemory = llama_get_memory(AContext);
+  if (!llama_memory_seq_rm(LMemory, 0, static_cast<llama_pos>(LData->Keep), -1))
+  {
+    llama_memory_clear(LMemory, true);
+    LData->Keep = 0;
+  }
+  if (LData->Held.Items.size() > LData->Keep)
+    LData->Held.Items.resize(LData->Keep);
+  try
+  {
+    LData->Pending.assign(LData->Full.begin() + static_cast<std::ptrdiff_t>(LData->Keep), LData->Full.end());
+    return true;
+  }
+  catch (...)
+  {
+    LData->Pending.clear();
+    return false;
+  }
+}
+
+llama_token* LlamaExtDoChatPendingData(void* AData)
+{
+  return static_cast<LlamaExtDoChatData*>(AData)->Pending.data();
+}
+
+std::int32_t LlamaExtDoChatPendingCount(void* AData)
+{
+  return static_cast<std::int32_t>(static_cast<LlamaExtDoChatData*>(AData)->Pending.size());
+}
+
+// The tokens the chat's context holds (a LlamaExtDoTokens), which the run
+// appends to as it decodes
+void* LlamaExtDoChatHeld(void* AData)
+{
+  return &static_cast<LlamaExtDoChatData*>(AData)->Held;
+}
+
+// Adds the assistant's reply to the history. False when there is no
+// memory for it (AError says why); the reply is then not added.
+bool LlamaExtDoChatCommit(void* AData, const std::string& AReply, std::string& AError)
+{
+  LlamaExtDoChatData* LData = static_cast<LlamaExtDoChatData*>(AData);
+  const std::size_t LCount = LData->Messages.size();
+  try
+  {
+    common_chat_msg LMessage;
+    LMessage.role = "assistant";
+    LMessage.content = AReply;
+    LData->Messages.push_back(LMessage);
+    return true;
+  }
+  catch (const std::exception& E)
+  {
+    LlamaExtDoSetError(AError, E.what());
+  }
+  catch (...)
+  {
+    LlamaExtDoSetError(AError, "unknown error");
+  }
+  LData->Messages.resize(LCount);
+  return false;
+}
+
+// Takes the newest message out of the history (a turn that failed)
+void LlamaExtDoChatDropLast(void* AData)
+{
+  LlamaExtDoChatData* LData = static_cast<LlamaExtDoChatData*>(AData);
+  if (!LData->Messages.empty())
+    LData->Messages.pop_back();
+}
+
+// Back to the opening: only the system prompt (when there is one) stays
+void LlamaExtDoChatReset(void* AData)
+{
+  LlamaExtDoChatData* LData = static_cast<LlamaExtDoChatData*>(AData);
+  if (!LData->Messages.empty() && (LData->Messages.front().role == "system"))
+    LData->Messages.resize(1);
+  else
+    LData->Messages.clear();
+  LData->Held.Items.clear();
+  LData->Full.clear();
+  LData->Keep = 0;
+  LData->Pending.clear();
+}
+
+// The history as JSON text: an array of OpenAI-style messages (role,
+// content), indented. False when there is no memory for it (AError says
+// why).
+bool LlamaExtDoChatToJson(void* AData, std::string& AText, std::string& AError)
+{
+  LlamaExtDoChatData* LData = static_cast<LlamaExtDoChatData*>(AData);
+  try
+  {
+    AText = common_chat_msgs_to_json_oaicompat(LData->Messages).dump(2);
+    return true;
+  }
+  catch (const std::exception& E)
+  {
+    LlamaExtDoSetError(AError, E.what());
+  }
+  catch (...)
+  {
+    LlamaExtDoSetError(AError, "unknown error");
+  }
+  return false;
+}
+
+// Replaces the history with the messages in AText (as
+// LlamaExtDoChatToJson writes them) once the chat template renders them;
+// what the context held is dropped (the next turn decodes the history).
+// ASystemPrompt gets the first message's text when it is a system message,
+// else "". False when AText is no message list or the template cannot
+// render it (AError says why); the chat is then as it was.
+bool LlamaExtDoChatFromJson(void* AData, const std::string& AText, std::string& ASystemPrompt, std::string& AError)
+{
+  LlamaExtDoChatData* LData = static_cast<LlamaExtDoChatData*>(AData);
+  try
+  {
+    std::vector<common_chat_msg> LMessages = common_chat_msgs_parse_oaicompat(common_json::parse(AText));
+    // The template renders the history before it replaces the chat's
+    common_chat_templates_inputs LInputs;
+    LInputs.messages = LMessages;
+    LInputs.add_generation_prompt = false;
+    LInputs.use_jinja = true;
+    common_chat_templates_apply(LData->Templates.get(), LInputs);
+    std::string LSystem;
+    if (!LMessages.empty() && (LMessages.front().role == "system"))
+      LSystem = LMessages.front().content;
+    LData->Messages.swap(LMessages);
+    LData->Held.Items.clear();
+    LData->Full.clear();
+    LData->Keep = 0;
+    LData->Pending.clear();
+    ASystemPrompt.swap(LSystem);
+    return true;
+  }
+  catch (const std::exception& E)
+  {
+    LlamaExtDoSetError(AError, E.what());
+  }
+  catch (...)
+  {
+    LlamaExtDoSetError(AError, "unknown error");
+  }
+  return false;
+}
+
+// A cancel flag, set from any thread, read by the run between tokens and
+// by llama.cpp's abort callback inside a decode; nullptr when there is no
+// memory for it
+void* LlamaExtDoCancelNew()
+{
+  return new (std::nothrow) std::atomic<bool>(false);
+}
+
+void LlamaExtDoCancelFree(void* AFlag)
+{
+  delete static_cast<std::atomic<bool>*>(AFlag);
+}
+
+void LlamaExtDoCancelSet(void* AFlag, const bool AValue)
+{
+  if (AFlag != nullptr)
+    static_cast<std::atomic<bool>*>(AFlag)->store(AValue);
+}
+
+bool LlamaExtDoCancelIs(void* AFlag)
+{
+  return (AFlag != nullptr) && static_cast<std::atomic<bool>*>(AFlag)->load();
+}
+
+// llama.cpp's abort callback: true ends the decode (llama.h: CPU only, so
+// the run also checks the flag between tokens)
+bool LlamaExtDoAbort(void* AData)
+{
+  return LlamaExtDoCancelIs(AData);
+}
+
+// AContext's decodes end when AFlag is set
+void LlamaExtDoSetAbort(llama_context* AContext, void* AFlag)
+{
+  llama_set_abort_callback(AContext, LlamaExtDoAbort, AFlag);
+}
+
+// A run's stop strings and the text it holds back: text that may be the
+// start of a stop string waits until the next piece shows it is not
+struct LlamaExtDoStop
+{
+  std::vector<std::string> Stops;
+  std::string Waiting;
+  bool Hit = false;
+};
+
+// A stop matcher with no strings yet; nullptr when there is no memory
+void* LlamaExtDoStopNew()
+{
+  return new (std::nothrow) LlamaExtDoStop();
+}
+
+void LlamaExtDoStopFree(void* AStop)
+{
+  delete static_cast<LlamaExtDoStop*>(AStop);
+}
+
+// False when there is no memory for the string
+bool LlamaExtDoStopAdd(void* AStop, const std::string& AText)
+{
+  try
+  {
+    static_cast<LlamaExtDoStop*>(AStop)->Stops.push_back(AText);
+    return true;
+  }
+  catch (...)
+  {
+    return false;
+  }
+}
+
+// Takes the next piece; gives back the text that can go out now. When a
+// stop string is complete, the text before it goes out, the stop string
+// and anything after it are dropped, and LlamaExtDoStopHit is true. Else
+// the longest tail that is the start of a stop string waits. False when
+// there is no memory (AOut is then "").
+bool LlamaExtDoStopFeed(void* AStop, const std::string& APiece, std::string& AOut)
+{
+  LlamaExtDoStop* LStop = static_cast<LlamaExtDoStop*>(AStop);
+  AOut.clear();
+  try
+  {
+    LStop->Waiting += APiece;
+    // Text that went out earlier holds no stop string's start, so a stop
+    // string can only begin inside Waiting: the earliest one wins
+    std::size_t LFirst = std::string::npos;
+    for (const std::string& LText : LStop->Stops)
+    {
+      const std::size_t LAt = LStop->Waiting.find(LText);
+      if ((LAt != std::string::npos) && ((LFirst == std::string::npos) || (LAt < LFirst)))
+        LFirst = LAt;
+    }
+    if (LFirst != std::string::npos)
+    {
+      AOut.assign(LStop->Waiting, 0, LFirst);
+      LStop->Waiting.clear();
+      LStop->Hit = true;
+      return true;
+    }
+    // The longest tail of Waiting that a stop string starts with (shorter
+    // than the stop string: a whole one was found above). Stop strings are
+    // never empty: LlamaExtDoCheckOptions refuses "" before a run starts.
+    std::size_t LHold = 0;
+    for (const std::string& LText : LStop->Stops)
+    {
+      std::size_t LLength = (LText.size() - 1 < LStop->Waiting.size()) ? (LText.size() - 1) : LStop->Waiting.size();
+      while (LLength > LHold)
+      {
+        if (LStop->Waiting.compare(LStop->Waiting.size() - LLength, LLength, LText, 0, LLength) == 0)
+        {
+          LHold = LLength;
+          break;
+        }
+        LLength--;
+      }
+    }
+    const std::size_t LSend = LStop->Waiting.size() - LHold;
+    AOut.assign(LStop->Waiting, 0, LSend);
+    LStop->Waiting.erase(0, LSend);
+    return true;
+  }
+  catch (...)
+  {
+    AOut.clear();
+    return false;
+  }
+}
+
+bool LlamaExtDoStopHit(void* AStop)
+{
+  return static_cast<LlamaExtDoStop*>(AStop)->Hit;
+}
+
+// The text still waiting when the run ends without a stop string: it was
+// not one, so it goes out
+std::string LlamaExtDoStopFlush(void* AStop)
+{
+  LlamaExtDoStop* LStop = static_cast<LlamaExtDoStop*>(AStop);
+  std::string LText;
+  LText.swap(LStop->Waiting);
+  return LText;
+}
+
+// The GBNF grammar a JSON schema describes (common's converter, the one
+// llama-server's response_format uses); false with the converter's reason
+// when the text is no JSON or no schema it takes (AGrammar is then "")
+bool LlamaExtDoSchemaGrammar(const std::string& ASchema, std::string& AGrammar, std::string& AError)
+{
+  try
+  {
+    AGrammar = json_schema_to_grammar(common_json::parse(ASchema));
+    return true;
+  }
+  catch (const std::exception& E)
+  {
+    LlamaExtDoSetError(AError, E.what());
+  }
+  catch (...)
+  {
+    LlamaExtDoSetError(AError, "the converter failed");
+  }
+  AGrammar.clear();
+  return false;
+}
+
+// AText's tokens as plain text (special tokens written in it stay text),
+// the BOS / EOS the model wants added; false when it cannot be tokenized
+// or there is no memory for it (ATokens is then empty)
+bool LlamaExtDoTokenize(const llama_vocab* AVocab, const std::string& AText, std::vector<llama_token>& ATokens)
+{
+  ATokens.clear();
+  try
+  {
+    if (LlamaExtDoTokenizeAppend(AVocab, AText, true, false, ATokens))
+      return true;
+  }
+  catch (...)
+  {
+  }
+  ATokens.clear();
+  return false;
+}
+
+// The text of ATokens, the BOS / EOS the model adds left out and special
+// tokens not rendered (LlamaExtDoTokenize's inverse, as common_detokenize
+// sizes it: a first guess, then the size llama.cpp asks for); false with
+// the reason when a token is no id of the model or there is no memory
+// (AText is then "")
+bool LlamaExtDoDetokenize(const llama_vocab* AVocab, const std::vector<llama_token>& ATokens, std::string& AText,
+  std::string& AError)
+{
+  AText.clear();
+  const std::int32_t LVocabSize = llama_vocab_n_tokens(AVocab);
+  for (const llama_token LToken : ATokens)
+  {
+    if ((LToken < 0) || (LToken >= LVocabSize))
+    {
+      LlamaExtDoSetError(AError, "a token is no id of the model");
+      return false;
+    }
+  }
+  // The BOS the model adds is skipped here, not by llama_detokenize: when
+  // it drops a leading BOS itself it keeps the space prefix the tokenizer
+  // put before the text (llama-vocab.cpp, b11971), and the text would not
+  // come back as it was
+  std::size_t LFirst = 0;
+  if (!ATokens.empty() && llama_vocab_get_add_bos(AVocab) && (ATokens[0] == llama_vocab_bos(AVocab)))
+    LFirst = 1;
+  if (ATokens.size() == LFirst)
+    return true;
+  // llama_detokenize takes int32 counts
+  if (ATokens.size() - LFirst > static_cast<std::size_t>(INT32_MAX / 8))
+  {
+    LlamaExtDoSetError(AError, "there are too many tokens");
+    return false;
+  }
+  const llama_token* LData = ATokens.data() + LFirst;
+  const std::int32_t LCount = static_cast<std::int32_t>(ATokens.size() - LFirst);
+  try
+  {
+    AText.resize(static_cast<std::size_t>(LCount) * 4);
+    std::int32_t LGot = llama_detokenize(AVocab, LData, LCount, AText.data(),
+      static_cast<std::int32_t>(AText.size()), true, false);
+    if (LGot < 0)
+    {
+      // A negative count is the size the text needs
+      AText.resize(static_cast<std::size_t>(-static_cast<std::int64_t>(LGot)));
+      LGot = llama_detokenize(AVocab, LData, LCount, AText.data(),
+        static_cast<std::int32_t>(AText.size()), true, false);
+    }
+    if (LGot < 0)
+    {
+      AText.clear();
+      LlamaExtDoSetError(AError, "llama.cpp could not detokenize the tokens");
+      return false;
+    }
+    AText.resize(static_cast<std::size_t>(LGot));
+    return true;
+  }
+  catch (...)
+  {
+    AText.clear();
+    LlamaExtDoSetError(AError, "there is no memory for the text");
+    return false;
+  }
+}
+
+// ATokens decoded in AContext (made with embeddings on, mean pooling and
+// room for every token in one batch: pooling reads the whole sequence at
+// once), and the sequence's pooled vector, scaled to length 1 (common's
+// Euclidean norm, llama-embedding's default), into AEmbedding; false with
+// the reason (AEmbedding is then empty)
+bool LlamaExtDoEmbed(llama_context* AContext, const llama_model* AModel, std::vector<llama_token>& ATokens,
+  std::vector<float>& AEmbedding, std::string& AError)
+{
+  AEmbedding.clear();
+  const std::int32_t LSize = llama_model_n_embd_out(AModel);
+  if (LSize <= 0)
+  {
+    LlamaExtDoSetError(AError, "the model gives no embeddings");
+    return false;
+  }
+  if (llama_decode(AContext, llama_batch_get_one(ATokens.data(), static_cast<std::int32_t>(ATokens.size()))) != 0)
+  {
+    LlamaExtDoSetError(AError, "llama_decode failed on the text");
+    return false;
+  }
+  const float* LPooled = llama_get_embeddings_seq(AContext, 0);
+  if (LPooled == nullptr)
+  {
+    LlamaExtDoSetError(AError, "the model gives no embeddings");
+    return false;
+  }
+  try
+  {
+    AEmbedding.resize(static_cast<std::size_t>(LSize));
+  }
+  catch (...)
+  {
+    LlamaExtDoSetError(AError, "there is no memory for the embedding");
+    return false;
+  }
+  common_embd_normalize(LPooled, AEmbedding.data(), LSize, 2);
+  return true;
+}
+
+// Device AIndex of ggml's registry (0 .. ggml_backend_dev_count() - 1):
+// its name, description, kind (0 CPU, 1 GPU, 2 integrated GPU,
+// 3 accelerator) and memory in bytes. 1 = a device; 0 = an entry that is
+// no device of its own (a meta device wraps others); -1 = no memory for
+// its texts
+std::int32_t LlamaExtDoDevice(const std::size_t AIndex, std::string& ADeviceName, std::string& ADescription,
+  std::int32_t& AKind, std::uint64_t& AFree, std::uint64_t& ATotal)
+{
+  ggml_backend_dev_t LDevice = ggml_backend_dev_get(AIndex);
+  if (LDevice == nullptr)
+    return 0;
+  switch (ggml_backend_dev_type(LDevice))
+  {
+    case GGML_BACKEND_DEVICE_TYPE_CPU: AKind = 0; break;
+    case GGML_BACKEND_DEVICE_TYPE_GPU: AKind = 1; break;
+    case GGML_BACKEND_DEVICE_TYPE_IGPU: AKind = 2; break;
+    case GGML_BACKEND_DEVICE_TYPE_ACCEL: AKind = 3; break;
+    default: return 0;
+  }
+  std::size_t LFree = 0;
+  std::size_t LTotal = 0;
+  ggml_backend_dev_memory(LDevice, &LFree, &LTotal);
+  AFree = static_cast<std::uint64_t>(LFree);
+  ATotal = static_cast<std::uint64_t>(LTotal);
+  try
+  {
+    const char* LName = ggml_backend_dev_name(LDevice);
+    const char* LDescription = ggml_backend_dev_description(LDevice);
+    ADeviceName.assign((LName != nullptr) ? LName : "");
+    ADescription.assign((LDescription != nullptr) ? LDescription : "");
+    return 1;
+  }
+  catch (...)
+  {
+    return -1;
+  }
+}
+
+}  // namespace
+
+exported type
+  /// Called with each piece of text as the model writes it: a token's
+  /// text, in order, so the pieces joined are the whole result.
+  /// @param AUserData the pointer given with the routine
+  /// @param APiece the new text (UTF-8; a character may span two pieces)
+  /// @example `routine Show(const AUserData: ptr; const APiece: string); begin print("{}", APiece); end;`
+  /// @since 0.3
+  /// @see GenerateLlama
+  /// @see SayLlamaChat
+  LlamaTokenProc = routine(const AUserData: ptr; const APiece: string);
+
+  /// How a model runs: its context, its threads, its sampling and when a
+  /// text ends. DefaultLlamaOptions gives llama.cpp's defaults (the values
+  /// the easy forms use). Options given to LoadLlamaModel become the
+  /// model's own, which GenerateLlama and CreateLlamaChat use when they are
+  /// given none; options given to those replace the model's for that call
+  /// or that chat. A value out of range makes the call fail with a reason.
+  /// @example `LOptions := DefaultLlamaOptions(); LOptions.Temperature := 0; LOptions.MaxTokens := 64;`
+  /// @since 0.3
+  /// @see DefaultLlamaOptions
+  LlamaOptions = record
+    /// Tokens a context holds: 0 = as large as fits the free memory (fitted
+    /// at load); more than the model was trained on is allowed (llama.cpp
+    /// warns), more than fits the memory fails when the context is made
+    ContextSize: int32;
+    /// CPU threads for generation and prompt processing: 0 = llama.cpp's
+    /// default
+    Threads: int32;
+    /// Sampling temperature: 0 = greedy (always the likeliest token, the
+    /// same text every run); higher is more varied. 0 or more.
+    Temperature: float32;
+    /// Only the TopK likeliest tokens are sampled from: 0 = no limit. 0 or more.
+    TopK: int32;
+    /// Only the likeliest tokens whose chances add up to TopP are sampled
+    /// from: 1 = no limit. From 0 to 1.
+    TopP: float32;
+    /// Tokens less likely than MinP times the likeliest are left out:
+    /// 0 = none. From 0 to 1.
+    MinP: float32;
+    /// The sampler's seed: one seed gives one text for one prompt, model
+    /// and options; LLAMA_DEFAULT_SEED = a random seed every run
+    Seed: uint32;
+    /// The most tokens a reply or a continuation runs to: 0 = until the
+    /// model ends it or the context is full. 0 or more.
+    MaxTokens: int32;
+    /// Texts that end a reply or a continuation when the model writes one:
+    /// the text before it is the result, the stop string is left out (and
+    /// never streamed). None may be "".
+    StopStrings: array of string;
+    /// A GBNF grammar (llama.cpp's grammars/README.md) the text must
+    /// follow, its start rule named root: every token is chosen among the
+    /// ones the grammar allows, and the text ends when the grammar is
+    /// complete. "" = none. A chat starts it over for every reply.
+    Grammar: string;
+    /// A JSON schema (as JSON text) the text must be a value of: converted
+    /// to a grammar by llama.cpp's converter (the subset llama-server's
+    /// response_format takes), then held to as Grammar is. "" = none; at
+    /// most one of Grammar and JsonSchema is set.
+    JsonSchema: string;
+    /// The folder LoadLlamaModelZip extracts a zip entry into and loads it
+    /// from (made when missing; ResolvePath's `$P:` / `$D:`): "" = the
+    /// system's temporary folder's pcpp_llama (TempDir() + "/pcpp_llama").
+    /// LoadLlamaModel by path never uses it.
+    CacheDir: string;
+  end;
+
+  /// A model loaded by LoadLlamaModel, with the context parameters fitted
+  /// to it. UnloadLlamaModel frees it, after every chat made from it.
+  /// @example `if not LoadLlamaModel("$P:model.gguf", LModel) then println("{}", LModel.ErrorMessage); end;`
+  /// @since 0.3
+  /// @see LoadLlamaModel
+  LlamaModel = record
+    /// The model (llama.h's API takes it as it is); nil when none is loaded
+    Handle: ptr to llama_model;
+    /// The parameters every context of this model starts from (its size
+    /// fitted to the free memory at load)
+    ContextParams: llama_context_params;
+    /// The buffers the fitted model parameters point into, freed by
+    /// UnloadLlamaModel
+    FitData: ptr;
+    /// The options the model was loaded with: GenerateLlama and
+    /// CreateLlamaChat use them when they are given none
+    Options: LlamaOptions;
+    /// The flag CancelLlamaModel sets to end a GenerateLlama running on
+    /// this model
+    CancelFlag: ptr;
+    /// Why the last call on this model failed; "" after one that succeeded
+    ErrorMessage: string;
+  end;
+
+  /// A conversation with a model: its system prompt, the turns so far and
+  /// the context they fill. CreateLlamaChat makes one, SayLlamaChat talks,
+  /// ResetLlamaChat starts over, FreeLlamaChat frees it.
+  /// @example `CreateLlamaChat(LModel, "You are helpful.", LChat); SayLlamaChat(LChat, "Hi!", LReply);`
+  /// @since 0.3
+  /// @see CreateLlamaChat
+  LlamaChat = record
+    /// The model the chat runs on (the caller's LlamaModel holds it)
+    ModelHandle: ptr to llama_model;
+    /// The chat's context; nil when no chat is open
+    Context: ptr to llama_context;
+    /// The chat's sampler chain
+    Sampler: ptr to llama_sampler;
+    /// The chain's grammar sampler (the chain owns it), started over for
+    /// every reply; nil when the options set no grammar
+    Grammar: ptr to llama_sampler;
+    /// The template state: the history and how much of it the context holds
+    ChatData: ptr;
+    /// The system prompt the chat opened with ("" for none); after
+    /// LoadLlamaChatHistory, the loaded history's
+    SystemPrompt: string;
+    /// The options the chat runs with (its context size, threads,
+    /// sampling, MaxTokens and StopStrings for every reply)
+    Options: LlamaOptions;
+    /// The flag CancelLlamaChat sets to end a SayLlamaChat running on this
+    /// chat
+    CancelFlag: ptr;
+    /// Why the last call on this chat failed; "" after one that succeeded
+    ErrorMessage: string;
+  end;
+
+  /// What a device llama.cpp can run on is: the CPU, a GPU with memory of
+  /// its own, a GPU sharing the system's memory, or an accelerator that
+  /// works beside the CPU.
+  /// @since 0.3
+  /// @see LlamaDevice
+  LlamaDeviceKind = choices(Cpu, Gpu, IntegratedGpu, Accelerator);
+
+  /// A device llama.cpp can run a model on, as ListLlamaDevices gives it.
+  /// @since 0.3
+  /// @see ListLlamaDevices
+  LlamaDevice = record
+    /// llama.cpp's name for it ("Vulkan0", "CPU")
+    DeviceName: string;
+    /// What it is: the GPU's name, or the CPU's
+    Description: string;
+    /// The kind of device
+    Kind: LlamaDeviceKind;
+    /// The bytes free on it when the list was made (the system's memory
+    /// for the CPU)
+    FreeMemory: uint64;
+    /// The bytes it has in all
+    TotalMemory: uint64;
+  end;
+
+/// llama.cpp's default options (common.h's values): a context as large as
+/// fits, llama.cpp's thread count, top-k 40, top-p 0.95, min-p 0.05,
+/// temperature 0.8, a random seed, no token limit, no stop strings and no
+/// grammar. The easy forms run with these.
+/// @returns the default options
+/// @example `LOptions := DefaultLlamaOptions(); LOptions.Seed := 42;`
+/// @since 0.3
+/// @see LlamaOptions
+exported routine DefaultLlamaOptions(): LlamaOptions;
+var
+  LOptions: LlamaOptions;
+begin
+  LOptions.ContextSize := 0;
+  LOptions.Threads := 0;
+  LOptions.Temperature := float32(0.8);
+  LOptions.TopK := 40;
+  LOptions.TopP := float32(0.95);
+  LOptions.MinP := float32(0.05);
+  LOptions.Seed := LLAMA_DEFAULT_SEED;
+  LOptions.MaxTokens := 0;
+  setlength(LOptions.StopStrings, 0);
+  LOptions.Grammar := "";
+  LOptions.JsonSchema := "";
+  LOptions.CacheDir := "";
+  return LOptions;
+end;
+
+// Whether every option is in its range; false with the first one that is
+// not (AError says which). The float checks are written as "not in range"
+// so a NaN is refused too.
+routine LlamaExtDoCheckOptions(const AOptions: LlamaOptions; var AError: string): bool;
+var
+  LIndex: int32;
+begin
+  if AOptions.ContextSize < 0 then
+    AError := "the option ContextSize is below 0";
+    return false;
+  end;
+  if AOptions.Threads < 0 then
+    AError := "the option Threads is below 0";
+    return false;
+  end;
+  if not (AOptions.Temperature >= float32(0)) then
+    AError := "the option Temperature is below 0";
+    return false;
+  end;
+  if AOptions.TopK < 0 then
+    AError := "the option TopK is below 0";
+    return false;
+  end;
+  if not ((AOptions.TopP >= float32(0)) and (AOptions.TopP <= float32(1))) then
+    AError := "the option TopP is not from 0 to 1";
+    return false;
+  end;
+  if not ((AOptions.MinP >= float32(0)) and (AOptions.MinP <= float32(1))) then
+    AError := "the option MinP is not from 0 to 1";
+    return false;
+  end;
+  if AOptions.MaxTokens < 0 then
+    AError := "the option MaxTokens is below 0";
+    return false;
+  end;
+  for LIndex := 0 to int32(len(AOptions.StopStrings)) - 1 do
+    if AOptions.StopStrings[LIndex] = "" then
+      AError := "the option StopStrings holds an empty string";
+      return false;
+    end;
+  end;
+  if (AOptions.Grammar <> "") and (AOptions.JsonSchema <> "") then
+    AError := "the options Grammar and JsonSchema are both set";
+    return false;
+  end;
+  return true;
+end;
+
+// The grammar AOptions hold: Grammar as it is, or the one JsonSchema
+// converts to; "" for none. False when JsonSchema does not convert
+// (AError says why).
+routine LlamaExtDoGrammarText(const AOptions: LlamaOptions; var AGrammarText: string; var AError: string): bool;
+var
+  LReason: string;
+begin
+  AGrammarText := AOptions.Grammar;
+  if AOptions.JsonSchema = "" then
+    return true;
+  end;
+  LReason := "";
+  if not LlamaExtDoSchemaGrammar(AOptions.JsonSchema, AGrammarText, LReason) then
+    AError := "the option JsonSchema is no JSON schema llama.cpp can convert: " + LReason;
+    return false;
+  end;
+  return true;
+end;
+
+// The sampler chain AOptions describe for AVocab's model: the grammar
+// first when there is one (so the samplers after it choose only among the
+// tokens it allows), top-k, top-p and min-p when they limit anything,
+// then the temperature and a seeded draw, or greedy at temperature 0
+// (common's sampler order). AGrammar is the chain's grammar sampler (the
+// chain owns it; nil for none). Nil when the grammar cannot be read or
+// llama.cpp has no memory for the chain (AError says why).
+routine LlamaExtDoSampler(const AVocab: ptr to const llama_vocab; const AOptions: LlamaOptions;
+  var AGrammar: ptr to llama_sampler; var AError: string): ptr to llama_sampler;
+var
+  LChain: ptr to llama_sampler;
+  LGrammarText: string;
+begin
+  AGrammar := nil;
+  if not LlamaExtDoGrammarText(AOptions, LGrammarText, AError) then
+    return nil;
+  end;
+  LChain := llama_sampler_chain_init(llama_sampler_chain_default_params());
+  if LChain = nil then
+    AError := "llama.cpp could not create a sampler";
+    return nil;
+  end;
+  if LGrammarText <> "" then
+    // The parser's reason goes to llama.cpp's log over several lines, the
+    // grammar echoed in it: the error names the option instead
+    AGrammar := llama_sampler_init_grammar(AVocab, LGrammarText.c_str(), "root");
+    if AGrammar = nil then
+      llama_sampler_free(LChain);
+      if AOptions.JsonSchema <> "" then
+        AError := "the option JsonSchema gives a grammar llama.cpp cannot read";
+      else
+        AError := "the option Grammar is no grammar llama.cpp can read";
+      end;
+      return nil;
+    end;
+    llama_sampler_chain_add(LChain, AGrammar);
+  end;
+  if AOptions.TopK > 0 then
+    llama_sampler_chain_add(LChain, llama_sampler_init_top_k(AOptions.TopK));
+  end;
+  if AOptions.TopP < float32(1) then
+    llama_sampler_chain_add(LChain, llama_sampler_init_top_p(AOptions.TopP, size_t(1)));
+  end;
+  if AOptions.MinP > float32(0) then
+    llama_sampler_chain_add(LChain, llama_sampler_init_min_p(AOptions.MinP, size_t(1)));
+  end;
+  if AOptions.Temperature > float32(0) then
+    llama_sampler_chain_add(LChain, llama_sampler_init_temp(AOptions.Temperature));
+    llama_sampler_chain_add(LChain, llama_sampler_init_dist(AOptions.Seed));
+  else
+    llama_sampler_chain_add(LChain, llama_sampler_init_greedy());
+  end;
+  return LChain;
+end;
+
+// A stop matcher holding AOptions' stop strings in AStop, nil when there
+// are none; false when there is no memory for it (AStop is then nil)
+routine LlamaExtDoMakeStop(const AOptions: LlamaOptions; var AStop: ptr): bool;
+var
+  LIndex: int32;
+begin
+  AStop := nil;
+  if len(AOptions.StopStrings) = 0 then
+    return true;
+  end;
+  AStop := LlamaExtDoStopNew();
+  if AStop = nil then
+    return false;
+  end;
+  for LIndex := 0 to int32(len(AOptions.StopStrings)) - 1 do
+    if not LlamaExtDoStopAdd(AStop, AOptions.StopStrings[LIndex]) then
+      LlamaExtDoStopFree(AStop);
+      AStop := nil;
+      return false;
+    end;
+  end;
+  return true;
+end;
+
+// Decodes ACount tokens at ATokens after what the context holds, in steps
+// of at most one batch (llama_decode takes no more); AHeld (a
+// LlamaExtDoTokens, nil for none) gets each step once it is decoded.
+// False when the prompt does not fit, ACancel is set, or a decode fails
+// (AError says why).
+routine LlamaExtDoDecodePrompt(const ACtx: ptr to llama_context; const ATokens: ptr to llama_token;
+  const ACount: int32; const AHeld: ptr; const ACancel: ptr; var AError: string): bool;
+var
+  LBatchSize: int32;
+  LDone: int32;
+  LStep: int32;
+  LStatus: int32;
+begin
+  if int64(llama_memory_seq_pos_max(llama_get_memory(ACtx), 0)) + 1 + int64(ACount) > int64(llama_n_ctx(ACtx)) then
+    AError := "the prompt does not fit in the context";
+    return false;
+  end;
+  LBatchSize := int32(llama_n_batch(ACtx));
+  LDone := 0;
+  while LDone < ACount do
+    if LlamaExtDoCancelIs(ACancel) then
+      AError := "the generation was cancelled";
+      return false;
+    end;
+    LStep := ACount - LDone;
+    if LStep > LBatchSize then
+      LStep := LBatchSize;
+    end;
+    LStatus := llama_decode(ACtx, llama_batch_get_one(address of ATokens[LDone], LStep));
+    // 2 = the abort callback ended the decode
+    if LStatus = 2 then
+      AError := "the generation was cancelled";
+      return false;
+    end;
+    if LStatus <> 0 then
+      AError := "llama_decode failed on the prompt";
+      return false;
+    end;
+    if (AHeld <> nil) and not LlamaExtDoTokensAppend(AHeld, address of ATokens[LDone], LStep) then
+      AError := "there is no memory to hold the prompt";
+      return false;
+    end;
+    LDone := LDone + LStep;
+  end;
+  return true;
+end;
+
+// A piece of the result goes out: through the stop matcher when there is
+// one (AStop; it may hold the piece back or cut it at a stop string), then
+// to AText and, when there is text and AOnToken is given, to it. Without
+// stop strings every piece goes out as it is, "" included. False when
+// there is no memory (AError says why).
+routine LlamaExtDoEmit(const AStop: ptr; const APiece: string; var AText: string;
+  const AOnToken: LlamaTokenProc; const AUserData: ptr; var AError: string): bool;
+var
+  LOut: string;
+begin
+  if AStop = nil then
+    AText := AText + APiece;
+    if AOnToken <> nil then
+      AOnToken(AUserData, APiece);
+    end;
+    return true;
+  end;
+  if not LlamaExtDoStopFeed(AStop, APiece, LOut) then
+    AError := "there is no memory for the stop strings";
+    return false;
+  end;
+  if LOut <> "" then
+    AText := AText + LOut;
+    if AOnToken <> nil then
+      AOnToken(AUserData, LOut);
+    end;
+  end;
+  return true;
+end;
+
+// Decodes the prompt (LlamaExtDoDecodePrompt), then samples one token at a
+// time, each decoded in turn, until the model ends its text, a stop string
+// is written (AStop, nil for none), AMaxTokens tokens were written (0 = no
+// limit) or the context is full; every piece goes out through
+// LlamaExtDoEmit. AHeld gets every token decoded. ACancel (a cancel flag,
+// nil for none) is checked before each token and after each piece went
+// out, so the token routine can cancel. False when the prompt does not
+// fit, the run is cancelled or a decode fails (AError says why).
+routine LlamaExtDoRun(const ACtx: ptr to llama_context; const AVocab: ptr to const llama_vocab;
+  const ASampler: ptr to llama_sampler; const ATokens: ptr to llama_token; const ACount: int32;
+  const AHeld: ptr; const AMaxTokens: int32; const AStop: ptr; const ACancel: ptr; var AText: string;
+  const AOnToken: LlamaTokenProc; const AUserData: ptr; var AError: string): bool;
+var
+  LContextSize: int64;
+  LWritten: int32;
+  LStatus: int32;
+  LToken: llama_token;
+  LPiece: string;
+begin
+  if not LlamaExtDoDecodePrompt(ACtx, ATokens, ACount, AHeld, ACancel, AError) then
+    return false;
+  end;
+  LContextSize := int64(llama_n_ctx(ACtx));
+  LWritten := 0;
+  while true do
+    if LlamaExtDoCancelIs(ACancel) then
+      AError := "the generation was cancelled";
+      return false;
+    end;
+    LToken := llama_sampler_sample(ASampler, ACtx, -1);
+    if llama_vocab_is_eog(AVocab, LToken) then
+      leave;
+    end;
+    LWritten := LWritten + 1;
+    if not LlamaExtDoEmit(AStop, LlamaExtDoPiece(AVocab, LToken), AText, AOnToken, AUserData, AError) then
+      return false;
+    end;
+    if LlamaExtDoCancelIs(ACancel) then
+      AError := "the generation was cancelled";
+      return false;
+    end;
+    // A stop string ends the result here: what waited was cut at it
+    if (AStop <> nil) and LlamaExtDoStopHit(AStop) then
+      return true;
+    end;
+    if (AMaxTokens > 0) and (LWritten >= AMaxTokens) then
+      leave;
+    end;
+    if int64(llama_memory_seq_pos_max(llama_get_memory(ACtx), 0)) + 1 >= LContextSize then
+      leave;
+    end;
+    LStatus := llama_decode(ACtx, llama_batch_get_one(address of LToken, 1));
+    if LStatus = 2 then
+      AError := "the generation was cancelled";
+      return false;
+    end;
+    if LStatus <> 0 then
+      AError := "llama_decode failed";
+      return false;
+    end;
+    if (AHeld <> nil) and not LlamaExtDoTokensAppend(AHeld, address of LToken, 1) then
+      AError := "there is no memory to hold the reply";
+      return false;
+    end;
+  end;
+  // The run ended with no stop string: what waited was none, it goes out
+  if AStop <> nil then
+    LPiece := LlamaExtDoStopFlush(AStop);
+    if LPiece <> "" then
+      AText := AText + LPiece;
+      if AOnToken <> nil then
+        AOnToken(AUserData, LPiece);
+      end;
+    end;
+  end;
+  return true;
+end;
+
+// A new context for AModel: its fitted parameters, with AOptions'
+// ContextSize and Threads when they are set, its decodes ended by ACancel;
+// nil when llama.cpp cannot make one (AError says why)
+routine LlamaExtDoContext(const AModel: LlamaModel; const AOptions: LlamaOptions; const ACancel: ptr;
+  var AError: string): ptr to llama_context;
+var
+  LParams: llama_context_params;
+  LContext: ptr to llama_context;
+begin
+  LParams := AModel.ContextParams;
+  if AOptions.ContextSize > 0 then
+    LParams.n_ctx := uint32(AOptions.ContextSize);
+  end;
+  if AOptions.Threads > 0 then
+    LParams.n_threads := AOptions.Threads;
+    LParams.n_threads_batch := AOptions.Threads;
+  end;
+  LlamaExtDoCaptureBegin();
+  LContext := llama_init_from_model(AModel.Handle, LParams);
+  AError := LlamaExtDoCaptureEnd();
+  if (LContext = nil) and (AError = "") then
+    AError := "llama.cpp could not create a context";
+  end;
+  if LContext <> nil then
+    LlamaExtDoSetAbort(LContext, ACancel);
+  end;
+  return LContext;
+end;
+
+// A turn that failed: its message leaves the history and the context goes
+// back to the tokens the turn began with
+routine LlamaExtDoDropTurn(var AChat: LlamaChat);
+begin
+  LlamaExtDoChatDropLast(AChat.ChatData);
+  LlamaExtDoChatCut(AChat.Context, AChat.ChatData);
+end;
+
+/// Frees a model: llama.cpp's model and the buffers its parameters point
+/// into; the record is then empty (IsLlamaModelValid false). Free every
+/// chat made from the model first. An empty record does nothing.
+/// @param AModel the model
+/// @example `UnloadLlamaModel(LModel);`
+/// @since 0.3
+/// @see LoadLlamaModel
+exported routine UnloadLlamaModel(var AModel: LlamaModel);
+begin
+  if AModel.Handle <> nil then
+    llama_model_free(AModel.Handle);
+    AModel.Handle := nil;
+  end;
+  if AModel.FitData <> nil then
+    LlamaExtDoFitFree(AModel.FitData);
+    AModel.FitData := nil;
+  end;
+  if AModel.CancelFlag <> nil then
+    LlamaExtDoCancelFree(AModel.CancelFlag);
+    AModel.CancelFlag := nil;
+  end;
+  AModel.ContextParams := llama_context_default_params();
+  AModel.Options := DefaultLlamaOptions();
+  AModel.ErrorMessage := "";
+end;
+
+/// Whether a model is loaded in the record.
+/// @param AModel the model
+/// @returns true after a LoadLlamaModel that succeeded, until UnloadLlamaModel
+/// @since 0.3
+/// @see LoadLlamaModel
+exported routine IsLlamaModelValid(const AModel: LlamaModel): bool;
+begin
+  return AModel.Handle <> nil;
+end;
+
+/// Loads a GGUF model from a file: as many of its layers on the GPU as fit
+/// the free device memory, and its contexts as large as fit (llama.cpp's
+/// fit, as llama-cli's --fit); the CPU runs what the GPU does not hold, or
+/// all of it without a Vulkan driver. A model the record already holds is
+/// unloaded first.
+/// AOptions become the model's own: GenerateLlama and CreateLlamaChat use
+/// them when they are given none. Their ContextSize, when set, is the
+/// context the fit places the layers for; their Threads, when set, run
+/// every context of the model.
+/// @param APath the .gguf file (resolved as ResolvePath resolves it: `$P:`, `$D:`)
+/// @param AOptions the model's options (DefaultLlamaOptions for llama.cpp's)
+/// @param AModel the loaded model
+/// @returns true when the model is loaded; false when an option is out of
+///   range or its grammar cannot be read, the file is missing, is no GGUF
+///   model llama.cpp can run or there is no memory for it
+///   (AModel.ErrorMessage says why)
+/// @example `LOptions := DefaultLlamaOptions(); LOptions.ContextSize := 2048; LoadLlamaModel("$P:tiny.gguf", LOptions, LModel);`
+/// @since 0.3
+/// @see UnloadLlamaModel
+/// @see GenerateLlama
+/// @see CreateLlamaChat
+exported routine LoadLlamaModel(const APath: string; const AOptions: LlamaOptions; var AModel: LlamaModel): bool;
+var
+  LPath: string;
+  LModelParams: llama_model_params;
+  LError: string;
+  LSampler: ptr to llama_sampler;
+  LGrammar: ptr to llama_sampler;
+begin
+  UnloadLlamaModel(AModel);
+  LError := "";
+  if not LlamaExtDoCheckOptions(AOptions, LError) then
+    AModel.ErrorMessage := LError;
+    return false;
+  end;
+  if not LlamaExtDoInit() then
+    AModel.ErrorMessage := "llama.cpp could not start";
+    return false;
+  end;
+  if not FileExists(APath) then
+    AModel.ErrorMessage := "the model file was not found: " + APath;
+    return false;
+  end;
+  LPath := ResolvePath(APath);
+  LModelParams := llama_model_default_params();
+  AModel.ContextParams := llama_context_default_params();
+  // The fit keeps a context size that is set (common/fit.h)
+  if AOptions.ContextSize > 0 then
+    AModel.ContextParams.n_ctx := uint32(AOptions.ContextSize);
+  end;
+  if AOptions.Threads > 0 then
+    AModel.ContextParams.n_threads := AOptions.Threads;
+    AModel.ContextParams.n_threads_batch := AOptions.Threads;
+  end;
+  LlamaExtDoCaptureBegin();
+  AModel.FitData := LlamaExtDoFit(LPath, address of LModelParams, address of AModel.ContextParams);
+  if AModel.FitData = nil then
+    LlamaExtDoCaptureEnd();
+    AModel.ContextParams := llama_context_default_params();
+    AModel.ErrorMessage := "there is no memory to load the model";
+    return false;
+  end;
+  AModel.Handle := llama_model_load_from_file(LPath.c_str(), LModelParams);
+  LError := LlamaExtDoCaptureEnd();
+  if AModel.Handle = nil then
+    UnloadLlamaModel(AModel);
+    AModel.ErrorMessage := LError;
+    if AModel.ErrorMessage = "" then
+      AModel.ErrorMessage := "llama.cpp could not load the model";
+    end;
+    return false;
+  end;
+  // A grammar is read with the model's vocabulary: checked now, so a load
+  // refuses it as it refuses every other option
+  LSampler := LlamaExtDoSampler(llama_model_get_vocab(AModel.Handle), AOptions, LGrammar, LError);
+  if LSampler = nil then
+    UnloadLlamaModel(AModel);
+    AModel.ErrorMessage := LError;
+    return false;
+  end;
+  llama_sampler_free(LSampler);
+  AModel.CancelFlag := LlamaExtDoCancelNew();
+  if AModel.CancelFlag = nil then
+    UnloadLlamaModel(AModel);
+    AModel.ErrorMessage := "there is no memory to load the model";
+    return false;
+  end;
+  AModel.Options := AOptions;
+  return true;
+end;
+
+/// LoadLlamaModel with llama.cpp's default options (DefaultLlamaOptions).
+/// @param APath the .gguf file
+/// @param AModel the loaded model
+/// @returns as LoadLlamaModel
+/// @example `if not LoadLlamaModel("$P:models/tiny.gguf", LModel) then println("{}", LModel.ErrorMessage); end;`
+/// @since 0.3
+exported routine LoadLlamaModel(const APath: string; var AModel: LlamaModel): bool;
+begin
+  return LoadLlamaModel(APath, DefaultLlamaOptions(), AModel);
+end;
+
+// The folder zip entries are extracted into: AOptions.CacheDir resolved, or
+// the temporary folder's pcpp_llama; "" when the system names no temporary
+// folder
+routine LlamaExtDoCacheFolder(const AOptions: LlamaOptions): string;
+var
+  LTemp: string;
+begin
+  if AOptions.CacheDir <> "" then
+    return ResolvePath(AOptions.CacheDir);
+  end;
+  LTemp := TempDir();
+  if LTemp = "" then
+    return "";
+  end;
+  return ResolvePath(LTemp + "/pcpp_llama");
+end;
+
+// True when ACache is a whole extraction of the entry: the cache file's
+// name carries the entry's CRC and size, and a file only gets that name
+// once its bytes passed the CRC check (LlamaExtDoExtract), so its size is
+// what is left to compare
+routine LlamaExtDoCacheCurrent(const ACache: string; const AInfo: ZipEntryInfo): bool;
+begin
+  return FileSize(ACache) = AInfo.Size;
+end;
+
+// The entry opened and closed again: an encrypted entry opens only with its
+// password (a large entry decodes nothing to open); false with AError when
+// it does not open
+routine LlamaExtDoCheckOpen(const AArchive: string; const AEntry: string; const APassword: string;
+  var AError: string): bool;
+var
+  LInput: IO;
+begin
+  LInput := CreateZipFileIO(AArchive, AEntry, APassword);
+  if LInput = nil then
+    AError := "the zip entry could not be opened (a missing or wrong password, or a damaged entry): " + AEntry;
+    return false;
+  end;
+  IOClose(LInput);
+  return true;
+end;
+
+// The entry streamed out of the zip into ACache: written as ACache + ".part"
+// (an entry IO fails a read whose bytes do not match the CRC), renamed to
+// ACache only when every byte is there; false with AError on any failure,
+// no .part left behind
+routine LlamaExtDoExtract(const AArchive: string; const AEntry: string; const APassword: string;
+  const AInfo: ZipEntryInfo; const ACache: string; var AError: string): bool;
+var
+  LPart: string;
+  LInput: IO;
+  LOutput: IO;
+  LCopied: int64;
+  LClosed: bool;
+begin
+  LPart := ACache + ".part";
+  // A .part is only ever an extraction that did not finish
+  DeleteFile(LPart);
+  LInput := CreateZipFileIO(AArchive, AEntry, APassword);
+  if LInput = nil then
+    AError := "the zip entry could not be opened (a missing or wrong password, or a damaged entry): " + AEntry;
+    return false;
+  end;
+  LOutput := CreateFileIO(LPart, FileMode.Write);
+  if LOutput = nil then
+    IOClose(LInput);
+    AError := "the cache file could not be written: " + LPart;
+    return false;
+  end;
+  LCopied := IOCopy(LInput, LOutput);
+  IOClose(LInput);
+  LClosed := IOClose(LOutput);
+  if (LCopied <> AInfo.Size) or not LClosed then
+    DeleteFile(LPart);
+    AError := "the zip entry could not be extracted (a wrong password, a damaged entry or a full disk): " + AEntry;
+    return false;
+  end;
+  // A cache file of another size under this name is stale: it goes first,
+  // RenameFile never replaces
+  DeleteFile(ACache);
+  if not RenameFile(LPart, ACache) then
+    DeleteFile(LPart);
+    // Another program may have finished the same extraction first
+    if LlamaExtDoCacheCurrent(ACache, AInfo) then
+      return true;
+    end;
+    AError := "the cache file could not be written: " + ACache;
+    return false;
+  end;
+  return true;
+end;
+
+/// Loads a GGUF model from an entry of a zip file, as LoadLlamaModel loads
+/// one from a file: the entry is streamed out once (its CRC checked) into a
+/// cache file in AOptions.CacheDir (the temporary folder's pcpp_llama when
+/// ""), named by the entry's name, CRC and size, and llama.cpp maps the
+/// model from there. A later load of the same entry (the same CRC and size)
+/// reuses that file without decoding the entry again (its password is
+/// still checked: a cache never loads an encrypted entry without it); an
+/// entry that changed gets a cache file of its own. One zip can hold a
+/// family of models, each loaded by its entry. Stored and deflated entries
+/// load, ZipCrypto encrypted ones with their password.
+/// @param AArchive the zip file (resolved as ResolvePath resolves it: `$P:`, `$D:`)
+/// @param AEntry the model's entry in the zip (`/` separated)
+/// @param APassword the archive's password, "" for none
+/// @param AOptions the model's options, as LoadLlamaModel takes them
+///   (CacheDir picks the cache folder)
+/// @param AModel the loaded model
+/// @returns true when the model is loaded; false when the zip file is
+///   missing or no zip, it has no such entry, the password is missing or
+///   wrong, the entry is damaged, the cache file cannot be written, or for
+///   any reason LoadLlamaModel fails (AModel.ErrorMessage says why)
+/// @example `if not LoadLlamaModelZip("$P:assets.zip", "models/tiny.gguf", "", DefaultLlamaOptions(), LModel) then println("{}", LModel.ErrorMessage); end;`
+/// @since 0.3
+/// @see LoadLlamaModel
+/// @see UnloadLlamaModel
+exported routine LoadLlamaModelZip(const AArchive: string; const AEntry: string; const APassword: string;
+  const AOptions: LlamaOptions; var AModel: LlamaModel): bool;
+var
+  LInfo: ZipEntryInfo;
+  LFolder: string;
+  LCache: string;
+  LError: string;
+begin
+  UnloadLlamaModel(AModel);
+  // The options first: a load they would fail costs no extraction
+  LError := "";
+  if not LlamaExtDoCheckOptions(AOptions, LError) then
+    AModel.ErrorMessage := LError;
+    return false;
+  end;
+  if not FileExists(AArchive) then
+    AModel.ErrorMessage := "the zip file was not found: " + AArchive;
+    return false;
+  end;
+  if not GetZipEntryInfo(AArchive, AEntry, APassword, LInfo) then
+    AModel.ErrorMessage := "the zip file is no zip or has no entry " + AEntry + ": " + AArchive;
+    return false;
+  end;
+  LFolder := LlamaExtDoCacheFolder(AOptions);
+  if (LFolder = "") or not ForceDirectories(LFolder) then
+    AModel.ErrorMessage := "the cache folder could not be made: " + LFolder;
+    return false;
+  end;
+  LCache := LFolder + "/" + FormatStr("{}-{:08x}-{}.gguf", ChangeFileExt(ExtractFileName(AEntry), ""),
+    LInfo.Crc, LInfo.Size);
+  if LlamaExtDoCacheCurrent(LCache, LInfo) then
+    // The cache holds the entry decoded: the password is still checked, so
+    // a cache never opens an encrypted entry without it
+    if not LlamaExtDoCheckOpen(AArchive, AEntry, APassword, LError) then
+      AModel.ErrorMessage := LError;
+      return false;
+    end;
+  else
+    if not LlamaExtDoExtract(AArchive, AEntry, APassword, LInfo, LCache, LError) then
+      AModel.ErrorMessage := LError;
+      return false;
+    end;
+  end;
+  return LoadLlamaModel(LCache, AOptions, AModel);
+end;
+
+/// LoadLlamaModelZip with llama.cpp's default options (DefaultLlamaOptions):
+/// the cache in the temporary folder's pcpp_llama.
+/// @param AArchive the zip file
+/// @param AEntry the model's entry in the zip
+/// @param APassword the archive's password, "" for none
+/// @param AModel the loaded model
+/// @returns as LoadLlamaModelZip
+/// @example `if not LoadLlamaModelZip("$P:assets.zip", "models/tiny.gguf", "", LModel) then println("{}", LModel.ErrorMessage); end;`
+/// @since 0.3
+/// @see LoadLlamaModelZip
+exported routine LoadLlamaModelZip(const AArchive: string; const AEntry: string; const APassword: string;
+  var AModel: LlamaModel): bool;
+begin
+  return LoadLlamaModelZip(AArchive, AEntry, APassword, DefaultLlamaOptions(), AModel);
+end;
+
+/// Continues a prompt as written (no chat template; special tokens in it
+/// are read as such) in a context of its own, made for the call and freed
+/// after it, until the model ends its text, a stop string is written,
+/// AOptions.MaxTokens tokens were written or the context is full.
+/// CancelLlamaModel ends it from any thread or from AOnToken.
+/// @param AModel the model; its ErrorMessage says why a call failed
+/// @param APrompt the text to continue (UTF-8)
+/// @param AOptions the call's options (the model's own are AModel.Options)
+/// @param AText the continuation ("" when the call fails)
+/// @param AOnToken called with each piece of the continuation as it is
+///   written (nil for none); with stop strings, text that may begin one
+///   comes in a later piece
+/// @param AUserData the pointer AOnToken receives
+/// @returns true when the continuation is complete; false when no model is
+///   loaded, an option is out of range or its grammar cannot be read, the
+///   prompt is empty or does not fit the context, the call was cancelled
+///   or llama.cpp fails (AModel.ErrorMessage says why)
+/// @example `LOptions := LModel.Options; LOptions.MaxTokens := 32; GenerateLlama(LModel, "Once upon a time", LOptions, LText, ShowPiece, nil);`
+/// @since 0.3
+/// @see LlamaOptions
+/// @see LlamaTokenProc
+/// @see CancelLlamaModel
+exported routine GenerateLlama(var AModel: LlamaModel; const APrompt: string; const AOptions: LlamaOptions;
+  var AText: string; const AOnToken: LlamaTokenProc; const AUserData: ptr): bool;
+var
+  LContext: ptr to llama_context;
+  LSampler: ptr to llama_sampler;
+  LGrammar: ptr to llama_sampler;
+  LTokens: ptr;
+  LStop: ptr;
+  LError: string;
+  LResult: bool;
+begin
+  AText := "";
+  AModel.ErrorMessage := "";
+  if AModel.Handle = nil then
+    AModel.ErrorMessage := "no model is loaded";
+    return false;
+  end;
+  LError := "";
+  if not LlamaExtDoCheckOptions(AOptions, LError) then
+    AModel.ErrorMessage := LError;
+    return false;
+  end;
+  if APrompt = "" then
+    AModel.ErrorMessage := "the prompt is empty";
+    return false;
+  end;
+  // A cancel before the call began is not this call's
+  LlamaExtDoCancelSet(AModel.CancelFlag, false);
+  LTokens := LlamaExtDoPromptTokens(llama_model_get_vocab(AModel.Handle), APrompt);
+  if LTokens = nil then
+    AModel.ErrorMessage := "the prompt could not be tokenized";
+    return false;
+  end;
+  if not LlamaExtDoMakeStop(AOptions, LStop) then
+    LlamaExtDoTokensFree(LTokens);
+    AModel.ErrorMessage := "there is no memory for the stop strings";
+    return false;
+  end;
+  LContext := LlamaExtDoContext(AModel, AOptions, AModel.CancelFlag, LError);
+  if LContext = nil then
+    LlamaExtDoStopFree(LStop);
+    LlamaExtDoTokensFree(LTokens);
+    AModel.ErrorMessage := LError;
+    return false;
+  end;
+  LSampler := LlamaExtDoSampler(llama_model_get_vocab(AModel.Handle), AOptions, LGrammar, LError);
+  if LSampler = nil then
+    llama_free(LContext);
+    LlamaExtDoStopFree(LStop);
+    LlamaExtDoTokensFree(LTokens);
+    AModel.ErrorMessage := LError;
+    return false;
+  end;
+  LResult := LlamaExtDoRun(LContext, llama_model_get_vocab(AModel.Handle), LSampler,
+    LlamaExtDoTokenData(LTokens), LlamaExtDoTokenCount(LTokens), nil, AOptions.MaxTokens, LStop,
+    AModel.CancelFlag, AText, AOnToken, AUserData, LError);
+  llama_sampler_free(LSampler);
+  llama_free(LContext);
+  LlamaExtDoStopFree(LStop);
+  LlamaExtDoTokensFree(LTokens);
+  if not LResult then
+    AText := "";
+    AModel.ErrorMessage := LError;
+  end;
+  return LResult;
+end;
+
+/// GenerateLlama with options and no streaming routine: the continuation
+/// comes back whole.
+/// @param AModel the model
+/// @param APrompt the text to continue
+/// @param AOptions the call's options
+/// @param AText the continuation
+/// @returns as GenerateLlama
+/// @example `if GenerateLlama(LModel, "Once upon a time", LOptions, LText) then println("{}", LText); end;`
+/// @since 0.3
+exported routine GenerateLlama(var AModel: LlamaModel; const APrompt: string; const AOptions: LlamaOptions;
+  var AText: string): bool;
+begin
+  return GenerateLlama(AModel, APrompt, AOptions, AText, nil, nil);
+end;
+
+/// GenerateLlama with the model's own options (the ones it was loaded with).
+/// @param AModel the model
+/// @param APrompt the text to continue
+/// @param AText the continuation
+/// @param AOnToken called with each piece as it is written (nil for none)
+/// @param AUserData the pointer AOnToken receives
+/// @returns as GenerateLlama
+/// @example `GenerateLlama(LModel, "Once upon a time", LText, ShowPiece, nil);`
+/// @since 0.3
+exported routine GenerateLlama(var AModel: LlamaModel; const APrompt: string; var AText: string;
+  const AOnToken: LlamaTokenProc; const AUserData: ptr): bool;
+var
+  LOptions: LlamaOptions;
+begin
+  // A copy: the call takes AModel as var, its options as const
+  LOptions := AModel.Options;
+  return GenerateLlama(AModel, APrompt, LOptions, AText, AOnToken, AUserData);
+end;
+
+/// GenerateLlama with the model's own options and no streaming routine:
+/// the continuation comes back whole.
+/// @param AModel the model
+/// @param APrompt the text to continue
+/// @param AText the continuation
+/// @returns as GenerateLlama
+/// @example `if GenerateLlama(LModel, "Once upon a time", LText) then println("{}", LText); end;`
+/// @since 0.3
+exported routine GenerateLlama(var AModel: LlamaModel; const APrompt: string; var AText: string): bool;
+begin
+  return GenerateLlama(AModel, APrompt, AText, nil, nil);
+end;
+
+/// Ends a GenerateLlama running on the model: it stops before its next
+/// token (or inside a decode on the CPU) and fails with "the generation
+/// was cancelled". Safe from any thread and from the call's own AOnToken.
+/// A model with no call running: the next call starts uncancelled.
+/// @param AModel the model
+/// @example `CancelLlamaModel(LModel);`
+/// @since 0.3
+/// @see GenerateLlama
+exported routine CancelLlamaModel(const AModel: LlamaModel);
+begin
+  LlamaExtDoCancelSet(AModel.CancelFlag, true);
+end;
+
+/// Frees a chat: its context, sampler and history; the record is then
+/// empty (IsLlamaChatValid false). The model stays loaded. An empty record
+/// does nothing.
+/// @param AChat the chat
+/// @example `FreeLlamaChat(LChat);`
+/// @since 0.3
+/// @see CreateLlamaChat
+exported routine FreeLlamaChat(var AChat: LlamaChat);
+begin
+  // The chain frees its grammar sampler with it
+  if AChat.Sampler <> nil then
+    llama_sampler_free(AChat.Sampler);
+    AChat.Sampler := nil;
+  end;
+  AChat.Grammar := nil;
+  if AChat.Context <> nil then
+    llama_free(AChat.Context);
+    AChat.Context := nil;
+  end;
+  if AChat.ChatData <> nil then
+    LlamaExtDoChatFree(AChat.ChatData);
+    AChat.ChatData := nil;
+  end;
+  if AChat.CancelFlag <> nil then
+    LlamaExtDoCancelFree(AChat.CancelFlag);
+    AChat.CancelFlag := nil;
+  end;
+  AChat.ModelHandle := nil;
+  AChat.SystemPrompt := "";
+  AChat.Options := DefaultLlamaOptions();
+  AChat.ErrorMessage := "";
+end;
+
+/// Whether a chat is open in the record.
+/// @param AChat the chat
+/// @returns true after a CreateLlamaChat that succeeded, until FreeLlamaChat
+/// @since 0.3
+/// @see CreateLlamaChat
+exported routine IsLlamaChatValid(const AChat: LlamaChat): bool;
+begin
+  return AChat.Context <> nil;
+end;
+
+/// Opens a chat with a loaded model: a context of its own, the sampling
+/// AOptions describe and the model's own chat template (chatml for a model
+/// that has none); every reply runs with AOptions' MaxTokens and
+/// StopStrings. A chat the record already holds is freed first. Free the
+/// chat before the model.
+/// @param AModel the model the chat runs on (it stays the caller's)
+/// @param ASystemPrompt the system message the chat opens with ("" for none)
+/// @param AOptions the chat's options (the model's own are AModel.Options)
+/// @param AChat the chat
+/// @returns true when the chat is open; false when no model is loaded, an
+///   option is out of range or llama.cpp cannot make the context or read
+///   the template (AChat.ErrorMessage says why)
+/// @example `LOptions := LModel.Options; setlength(LOptions.StopStrings, 1); LOptions.StopStrings[0] := "User:"; CreateLlamaChat(LModel, "", LOptions, LChat);`
+/// @since 0.3
+/// @see SayLlamaChat
+/// @see FreeLlamaChat
+/// @see LlamaOptions
+exported routine CreateLlamaChat(const AModel: LlamaModel; const ASystemPrompt: string; const AOptions: LlamaOptions;
+  var AChat: LlamaChat): bool;
+var
+  LError: string;
+begin
+  FreeLlamaChat(AChat);
+  if AModel.Handle = nil then
+    AChat.ErrorMessage := "no model is loaded";
+    return false;
+  end;
+  LError := "";
+  if not LlamaExtDoCheckOptions(AOptions, LError) then
+    AChat.ErrorMessage := LError;
+    return false;
+  end;
+  AChat.CancelFlag := LlamaExtDoCancelNew();
+  if AChat.CancelFlag = nil then
+    AChat.ErrorMessage := "there is no memory for the chat";
+    return false;
+  end;
+  AChat.Context := LlamaExtDoContext(AModel, AOptions, AChat.CancelFlag, LError);
+  if AChat.Context = nil then
+    FreeLlamaChat(AChat);
+    AChat.ErrorMessage := LError;
+    return false;
+  end;
+  AChat.Sampler := LlamaExtDoSampler(llama_model_get_vocab(AModel.Handle), AOptions, AChat.Grammar, LError);
+  if AChat.Sampler = nil then
+    FreeLlamaChat(AChat);
+    AChat.ErrorMessage := LError;
+    return false;
+  end;
+  LError := "";
+  AChat.ChatData := LlamaExtDoChatNew(AModel.Handle, ASystemPrompt, LError);
+  if AChat.ChatData = nil then
+    FreeLlamaChat(AChat);
+    AChat.ErrorMessage := "the chat template could not be read: " + LError;
+    return false;
+  end;
+  AChat.ModelHandle := AModel.Handle;
+  AChat.SystemPrompt := ASystemPrompt;
+  AChat.Options := AOptions;
+  return true;
+end;
+
+/// CreateLlamaChat with the model's own options (the ones it was loaded
+/// with).
+/// @param AModel the model the chat runs on
+/// @param ASystemPrompt the system message the chat opens with ("" for none)
+/// @param AChat the chat
+/// @returns as CreateLlamaChat
+/// @example `CreateLlamaChat(LModel, "You are a helpful assistant.", LChat);`
+/// @since 0.3
+exported routine CreateLlamaChat(const AModel: LlamaModel; const ASystemPrompt: string; var AChat: LlamaChat): bool;
+begin
+  return CreateLlamaChat(AModel, ASystemPrompt, AModel.Options, AChat);
+end;
+
+/// Says a message in a chat and gets the model's reply: the message joins
+/// the history, the part of it the context does not hold yet is decoded,
+/// and the reply is written until the model ends it, a stop string is
+/// written, the chat's MaxTokens tokens were written or the context is
+/// full. A turn that fails (a cancelled one too) leaves the chat as it was
+/// before it. A reply cut short by a full context comes back as far as it
+/// got; a turn after it no longer fits, and ResetLlamaChat starts the chat
+/// over. CancelLlamaChat ends a turn from any thread or from AOnToken.
+/// @param AChat the chat; its ErrorMessage says why a call failed
+/// @param AMessage the user's message (UTF-8; written as plain text, never
+///   read as special tokens)
+/// @param AReply the reply ("" when the call fails)
+/// @param AOnToken called with each piece of the reply as it is written
+///   (nil for none)
+/// @param AUserData the pointer AOnToken receives
+/// @returns true when the reply is complete; false when no chat is open,
+///   the message is empty, the turn does not fit the context, the turn was
+///   cancelled or llama.cpp fails (AChat.ErrorMessage says why)
+/// @example `if SayLlamaChat(LChat, "What is a llama?", LReply, ShowPiece, nil) then println(""); end;`
+/// @since 0.3
+/// @see LlamaTokenProc
+/// @see ResetLlamaChat
+/// @see CancelLlamaChat
+exported routine SayLlamaChat(var AChat: LlamaChat; const AMessage: string; var AReply: string;
+  const AOnToken: LlamaTokenProc; const AUserData: ptr): bool;
+var
+  LVocab: ptr to const llama_vocab;
+  LStop: ptr;
+  LResult: bool;
+  LError: string;
+begin
+  AReply := "";
+  AChat.ErrorMessage := "";
+  if AChat.Context = nil then
+    AChat.ErrorMessage := "no chat is open";
+    return false;
+  end;
+  if AMessage = "" then
+    AChat.ErrorMessage := "the message is empty";
+    return false;
+  end;
+  // A cancel before the turn began is not this turn's
+  LlamaExtDoCancelSet(AChat.CancelFlag, false);
+  if not LlamaExtDoMakeStop(AChat.Options, LStop) then
+    AChat.ErrorMessage := "there is no memory for the stop strings";
+    return false;
+  end;
+  LVocab := llama_model_get_vocab(AChat.ModelHandle);
+  LError := "";
+  if not LlamaExtDoChatPrompt(AChat.ChatData, LVocab, AMessage, LError) then
+    LlamaExtDoStopFree(LStop);
+    AChat.ErrorMessage := LError;
+    return false;
+  end;
+  // The context keeps what the history still starts with; the rest of
+  // the history is decoded, then the reply
+  if not LlamaExtDoChatCut(AChat.Context, AChat.ChatData) then
+    LlamaExtDoStopFree(LStop);
+    LlamaExtDoChatDropLast(AChat.ChatData);
+    AChat.ErrorMessage := "there is no memory for the turn";
+    return false;
+  end;
+  // A reply is a text of its own: the grammar starts over (the rest of the
+  // chain keeps its state, so a seeded chat goes on as before)
+  if AChat.Grammar <> nil then
+    llama_sampler_reset(AChat.Grammar);
+  end;
+  LResult := LlamaExtDoRun(AChat.Context, LVocab, AChat.Sampler, LlamaExtDoChatPendingData(AChat.ChatData),
+    LlamaExtDoChatPendingCount(AChat.ChatData), LlamaExtDoChatHeld(AChat.ChatData), AChat.Options.MaxTokens,
+    LStop, AChat.CancelFlag, AReply, AOnToken, AUserData, LError);
+  LlamaExtDoStopFree(LStop);
+  if not LResult then
+    LlamaExtDoDropTurn(AChat);
+    AReply := "";
+    AChat.ErrorMessage := LError;
+    return false;
+  end;
+  if not LlamaExtDoChatCommit(AChat.ChatData, AReply, LError) then
+    LlamaExtDoDropTurn(AChat);
+    AReply := "";
+    AChat.ErrorMessage := LError;
+    return false;
+  end;
+  return true;
+end;
+
+/// SayLlamaChat with no streaming routine: the reply comes back whole.
+/// @param AChat the chat
+/// @param AMessage the user's message
+/// @param AReply the reply
+/// @returns as SayLlamaChat
+/// @example `if SayLlamaChat(LChat, "Hello!", LReply) then println("{}", LReply); end;`
+/// @since 0.3
+exported routine SayLlamaChat(var AChat: LlamaChat; const AMessage: string; var AReply: string): bool;
+begin
+  return SayLlamaChat(AChat, AMessage, AReply, nil, nil);
+end;
+
+/// Starts a chat over: the history goes back to the system prompt, the
+/// context is emptied and the sampler reset; the model and the template
+/// stay. A record with no chat open does nothing.
+/// @param AChat the chat
+/// @example `ResetLlamaChat(LChat);`
+/// @since 0.3
+/// @see SayLlamaChat
+exported routine ResetLlamaChat(var AChat: LlamaChat);
+begin
+  if AChat.Context = nil then
+    return;
+  end;
+  llama_memory_clear(llama_get_memory(AChat.Context), true);
+  llama_sampler_reset(AChat.Sampler);
+  LlamaExtDoChatReset(AChat.ChatData);
+  AChat.ErrorMessage := "";
+end;
+
+/// Ends a SayLlamaChat running on the chat: it stops before its next
+/// token (or inside a decode on the CPU) and fails with "the generation
+/// was cancelled", the chat left as it was before the turn. Safe from any
+/// thread and from the turn's own AOnToken. A chat with no turn running:
+/// the next turn starts uncancelled.
+/// @param AChat the chat
+/// @example `CancelLlamaChat(LChat);`
+/// @since 0.3
+/// @see SayLlamaChat
+exported routine CancelLlamaChat(const AChat: LlamaChat);
+begin
+  LlamaExtDoCancelSet(AChat.CancelFlag, true);
+end;
+
+/// Saves a chat's history to a file: the messages so far, the system
+/// prompt first when there is one, as JSON (an array of OpenAI-style
+/// messages with role and content, UTF-8). The file is the model's text,
+/// not its state: any model can load it.
+/// @param AChat the chat; its ErrorMessage says why a call failed
+/// @param APath the file to write (resolved as ResolvePath resolves it);
+///   a file there is replaced
+/// @returns true when the file is written; false when no chat is open or
+///   the file cannot be written (AChat.ErrorMessage says why)
+/// @example `SaveLlamaChatHistory(LChat, "$P:chat.json");`
+/// @since 0.3
+/// @see LoadLlamaChatHistory
+exported routine SaveLlamaChatHistory(var AChat: LlamaChat; const APath: string): bool;
+var
+  LText: string;
+  LError: string;
+begin
+  AChat.ErrorMessage := "";
+  if AChat.Context = nil then
+    AChat.ErrorMessage := "no chat is open";
+    return false;
+  end;
+  LError := "";
+  if not LlamaExtDoChatToJson(AChat.ChatData, LText, LError) then
+    AChat.ErrorMessage := "the history could not be written: " + LError;
+    return false;
+  end;
+  if not WriteAllText(APath, LText) then
+    AChat.ErrorMessage := "the history file could not be written: " + APath;
+    return false;
+  end;
+  return true;
+end;
+
+/// Loads a chat's history from a file SaveLlamaChatHistory wrote (or any
+/// array of OpenAI-style role / content messages): it replaces the chat's
+/// history, its system prompt becomes the file's (its first message when
+/// that is a system message, else ""), and the next turn reads the whole
+/// history into the context. The chat's model, options and template stay.
+/// @param AChat the chat; its ErrorMessage says why a call failed
+/// @param APath the file to read (resolved as ResolvePath resolves it)
+/// @returns true when the history is loaded; false when no chat is open,
+///   the file cannot be read, holds no message list or the chat template
+///   cannot render it (AChat.ErrorMessage says why); the chat is then as
+///   it was
+/// @example `if LoadLlamaChatHistory(LChat, "$P:chat.json") then SayLlamaChat(LChat, "Go on.", LReply); end;`
+/// @since 0.3
+/// @see SaveLlamaChatHistory
+exported routine LoadLlamaChatHistory(var AChat: LlamaChat; const APath: string): bool;
+var
+  LText: string;
+  LSystem: string;
+  LError: string;
+begin
+  AChat.ErrorMessage := "";
+  if AChat.Context = nil then
+    AChat.ErrorMessage := "no chat is open";
+    return false;
+  end;
+  if not ReadAllText(APath, LText) then
+    AChat.ErrorMessage := "the history file could not be read: " + APath;
+    return false;
+  end;
+  LError := "";
+  if not LlamaExtDoChatFromJson(AChat.ChatData, LText, LSystem, LError) then
+    AChat.ErrorMessage := "the history file holds no chat history: " + LError;
+    return false;
+  end;
+  // The history was replaced: what the context held is not its start
+  llama_memory_clear(llama_get_memory(AChat.Context), true);
+  llama_sampler_reset(AChat.Sampler);
+  AChat.SystemPrompt := LSystem;
+  return true;
+end;
+
+/// A text's embedding: a vector of the model's embedding size that stands
+/// for what the text means, so texts that mean alike have vectors that
+/// point alike (compare two with Math's CosineSimilarity). The model reads
+/// the text as plain text (as TokenizeLlama reads it), every token in one
+/// batch of a context made for the call and freed after it; the vector is
+/// the mean of its tokens' outputs, scaled to length 1. Any model gives
+/// one; a model made for embeddings gives the better ones.
+/// @param AModel the model; its ErrorMessage says why a call failed
+/// @param AText the text (UTF-8)
+/// @param AEmbedding the embedding (empty when the call fails)
+/// @returns true when the embedding is made; false when no model is
+///   loaded, the text is empty or cannot be tokenized, or llama.cpp cannot
+///   make the context or run it (AModel.ErrorMessage says why)
+/// @example `if EmbedLlama(LModel, "A cat sat on the mat.", LCat) and EmbedLlama(LModel, "A dog lay on the rug.", LDog) then println("{:.3f}", CosineSimilarity(LCat, LDog)); end;`
+/// @since 0.3
+/// @see CosineSimilarity
+/// @see TokenizeLlama
+exported routine EmbedLlama(var AModel: LlamaModel; const AText: string; var AEmbedding: array of float32): bool;
+var
+  LTokens: array of int32;
+  LParams: llama_context_params;
+  LContext: ptr to llama_context;
+  LError: string;
+  LLogged: string;
+  LResult: bool;
+begin
+  setlength(AEmbedding, 0);
+  AModel.ErrorMessage := "";
+  if AModel.Handle = nil then
+    AModel.ErrorMessage := "no model is loaded";
+    return false;
+  end;
+  if AText = "" then
+    AModel.ErrorMessage := "the text is empty";
+    return false;
+  end;
+  if not LlamaExtDoTokenize(llama_model_get_vocab(AModel.Handle), AText, LTokens) then
+    AModel.ErrorMessage := "the text could not be tokenized";
+    return false;
+  end;
+  if len(LTokens) = 0 then
+    AModel.ErrorMessage := "the text gives no tokens";
+    return false;
+  end;
+  // Pooling reads the whole sequence at once: the context, its batch and
+  // its micro-batch all hold every token
+  LParams := AModel.ContextParams;
+  LParams.n_ctx := uint32(len(LTokens));
+  LParams.n_batch := uint32(len(LTokens));
+  LParams.n_ubatch := uint32(len(LTokens));
+  LParams.n_seq_max := 1;
+  LParams.embeddings := true;
+  LParams.pooling_type := LLAMA_POOLING_TYPE_MEAN;
+  LResult := false;
+  LError := "llama.cpp could not create a context";
+  LlamaExtDoCaptureBegin();
+  LContext := llama_init_from_model(AModel.Handle, LParams);
+  if LContext <> nil then
+    LResult := LlamaExtDoEmbed(LContext, AModel.Handle, LTokens, AEmbedding, LError);
+    llama_free(LContext);
+  end;
+  LLogged := LlamaExtDoCaptureEnd();
+  if not LResult then
+    // llama.cpp's own reason, when it logged one, says more
+    if LLogged <> "" then
+      LError := LLogged;
+    end;
+    setlength(AEmbedding, 0);
+    AModel.ErrorMessage := LError;
+    return false;
+  end;
+  return true;
+end;
+
+/// A text as the model's tokens: the ids its vocabulary gives the text,
+/// read as plain text (special tokens written in it stay text), with the
+/// start token (BOS) first when the model wants one, as EmbedLlama reads a
+/// text. DetokenizeLlama turns them back into the text.
+/// @param AModel the model; its ErrorMessage says why a call failed
+/// @param AText the text (UTF-8; "" gives only what the model adds)
+/// @param ATokens the tokens (empty when the call fails)
+/// @returns true when the text is tokenized; false when no model is
+///   loaded or the text cannot be tokenized (AModel.ErrorMessage says why)
+/// @example `if TokenizeLlama(LModel, "Once upon a time", LTokens) then println("{} tokens", len(LTokens)); end;`
+/// @since 0.3
+/// @see DetokenizeLlama
+exported routine TokenizeLlama(var AModel: LlamaModel; const AText: string; var ATokens: array of int32): bool;
+begin
+  setlength(ATokens, 0);
+  AModel.ErrorMessage := "";
+  if AModel.Handle = nil then
+    AModel.ErrorMessage := "no model is loaded";
+    return false;
+  end;
+  if not LlamaExtDoTokenize(llama_model_get_vocab(AModel.Handle), AText, ATokens) then
+    AModel.ErrorMessage := "the text could not be tokenized";
+    return false;
+  end;
+  return true;
+end;
+
+/// Tokens as text: TokenizeLlama's inverse. The start and end tokens the
+/// model adds are left out, and special tokens give no text, so the tokens
+/// of a text give that text back.
+/// @param AModel the model; its ErrorMessage says why a call failed
+/// @param ATokens the tokens (ids of the model's vocabulary)
+/// @param AText the text ("" when the call fails)
+/// @returns true when the tokens are turned into text; false when no model
+///   is loaded, a token is no id of the model, or there is no memory for
+///   the text (AModel.ErrorMessage says why)
+/// @example `if DetokenizeLlama(LModel, LTokens, LText) then println("{}", LText); end;`
+/// @since 0.3
+/// @see TokenizeLlama
+exported routine DetokenizeLlama(var AModel: LlamaModel; const ATokens: array of int32; var AText: string): bool;
+var
+  LError: string;
+begin
+  AText := "";
+  AModel.ErrorMessage := "";
+  if AModel.Handle = nil then
+    AModel.ErrorMessage := "no model is loaded";
+    return false;
+  end;
+  LError := "";
+  if not LlamaExtDoDetokenize(llama_model_get_vocab(AModel.Handle), ATokens, AText, LError) then
+    AModel.ErrorMessage := LError;
+    return false;
+  end;
+  return true;
+end;
+
+// A device kind from LlamaExtDoDevice's number
+routine LlamaExtDoDeviceKind(const AKind: int32): LlamaDeviceKind;
+begin
+  if AKind = 1 then
+    return LlamaDeviceKind.Gpu;
+  end;
+  if AKind = 2 then
+    return LlamaDeviceKind.IntegratedGpu;
+  end;
+  if AKind = 3 then
+    return LlamaDeviceKind.Accelerator;
+  end;
+  return LlamaDeviceKind.Cpu;
+end;
+
+/// The devices llama.cpp can run a model on, in llama.cpp's order: each
+/// Vulkan GPU its driver offers (none without a Vulkan driver), and the
+/// CPU. LoadLlamaModel places a model's layers on the GPUs first and the
+/// rest on the CPU. llama.cpp's virtual devices (one wrapping others) are
+/// left out.
+/// @param ADevices the devices (empty when the call fails)
+/// @returns true when the list is made; false when llama.cpp could not
+///   start or there is no memory for a device's name
+/// @example `if ListLlamaDevices(LDevices) then for LIndex := 0 to int32(len(LDevices)) - 1 do println("{}", LDevices[LIndex].Description); end; end;`
+/// @since 0.3
+/// @see LlamaDevice
+exported routine ListLlamaDevices(var ADevices: array of LlamaDevice): bool;
+var
+  LIndex: int64;
+  LCount: int64;
+  LDevice: LlamaDevice;
+  LKind: int32;
+  LFound: int32;
+begin
+  setlength(ADevices, 0);
+  if not LlamaExtDoInit() then
+    return false;
+  end;
+  LCount := int64(ggml_backend_dev_count());
+  for LIndex := 0 to LCount - 1 do
+    LKind := 0;
+    LFound := LlamaExtDoDevice(size_t(LIndex), LDevice.DeviceName, LDevice.Description, LKind,
+      LDevice.FreeMemory, LDevice.TotalMemory);
+    if LFound < 0 then
+      setlength(ADevices, 0);
+      return false;
+    end;
+    if LFound > 0 then
+      LDevice.Kind := LlamaExtDoDeviceKind(LKind);
+      setlength(ADevices, len(ADevices) + 1);
+      ADevices[int64(len(ADevices)) - 1] := LDevice;
+    end;
+  end;
+  return true;
+end;
+
+end.

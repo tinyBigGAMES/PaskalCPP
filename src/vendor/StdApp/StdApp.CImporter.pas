@@ -1149,7 +1149,6 @@ var
   LOutputFile: string;
   LOutputDir: string;
   LHeaderFile: string;
-  LIncludePath: string;
   LPath: string;
   LTCCBasePath: string;
   LCompileResult: Boolean;
@@ -1158,10 +1157,10 @@ begin
   Result := False;
   APreprocessedSource := '';
 
-  LHeaderFile := TPath.GetFullPath(AHeaderFile);
+  LHeaderFile := TUtils.ResolvePath(AHeaderFile);
 
   if FOutputPath <> '' then
-    LOutputDir := TPath.GetFullPath(FOutputPath)
+    LOutputDir := TUtils.ResolvePath(FOutputPath)
   else
     LOutputDir := TPath.GetDirectoryName(LHeaderFile);
   LOutputFile := TPath.Combine(LOutputDir, FModuleName + '_pp.c');
@@ -1202,12 +1201,10 @@ begin
       LLibTCC.AddIncludePath(TPath.Combine(LTCCBasePath, 'include'));
       LLibTCC.AddIncludePath(TPath.Combine(LTCCBasePath, 'include\winapi'));
 
-      // Add user include paths
+      // Add user include paths: resolved once by AddIncludePath (plain
+      // spelling, forward slashes), handed to TCC as stored
       for LPath in FIncludePaths do
-      begin
-        LIncludePath := TPath.GetFullPath(LPath).Replace('\', '/');
-        LLibTCC.AddIncludePath(LIncludePath);
-      end;
+        LLibTCC.AddIncludePath(LPath);
 
       // Apply user defines
       for LPath in FUserDefines.Keys do
@@ -4028,7 +4025,9 @@ procedure TCImporter.AddIncludePath(const APath: string; const AModuleName: stri
 var
   LPath: string;
 begin
-  LPath := TPath.GetFullPath(APath).Replace('\', '/');
+  // Resolved once, here: plain spelling (a long-path prefix turned to
+  // '//?/' would name nothing), forward slashes, the form TCC is handed
+  LPath := TUtils.StripLongPathPrefix(TUtils.ResolvePath(APath)).Replace('\', '/');
   if not FIncludePaths.Contains(LPath) then
     FIncludePaths.Add(LPath);
 end;
@@ -4037,7 +4036,8 @@ procedure TCImporter.AddSourcePath(const APath: string);
 var
   LPath: string;
 begin
-  LPath := TPath.GetFullPath(APath).Replace('\', '/');
+  // Plain spelling, forward slashes, as the include paths
+  LPath := TUtils.StripLongPathPrefix(TUtils.ResolvePath(APath)).Replace('\', '/');
   if not FSourcePaths.Contains(LPath) then
     FSourcePaths.Add(LPath);
 end;
@@ -4331,7 +4331,7 @@ procedure TCImporter.AddDllNameMap(const APath, ADllName, ADllPath: string);
 var
   LEntry: TDllMapEntry;
 begin
-  LEntry.Path := TPath.GetFullPath(APath).Replace('\', '/');
+  LEntry.Path := TUtils.StripLongPathPrefix(TUtils.ResolvePath(APath)).Replace('\', '/');
   LEntry.DllName := ADllName;
   if not LEntry.DllName.EndsWith('.dll', True) then
     LEntry.DllName := LEntry.DllName + '.dll';
@@ -5226,7 +5226,7 @@ begin
   if FOutputPath <> '' then
     LOutputDir := FOutputPath
   else
-    LOutputDir := TPath.GetDirectoryName(TPath.GetFullPath(FHeader));
+    LOutputDir := TPath.GetDirectoryName(TUtils.ResolvePath(FHeader));
 
   LOutputFile := TPath.Combine(LOutputDir, FModuleName + '.pas').Replace('\', '/');
 
@@ -5324,14 +5324,14 @@ begin
           // Multi-DLL: add one RCDATA resource per mapped + dep DLL
           for LMapEntry in FDllNameMap do
             LResCompiler.AddResourceFromFile(RES_RT_RCDATA, LMapEntry.ResName,
-              TPath.GetFullPath(LMapEntry.DllPath));
+              TUtils.ResolvePath(LMapEntry.DllPath));
           for LDepEntry in FDepDlls do
             LResCompiler.AddResourceFromFile(RES_RT_RCDATA, LDepEntry.ResName,
-              TPath.GetFullPath(LDepEntry.DllPath));
+              TUtils.ResolvePath(LDepEntry.DllPath));
         end
         else
           LResCompiler.AddResourceFromFile(RES_RT_RCDATA, FResName,
-            TPath.GetFullPath(FDllPath));
+            TUtils.ResolvePath(FDllPath));
         LResCompiler.CompileToFile(LResFile);
         Status(COLOR_WHITE + '  RES:    ' + COLOR_RESET + '%s', [LResFile]);
       finally

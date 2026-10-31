@@ -1,0 +1,226 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  std_strutils.pcpp - Std library compliance: the StrUtils unit
+  (res\libs\std\StrUtils.pcpp)
+
+  Trim / TrimLeft / TrimRight cut the bytes at or below the space at the
+  ends (inside blanks and UTF-8 text stay; all blanks and "" give "").
+  SplitString cuts at every byte of the separator set: side by side, at
+  the start or at the end a separator makes an empty piece, which the short
+  form keeps (Delphi's SplitString) and the ASkipEmpty form drops (words
+  over runs of spaces, lines over CR LF / LF / blank lines); "" gives no
+  pieces, no separators the whole text; the result array is emptied first.
+  TryStrToInt reads decimal only: blanks around, one optional sign, digits
+  to the end; anything else fails and leaves the value as it was; int32 and
+  int64 take exactly their own range (both ends), nothing wraps.
+  StrToIntDef gives the number or the default. The "qualified" row calls
+  StrUtils.Trim. Each row prints "ok <case>", or "FAIL <case>" with what
+  came back. Pieces print as [a|b|c].
+*******************************************************************************/
+
+module exe std_strutils;
+
+/*
+  @@test
+    kind run
+    expect
+    | ok   trim
+    | ok   trim all blanks
+    | ok   trim empty
+    | ok   trim left
+    | ok   trim right
+    | ok   trim utf8
+    | ok   split keep empty
+    | ok   split end
+    | ok   split start
+    | ok   split empty text
+    | ok   split no separators
+    | ok   split any separator
+    | ok   split skip words
+    | ok   split skip lines
+    | ok   split cleared
+    | ok   int
+    | ok   int minus
+    | ok   int plus
+    | ok   int blanks
+    | ok   int bad tail
+    | ok   int empty
+    | ok   int sign only
+    | ok   int two signs
+    | ok   int inner blank
+    | ok   int hex
+    | ok   int32 max
+    | ok   int32 min
+    | ok   int32 over
+    | ok   int32 under
+    | ok   int64 max
+    | ok   int64 min
+    | ok   int64 over
+    | ok   def bad
+    | ok   def good
+    | ok   def int64
+    | ok   qualified
+    | done
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import
+  StrUtils;
+
+// The pieces as [a|b|c], so an empty piece shows as ||
+routine Joined(const AParts: array of string): string;
+var
+  LText: string;
+  LIndex: int64;
+begin
+  LText := "[";
+  for LIndex := 0 to len(AParts) - 1 do
+    if LIndex > 0 then
+      LText := LText + "|";
+    end;
+    LText := LText + AParts[LIndex];
+  end;
+  return LText + "]";
+end;
+
+// One text row: what came back against what the rule says
+routine CheckText(const ACase: string; const AGot: string; const AWant: string);
+begin
+  if AGot = AWant then
+    println("ok   {}", ACase);
+  else
+    println("FAIL {}: got \"{}\", want \"{}\"", ACase, AGot, AWant);
+  end;
+end;
+
+// One split row: the pieces joined against the joined pieces wanted
+routine CheckSplit(const ACase: string; const AParts: array of string; const AWant: string);
+begin
+  CheckText(ACase, Joined(AParts), AWant);
+end;
+
+// One int64 row: whether it read, and the value it left
+routine CheckInt64(const ACase: string; const AText: string; const AWantOk: bool; const AWant: int64);
+var
+  LValue: int64;
+  LOk: bool;
+begin
+  LValue := 99;
+  LOk := TryStrToInt(AText, LValue);
+  if (LOk = AWantOk) and (LValue = AWant) then
+    println("ok   {}", ACase);
+  else
+    println("FAIL {}: got {} {}, want {} {}", ACase, LOk, LValue, AWantOk, AWant);
+  end;
+end;
+
+// One int32 row: whether it read, and the value it left
+routine CheckInt32(const ACase: string; const AText: string; const AWantOk: bool; const AWant: int32);
+var
+  LValue: int32;
+  LOk: bool;
+begin
+  LValue := 99;
+  LOk := TryStrToInt(AText, LValue);
+  if (LOk = AWantOk) and (LValue = AWant) then
+    println("ok   {}", ACase);
+  else
+    println("FAIL {}: got {} {}, want {} {}", ACase, LOk, LValue, AWantOk, AWant);
+  end;
+end;
+
+routine TestTrim();
+begin
+  CheckText("trim", Trim("  a b \t\r\n"), "a b");
+  CheckText("trim all blanks", Trim(" \t \n"), "");
+  CheckText("trim empty", Trim(""), "");
+  CheckText("trim left", TrimLeft("  a b  "), "a b  ");
+  CheckText("trim right", TrimRight("  a b  "), "  a b");
+  CheckText("trim utf8", Trim(" café "), "café");
+end;
+
+routine TestSplit();
+var
+  LParts: array of string;
+begin
+  SplitString("a,,b", ",", LParts);
+  CheckSplit("split keep empty", LParts, "[a||b]");
+  SplitString("a,", ",", LParts);
+  CheckSplit("split end", LParts, "[a|]");
+  SplitString(",a", ",", LParts);
+  CheckSplit("split start", LParts, "[|a]");
+  SplitString("", ",", LParts);
+  CheckSplit("split empty text", LParts, "[]");
+  SplitString("a,b", "", LParts);
+  CheckSplit("split no separators", LParts, "[a,b]");
+  SplitString("a;b,c", ";,", LParts);
+  CheckSplit("split any separator", LParts, "[a|b|c]");
+  SplitString("  lander 1  1 16 14 ", " ", true, LParts);
+  CheckSplit("split skip words", LParts, "[lander|1|1|16|14]");
+  SplitString("a\r\nb\n\nc\r\n", "\r\n", true, LParts);
+  CheckSplit("split skip lines", LParts, "[a|b|c]");
+  SplitString("x y", " ", LParts);
+  SplitString(" ", " ", true, LParts);
+  CheckSplit("split cleared", LParts, "[]");
+end;
+
+routine TestInt();
+begin
+  CheckInt32("int", "42", true, 42);
+  CheckInt32("int minus", "-42", true, -42);
+  CheckInt32("int plus", "+7", true, 7);
+  CheckInt32("int blanks", " \t12 \r\n", true, 12);
+  CheckInt32("int bad tail", "12x", false, 99);
+  CheckInt32("int empty", "", false, 99);
+  CheckInt32("int sign only", "-", false, 99);
+  CheckInt32("int two signs", "+-1", false, 99);
+  CheckInt32("int inner blank", "1 2", false, 99);
+  CheckInt32("int hex", "0x10", false, 99);
+  CheckInt32("int32 max", "2147483647", true, 2147483647);
+  CheckInt32("int32 min", "-2147483648", true, int32(-2147483648));
+  CheckInt32("int32 over", "2147483648", false, 99);
+  CheckInt32("int32 under", "-2147483649", false, 99);
+  CheckInt64("int64 max", "9223372036854775807", true, 9223372036854775807);
+  CheckInt64("int64 min", "-9223372036854775808", true, -9223372036854775807 - 1);
+  CheckInt64("int64 over", "9223372036854775808", false, 99);
+end;
+
+// One StrToIntDef row: the number it gave against the number wanted
+routine CheckDefault(const ACase: string; const AGot: int64; const AWant: int64);
+begin
+  if AGot = AWant then
+    println("ok   {}", ACase);
+  else
+    println("FAIL {}: got {}, want {}", ACase, AGot, AWant);
+  end;
+end;
+
+routine TestDefault();
+begin
+  CheckDefault("def bad", StrToIntDef("12x", -1), -1);
+  CheckDefault("def good", StrToIntDef("5", -1), 5);
+  CheckDefault("def int64", StrToIntDef("-5000000000", int64(0)), -5000000000);
+end;
+
+begin
+  TestTrim();
+  TestSplit();
+  TestInt();
+  TestDefault();
+  CheckText("qualified", StrUtils.Trim(" q "), "q");
+  println("done");
+end.

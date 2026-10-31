@@ -18,9 +18,13 @@
   The rules, with no window: GetScaledFrameSize (base x DPI / 96, rounded;
   120 DPI gives 562.5, rounded away from zero), GetLetterboxRect (a window
   of the frame's aspect, a wider one: bars left and right, a taller one:
-  bars above and below, a resize, a size of 0: the whole window) and
-  GetFramePoint (a point through the letterbox in base units, clamped to
-  the frame in a bar and past the edge, an empty letterbox: 0, 0).
+  bars above and below, a resize, a size of 0: the whole window),
+  GetIntegerLetterboxRect (an exact multiple fills the window, a size
+  between multiples takes the lower one centred, odd bars round down, the
+  smaller side decides, a window below the base size gets the fit rule, a
+  size of 0: the whole window) and GetFramePoint (a point through the
+  letterbox in base units, clamped to the frame in a bar and past the edge,
+  an empty letterbox: 0, 0).
 
   The window, hidden: InitFrameWindow opens at GetScaledFrameSize of its
   own GetFrameDpi (any monitor), a second one is refused, a frame drawn
@@ -37,15 +41,25 @@
   the bar colour; the control row (raylib's BeginMode3D) draws it larger
   (the window's aspect and height); after EndFrameMode3D a base-unit square
   lands at the frame's origin and a fill far past the frame stops at the
-  letterbox (the camera and clip back); a perspective cube is centred. In a
-  plain window (no frame) BeginFrameMode3D gives raylib's pixels. Closed: after
-  CloseWindow GetFrameWidth / Height and the camera's zoom are 0, the frame
-  calls do nothing, a colour set before the close is kept, a new frame
-  window opens, and a plain raylib window opened right after a frame's
-  close (no frame call between) is not taken for the frame.
+  letterbox (the camera and clip back); a perspective cube is centred.
+  SetFrameIntegerScale: off by default and GetFrameLetterbox is the fit rule;
+  on, in a window between multiples, GetFrameLetterbox is the integer rule,
+  the camera's zoom a whole number, the mouse in the frame, and the screen
+  read back shows the bar left of the letterbox and the frame inside it;
+  off again, the fit rule. In a plain window (no frame) BeginFrameMode3D
+  gives raylib's pixels. Closed: after CloseWindow GetFrameWidth / Height,
+  the camera's zoom and GetFrameLetterbox are 0, the frame calls do nothing,
+  a colour and the integer scale set before the close are kept, a new frame
+  window opens with SetFrameZoom(2) at twice the base size x the DPI scale
+  (the base size unchanged), a zoom set on the open window resizes it at
+  once, the zoom is kept over the close, and a plain raylib window opened
+  right after a frame's close (no frame call between) is not taken for the
+  frame.
 
   Negatives: a base size of 0 x 0 or a negative one is refused (false, no
-  window, GetFrameWidth 0) before any window exists.
+  window, GetFrameWidth 0, GetFrameLetterbox empty) before any window
+  exists; the zoom is 1 by default, and a zoom of 0 or a negative one is
+  taken as 1.
 
   Each row prints ok or FAIL with its name; the last is `done <failures>`.
   raylib's own log is off (SetTraceLogLevel(LOG_NONE)).
@@ -67,6 +81,13 @@ module exe std_raylib_ext_frame;
     | ok letterbox resized
     | ok letterbox zero window
     | ok letterbox zero base
+    | ok integer exact multiple
+    | ok integer between multiples
+    | ok integer odd bars round down
+    | ok integer height decides
+    | ok integer below base is fit
+    | ok integer zero window
+    | ok integer zero base
     | ok point centre
     | ok point left bar clamped
     | ok point past edge clamped
@@ -74,6 +95,10 @@ module exe std_raylib_ext_frame;
     | ok refused 0 x 0
     | ok refused negative
     | ok no window after refusal
+    | ok no frame letterbox after refusal
+    | ok zoom default 1
+    | ok zoom 0 is 1
+    | ok zoom negative is 1
     | ok frame window opens
     | ok frame base size
     | ok frame dpi scale
@@ -92,10 +117,22 @@ module exe std_raylib_ext_frame;
     | ok plain mode3d takes the window aspect
     | ok after 3d the clip
     | ok 3d perspective centred
+    | ok integer scale off by default
+    | ok fit frame letterbox
+    | ok window between multiples
+    | ok integer frame letterbox
+    | ok integer zoom whole
+    | ok integer mouse in frame
+    | ok integer bar and frame on screen
+    | ok integer off is fit again
     | ok closed no frame
     | ok closed frame calls do nothing
     | ok closed colours kept
+    | ok closed integer scale kept
     | ok reopened
+    | ok zoomed window size
+    | ok zoom applied to the open window
+    | ok closed zoom kept
     | ok plain window after close no frame
     | ok plain window 3d is raylib's
     | done 0
@@ -136,6 +173,16 @@ begin
   Check(AName, Near(AGot.x, AX) and Near(AGot.y, AY) and Near(AGot.width, AWidth) and Near(AGot.height, AHeight));
 end;
 
+routine SameRect(const AA: Rectangle; const AB: Rectangle): bool;
+begin
+  return Near(AA.x, AB.x) and Near(AA.y, AB.y) and Near(AA.width, AB.width) and Near(AA.height, AB.height);
+end;
+
+routine EmptyRect(const ARect: Rectangle): bool;
+begin
+  return Near(ARect.x, 0.0) and Near(ARect.y, 0.0) and Near(ARect.width, 0.0) and Near(ARect.height, 0.0);
+end;
+
 routine TestRules();
 var
   LBox: Rectangle;
@@ -153,6 +200,16 @@ begin
   CheckRect("letterbox resized", GetLetterboxRect(1000, 450, 800, 450), 100.0, 0.0, 800.0, 450.0);
   CheckRect("letterbox zero window", GetLetterboxRect(0, 1080, 800, 450), 0.0, 0.0, 0.0, 1080.0);
   CheckRect("letterbox zero base", GetLetterboxRect(640, 480, 0, 450), 0.0, 0.0, 640.0, 480.0);
+
+  // 320 x 180: 4x is 1280 x 720, 3x is 960 x 540
+  CheckRect("integer exact multiple", GetIntegerLetterboxRect(1280, 720, 320, 180), 0.0, 0.0, 1280.0, 720.0);
+  CheckRect("integer between multiples", GetIntegerLetterboxRect(1366, 768, 320, 180), 43.0, 24.0, 1280.0, 720.0);
+  CheckRect("integer odd bars round down", GetIntegerLetterboxRect(1283, 723, 320, 180), 1.0, 1.0, 1280.0, 720.0);
+  CheckRect("integer height decides", GetIntegerLetterboxRect(1920, 800, 320, 180), 320.0, 40.0, 1280.0, 720.0);
+  // Below one base size: GetLetterboxRect(200, 90, 320, 180), never empty
+  CheckRect("integer below base is fit", GetIntegerLetterboxRect(200, 90, 320, 180), 20.0, 0.0, 160.0, 90.0);
+  CheckRect("integer zero window", GetIntegerLetterboxRect(0, 1080, 320, 180), 0.0, 0.0, 0.0, 1080.0);
+  CheckRect("integer zero base", GetIntegerLetterboxRect(640, 480, 0, 180), 0.0, 0.0, 640.0, 480.0);
 
   LBox := GetLetterboxRect(1920, 1080, 800, 600);
   LPoint.x := 960.0;
@@ -175,6 +232,27 @@ begin
   Check("refused 0 x 0", not InitFrameWindow(0, 0, "std_raylib_ext_frame"));
   Check("refused negative", not InitFrameWindow(-5, 450, "std_raylib_ext_frame"));
   Check("no window after refusal", (not IsWindowReady()) and (GetFrameWidth() = 0));
+  Check("no frame letterbox after refusal", EmptyRect(GetFrameLetterbox()));
+  Check("zoom default 1", Near(GetFrameZoom(), 1.0));
+  SetFrameZoom(0.0);
+  Check("zoom 0 is 1", Near(GetFrameZoom(), 1.0));
+  SetFrameZoom(-2.0);
+  Check("zoom negative is 1", Near(GetFrameZoom(), 1.0));
+end;
+
+// Polls the window until its size is ASize (the window system's resize is
+// seen once events are polled), at most 120 frames
+routine WaitWindowSize(const ASize: ::Vector2): bool;
+var
+  LTry: int32;
+begin
+  LTry := 0;
+  while ((float32(GetScreenWidth()) <> ASize.x) or (float32(GetScreenHeight()) <> ASize.y)) and (LTry < 120) do
+    BeginDrawing();
+    EndDrawing();
+    LTry := LTry + 1;
+  end;
+  return (float32(GetScreenWidth()) = ASize.x) and (float32(GetScreenHeight()) = ASize.y);
 end;
 
 // One frame with the clip turned off inside it (EndScissorMode), then back
@@ -383,6 +461,77 @@ begin
   return LSame;
 end;
 
+// One empty frame (the frame colour inside the letterbox, the bars around
+// it), the screen read back before EndDrawing (the caller unloads it)
+routine EmptyShot(): Image;
+var
+  LShot: Image;
+begin
+  BeginDrawing();
+  BeginFrame();
+  EndFrame();
+  LShot := LoadImageFromScreen();
+  EndDrawing();
+  return LShot;
+end;
+
+// SetFrameIntegerScale in a 1000 x 600 window, between the 3x (960 x 540)
+// and 4x multiples of 320 x 180 and taller than 16:9: the fit rule has bars
+// above and below, the integer rule bars on every side
+routine TestIntegerScale();
+var
+  LTry: int32;
+  LBox: Rectangle;
+  LShot: Image;
+  LMiddle: int32;
+  LLeft: int32;
+  LRight: int32;
+  LZoom: float32;
+  LMouse: ::Vector2;
+begin
+  Check("integer scale off by default", not IsFrameIntegerScale());
+  SetWindowSize(1000, 600);
+  // The window system's resize is seen once events are polled; on X11 the
+  // framebuffer's size comes a poll after the window's (TestFrame3D)
+  LTry := 0;
+  while ((GetScreenWidth() <> 1000) or (GetScreenHeight() <> 600) or (GetRenderWidth() <> 1000) or
+    (GetRenderHeight() <> 600)) and (LTry < 120) do
+    BeginDrawing();
+    EndDrawing();
+    LTry := LTry + 1;
+  end;
+  Check("fit frame letterbox", SameRect(GetFrameLetterbox(), GetLetterboxRect(GetScreenWidth(), GetScreenHeight(), 320, 180)));
+  Check("window between multiples", (GetScreenWidth() = 1000) and (GetScreenHeight() = 600) and
+    (GetRenderWidth() = 1000) and (GetRenderHeight() = 600));
+
+  SetFrameIntegerScale(true);
+  LShot := EmptyShot();
+  LBox := GetFrameLetterbox();
+  Check("integer frame letterbox", SameRect(LBox, GetIntegerLetterboxRect(GetScreenWidth(), GetScreenHeight(), 320, 180)) and
+    SameRect(LBox, GetIntegerLetterboxRect(1000, 600, 320, 180)));
+  LZoom := GetFrameCamera().zoom;
+  Check("integer zoom whole", Near(LZoom, 3.0));
+  LMouse := GetFrameMousePosition();
+  Check("integer mouse in frame", (LMouse.x >= 0.0) and (LMouse.x <= 319.0) and (LMouse.y >= 0.0) and (LMouse.y <= 179.0));
+  // Whole pixels: the first and last frame columns are the frame colour,
+  // the columns just outside them the bar colour
+  LMiddle := LShot.height div 2;
+  LLeft := int32(LBox.x);
+  LRight := int32(LBox.x + LBox.width) - 1;
+  Check("integer bar and frame on screen", SameColor(GetImageColor(LShot, LLeft - 1, LMiddle), GetFrameBarColor()) and
+    SameColor(GetImageColor(LShot, LLeft, LMiddle), GetFrameColor()) and
+    SameColor(GetImageColor(LShot, LRight, LMiddle), GetFrameColor()) and
+    SameColor(GetImageColor(LShot, LRight + 1, LMiddle), GetFrameBarColor()));
+  UnloadImage(LShot);
+
+  SetFrameIntegerScale(false);
+  LShot := EmptyShot();
+  UnloadImage(LShot);
+  LBox := GetLetterboxRect(GetScreenWidth(), GetScreenHeight(), 320, 180);
+  Check("integer off is fit again", (not IsFrameIntegerScale()) and SameRect(GetFrameLetterbox(), LBox) and
+    Near(GetFrameCamera().zoom, float32(LBox.width / 320.0)));
+end;
+
 routine TestWindow();
 var
   LSize: ::Vector2;
@@ -419,8 +568,10 @@ begin
   Check("frame mouse in frame", (LMouse.x >= 0.0) and (LMouse.x <= 319.0) and (LMouse.y >= 0.0) and (LMouse.y <= 179.0));
   TestRestoreClip();
   TestFrame3D();
-  // A setting of the program's, kept over the close (TestClosed)
+  TestIntegerScale();
+  // Settings of the program's, kept over the close (TestClosed)
   SetFrameBarColor(DARKBLUE);
+  SetFrameIntegerScale(true);
   CloseWindow();
 end;
 
@@ -428,19 +579,31 @@ end;
 // do nothing, the colours kept; a new frame window opens again
 routine TestClosed();
 begin
-  Check("closed no frame", (GetFrameWidth() = 0) and (GetFrameHeight() = 0) and (GetFrameCamera().zoom = 0.0));
+  Check("closed no frame", (GetFrameWidth() = 0) and (GetFrameHeight() = 0) and (GetFrameCamera().zoom = 0.0) and
+    EmptyRect(GetFrameLetterbox()));
   BeginFrame();
   EndFrame();
   RestoreFrameClip();
   ToggleFrameFullscreen();
   Check("closed frame calls do nothing", not IsWindowReady());
   Check("closed colours kept", SameColor(GetFrameBarColor(), DARKBLUE));
+  Check("closed integer scale kept", IsFrameIntegerScale());
+  SetFrameIntegerScale(false);
+  // Zoomed: the window at base x 2 x the DPI scale, the base size as it is
+  SetFrameZoom(2.0);
   SetConfigFlags(FLAG_WINDOW_HIDDEN);
   Check("reopened", InitFrameWindow(200, 100, "std_raylib_ext_frame") and (GetFrameWidth() = 200) and
     (GetFrameHeight() = 100));
   if IsWindowReady() then
+    Check("zoomed window size", WaitWindowSize(GetScaledFrameSize(400, 200, GetFrameDpi())) and
+      (GetFrameWidth() = 200) and (GetFrameHeight() = 100));
+    // A zoom set with the frame open resizes the window at once
+    SetFrameZoom(3.0);
+    Check("zoom applied to the open window", WaitWindowSize(GetScaledFrameSize(600, 300, GetFrameDpi())));
     CloseWindow();
   end;
+  Check("closed zoom kept", Near(GetFrameZoom(), 3.0));
+  SetFrameZoom(1.0);
   // A plain raylib window right after the frame's close, no frame call
   // between: never taken for the frame
   SetConfigFlags(FLAG_WINDOW_HIDDEN);

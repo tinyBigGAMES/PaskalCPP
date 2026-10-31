@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  prj_inside_unit.pcpp - Project test support: the unit prj_inside finds
+  through @addmodulepath "$R:units" (only this project's units\ holds it).
+  A unit a project's main module imports is part of the project build, so
+  ProjectPassword() is there for it too (Secret).
+*******************************************************************************/
+
+module unit prj_inside_unit;
+
+exported routine Value(): int32;
+begin
+  return 7;
+end;
+
+// The project's password as this unit reads it
+exported routine Secret(): string;
+begin
+  return ProjectPassword();
+end;
+
+end.

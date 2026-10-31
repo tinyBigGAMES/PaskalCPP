@@ -91,6 +91,8 @@ const
   PC_ERR_TS_108 = 'TS0108';   // a dep test nothing depends on
   { PC_ERR_TS_109 }
   PC_ERR_TS_109 = 'TS0109';   // warning: the results file could not be written
+  { PC_ERR_TS_113 }
+  PC_ERR_TS_113 = 'TS0113';   // the output folder could not be made: nothing was run
 
   { PC_TS_EXIT_PASSED }
   PC_TS_EXIT_PASSED = 0;
@@ -259,7 +261,8 @@ type
       var AResult: TPCTestResult);
     procedure DoRunCli(const AItem: TPCTestItem; const ACell: TPCTestCell;
       var AResult: TPCTestResult);
-    procedure DoCollectSources(const ADir: string; const AFiles: TList<string>);
+    procedure DoCollectSources(const ADir: string; const AIsExamples: Boolean;
+      const AFiles: TList<string>);
     procedure DoRunCode(const AItem: TPCTestItem; const ACell: TPCTestCell;
       var AResult: TPCTestResult);
     function DoRunOne(const ARun: TPCTestRun): TPCTestResult;
@@ -352,7 +355,8 @@ uses
   StdApp.Utils,
   StdApp.Console,
   StdApp.Resources,
-  PaskalCPP.Common;
+  PaskalCPP.Common,
+  PaskalCPP.Project;
 
 const
   { PC_TS_MAX_ERRORS }
@@ -683,8 +687,9 @@ begin
         FErrors.Add(esError, PC_ERR_TS_101, RSTstRootMissing, [LDir]);
         Exit;
       end;
-      // Every source file, fixtures folders left out
-      DoCollectSources(LDir, LCollected);
+      // Every source file, fixtures folders left out (and, under an example
+      // root, project folders)
+      DoCollectSources(LDir, AIsExamples, LCollected);
     except
       on E: Exception do
       begin
@@ -2060,15 +2065,20 @@ begin
   DoCheckRunOutput(AItem, ACell, TPCTestText.Normalize(LOutput), LExitCode, AResult);
 end;
 
-procedure TPCTestSuite.DoCollectSources(const ADir: string; const AFiles: TList<string>);
+procedure TPCTestSuite.DoCollectSources(const ADir: string; const AIsExamples: Boolean;
+  const AFiles: TList<string>);
 var
   LFile: string;
   LSub: string;
   LSubName: string;
 begin
   // Every source file under ADir, folders named fixtures left out (with
-  // everything below them): their files are inputs, never tests. RTL calls
-  // that raise are the caller's (DoDiscoverRoot reports them)
+  // everything below them): their files are inputs, never tests. Under an
+  // example root a folder holding project.toml is left out too (with
+  // everything below it): its sources are a project's modules, built as
+  // that project, never as standalone examples (user 2026-10-31). A test
+  // root keeps its project folders (res\tests\prj\prj_inside is a test).
+  // RTL calls that raise are the caller's (DoDiscoverRoot reports them)
   for LFile in TDirectory.GetFiles(ADir, '*.' + PC_SRC_EXT, TSearchOption.soTopDirectoryOnly) do
     AFiles.Add(LFile);
   for LSub in TDirectory.GetDirectories(ADir) do
@@ -2077,7 +2087,9 @@ begin
     LSubName := LSub.Substring(LSub.LastDelimiter('/\') + 1);
     if SameText(LSubName, PC_TS_FIXTURES_FOLDER) then
       Continue;
-    DoCollectSources(LSub, AFiles);
+    if AIsExamples and TFile.Exists(TUtils.ResolvePath(PC_PRJ_FILE_NAME, LSub)) then
+      Continue;
+    DoCollectSources(LSub, AIsExamples, AFiles);
   end;
 end;
 
@@ -2551,6 +2563,24 @@ end;
 
 function TPCTestSuite.Run(const AFilter: TPCTestFilter): Integer;
 begin
+  // The output folder every test writes into exists before the first test:
+  // a code test runs pcpp in it (a missing working folder fails the run,
+  // Windows error 267), and nothing else made it before the results file
+  if FOutputRoot <> '' then
+  begin
+    try
+      TDirectory.CreateDirectory(FOutputRoot);
+    except
+      on E: Exception do
+      begin
+        FErrors.Add(esError, PC_ERR_TS_113, RSTstOutputCreateFailed,
+          [TUtils.StripLongPathPrefix(FOutputRoot), E.Message]);
+        FErrors.PrintErrors();
+        Exit(PC_TS_EXIT_FAILED);
+      end;
+    end;
+  end;
+
   // One run per output folder: the control channel's name being taken
   // means a testbed already runs here (reported by Start)
   if not FControl.Start(FOutputRoot) then

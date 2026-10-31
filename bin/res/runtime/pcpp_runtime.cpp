@@ -32,6 +32,7 @@
 #include <mutex>
 #include <new>
 #include <unordered_map>
+#include <vector>
 
 #if defined(_WIN32)
     #include <windows.h>
@@ -645,8 +646,105 @@ void after_fault(const std::int32_t code) {
  * Startup
  ******************************************************************************/
 
-int g_argc = 0;
-char** g_argv = nullptr;
+// The program's arguments, UTF-8 on every target (index 0 = the program).
+// Empty until an exe's main calls init with its argv
+std::vector<std::string> g_args;
+
+#if defined(_WIN32)
+// One UTF-16 run as UTF-8 (an unpaired surrogate becomes U+FFFD)
+std::string wide_to_utf8(const std::wstring& AText) {
+    if (AText.empty()) {
+        return std::string();
+    }
+    const int LSize = WideCharToMultiByte(CP_UTF8, 0, AText.data(), static_cast<int>(AText.size()),
+                                          nullptr, 0, nullptr, nullptr);
+    if (LSize <= 0) {
+        return std::string();
+    }
+    std::string LResult(static_cast<std::size_t>(LSize), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, AText.data(), static_cast<int>(AText.size()),
+                        LResult.data(), LSize, nullptr, nullptr);
+    return LResult;
+}
+
+// The process's command line split into arguments, UTF-8. The narrow argv
+// main gets is in the ANSI code page (lossy for anything outside it), so the
+// wide line is split again by the C runtime's own rules (UCRT
+// parse_command_line): every argument splits exactly as argv did:
+// - the program name runs to the first blank outside quotes; a quote only
+//   toggles quoting there, a backslash is plain
+// - an argument ends at a blank or tab outside quotes
+// - 2n backslashes before a quote are n backslashes and the quote toggles
+//   quoting; 2n+1 are n backslashes and a literal quote
+// - inside quotes, "" is one literal quote and quoting goes on
+// - backslashes before anything else are literal
+std::vector<std::string> split_command_line(const wchar_t* ALine) {
+    std::vector<std::string> LArgs;
+    const wchar_t* LP = ALine;
+    std::wstring LArg;
+    bool LQuoted = false;
+
+    // The program name
+    while (*LP != L'\0') {
+        if (*LP == L'"') {
+            LQuoted = !LQuoted;
+            ++LP;
+            continue;
+        }
+        if ((!LQuoted) && ((*LP == L' ') || (*LP == L'\t'))) {
+            break;
+        }
+        LArg += *LP;
+        ++LP;
+    }
+    LArgs.push_back(wide_to_utf8(LArg));
+
+    // The arguments
+    for (;;) {
+        while ((*LP == L' ') || (*LP == L'\t')) {
+            ++LP;
+        }
+        if (*LP == L'\0') {
+            break;
+        }
+        LArg.clear();
+        LQuoted = false;
+        for (;;) {
+            std::size_t LSlashes = 0;
+            while (*LP == L'\\') {
+                ++LSlashes;
+                ++LP;
+            }
+            if (*LP == L'"') {
+                LArg.append(LSlashes / 2, L'\\');
+                if ((LSlashes % 2) == 1) {
+                    // An escaped quote
+                    LArg += L'"';
+                    ++LP;
+                }
+                else if (LQuoted && (LP[1] == L'"')) {
+                    // "" inside quotes: one quote, still quoted
+                    LArg += L'"';
+                    LP += 2;
+                }
+                else {
+                    LQuoted = !LQuoted;
+                    ++LP;
+                }
+                continue;
+            }
+            LArg.append(LSlashes, L'\\');
+            if ((*LP == L'\0') || ((!LQuoted) && ((*LP == L' ') || (*LP == L'\t')))) {
+                break;
+            }
+            LArg += *LP;
+            ++LP;
+        }
+        LArgs.push_back(wide_to_utf8(LArg));
+    }
+    return LArgs;
+}
+#endif
 
 void setup_console() {
 #if defined(_WIN32)
@@ -727,10 +825,16 @@ void init(int argc, char** argv) {
         return true;
     }();
     static_cast<void>(s_once);
-    if (argv != nullptr) {
-        g_argc = argc;
-        g_argv = argv;
+    if (argv == nullptr) {
+        return;
     }
+#if defined(_WIN32)
+    // The wide command line, not argv's ANSI text (split_command_line)
+    static_cast<void>(argc);
+    g_args = split_command_line(GetCommandLineW());
+#else
+    g_args.assign(argv, argv + argc);
+#endif
 }
 
 std::int32_t enter(std::int32_t (*AEntry)()) noexcept {
@@ -747,14 +851,48 @@ std::int32_t enter(std::int32_t (*AEntry)()) noexcept {
 }
 
 std::int32_t param_count() {
-    return (g_argc > 0) ? (g_argc - 1) : 0;
+    return g_args.empty() ? 0 : static_cast<std::int32_t>(g_args.size() - 1);
 }
 
 std::string param_str(const std::int32_t index) {
-    if ((g_argv == nullptr) || (index < 0) || (index >= g_argc) || (g_argv[index] == nullptr)) {
+    if ((index < 0) || (static_cast<std::size_t>(index) >= g_args.size())) {
         return std::string();
     }
-    return std::string(g_argv[index]);
+    return g_args[static_cast<std::size_t>(index)];
+}
+
+namespace {
+
+// One SplitMix64 step: the state moves on by the gamma, the word is the
+// state mixed. The same step as the compiler's TPCProject.DoSplitMixNext
+// (PaskalCPP.Project.pas): the two halves of ProjectPassword() are kept in step
+std::uint64_t project_password_word(std::uint64_t& AState) {
+    AState += 0x9E3779B97F4A7C15ULL;
+    std::uint64_t LZ = AState;
+    LZ = (LZ ^ (LZ >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    LZ = (LZ ^ (LZ >> 27)) * 0x94D049BB133111EBULL;
+    return LZ ^ (LZ >> 31);
+}
+
+} // namespace
+
+std::string project_password(const char* data, const std::size_t length, const std::uint64_t key) {
+    // TPCProject.ScramblePassword undone: each byte XOR the keystream's byte
+    // at its place, a new word every 8 bytes, its bytes taken low first. The
+    // bytes are read through volatile, so no optimizer (an LTO build
+    // included) folds the plain text into the program as a constant
+    const volatile unsigned char* LBytes = reinterpret_cast<const volatile unsigned char*>(data);
+    std::string LText(length, '\0');
+    std::uint64_t LState = key;
+    std::uint64_t LWord = 0;
+    for (std::size_t LI = 0; LI < length; ++LI) {
+        if ((LI % 8) == 0) {
+            LWord = project_password_word(LState);
+        }
+        const unsigned char LMask = static_cast<unsigned char>(LWord >> (8 * (LI % 8)));
+        LText[LI] = static_cast<char>(LBytes[LI] ^ LMask);
+    }
+    return LText;
 }
 
 /*******************************************************************************

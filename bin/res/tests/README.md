@@ -160,6 +160,38 @@ A test that links a library or a DLL the suite must build first names it in `dep
 | `suite_cli_missing.pcpp` | a `cli` test with `<DIR>` |
 | `suite_dir.pcpp` | `<DIR>` in a run test |
 
+## The suite's own reports
+
+The testbed's own codes are `TS`, reported at the file and line they are about. Any error found while discovering the tests stops the run before anything runs: `Test discovery found <n> error(s): nothing was run`. `testbed -list` shows them without running anything.
+
+| Code | What is wrong |
+|---|---|
+| TS0001 | the test file has no text to read |
+| TS0002 | `@@test` or `@@end` in a `//` comment (they belong in a `/* */` block comment) |
+| TS0003 | a second spec in one file |
+| TS0004 | no `@@end` before the comment ends |
+| TS0010, TS0011 | a spec inside a conditional region, or a cppstart block |
+| TS0005 | an unknown key (the message lists the keys) |
+| TS0006 | a key given twice |
+| TS0007 | a value the key does not take (the message says what it takes) |
+| TS0008 | a key with no value |
+| TS0009 | a quoted value with no closing quote, or an escape other than `\"` and `\\` |
+| TS0012 | no `kind` |
+| TS0013 | a key the kind does not take |
+| TS0014 | an output line (`\| text`) not under `expect` |
+| TS0015, TS0017 | an `expectfile` or `stdin` file that does not exist |
+| TS0016 | a report marker that is not `WORD CODE[@col][: text]` |
+| TS0101 | a test folder that does not exist |
+| TS0102, TS0103 | two files with one name, or one id twice |
+| TS0104, TS0105 | a `deps` entry that is no test, or a test that is not kind `dep` or `build` |
+| TS0106 | a dependency cycle (the whole chain is shown) |
+| TS0107 | a test runs in a cell its dependency does not build in |
+| TS0108 | a test of kind `dep` that nothing depends on |
+| TS0111 | another testbed already runs on this output folder |
+| TS0109 (warning) | the results file cannot be written, so `-failed` has nothing new to read |
+| TS0110 (warning) | the stop file cannot be used; the stop key still works |
+| TS0112 (warning) | the `-rpc` channel cannot be opened; the run goes on without it |
+
 ## Running the suite
 
 Run `testbed.exe` from the `bin` folder:
@@ -184,7 +216,7 @@ testbed -h                                     every option
 
 - The exit code is 0 when everything passed, 1 when something failed, 2 for bad arguments, and 3 when the run was stopped. `-rpc` adds 4 when no testbed is running and 5 when `-rpc wait` runs out of time.
 - A run goes cell by cell: every test on Windows at debug, then at safe, fast and small, then the same on Linux, so each target's toolchain and build cache stay warm instead of every test switching targets.
-- One testbed runs per output folder: a second one started while the first runs is refused with TS0111.
+- One testbed runs per output folder: a second one started while the first runs is refused with TS0111. When the `-rpc` channel cannot be opened the run goes on without it (the warning TS0112), and when the stop file cannot be used the key still stops the run (the warning TS0110).
 - A running testbed answers `testbed -rpc <command>` from another console: `status` (the cell, the test, the counts and how long since it last checked in, as one JSON line), `failures` (the failed tests so far, as JSON), `stop` (the same as the stop key: the running test finishes, nothing more starts), `abort` (the same as pressing it twice) and `wait [seconds]` (until the run ends; exits with the run's own exit code).
 - To stop a run cleanly, press `Ctrl+Shift+Alt+X` (it works from any window, so it also stops a run with no console) or create the file `bin\output\testbed.stop`. The test that is running finishes, nothing more starts, and the summary says `STOPPED after N of M`. Press again (or create the file again) to end the running test at once: its processes are ended and it is listed as skipped, `stopped`. `Ctrl+C` is not a clean stop.
 - A run prints one line per test and cell, and the first difference of each failure, then the totals. The last run's results are kept in `bin\output\testsuite-results.txt`, which `-failed` reads.

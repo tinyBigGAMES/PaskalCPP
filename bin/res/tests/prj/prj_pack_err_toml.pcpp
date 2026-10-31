@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  prj_pack_err_toml.pcpp - Projects: pcpp pack on an invalid project.toml
+
+  The fixture's project.toml is not TOML: its PJ0001 report and exit 1, as
+  pcpp build gives, and nothing is built or packed. A cli test (pcpp
+  itself, in the suite's output root); this file itself is never compiled.
+*******************************************************************************/
+
+module exe prj_pack_err_toml;
+
+/*
+  @@test
+    kind cli
+    args "--no-banner pack <DIR>/fixtures/bad_parse"
+    exitcode 1
+    expect
+    | [ERROR] PJ0001: Cannot read the project file '<DIR>/fixtures/bad_parse/project.toml': Failed to parse TOML: Expected ']' at line 4, column 9
+    | Failed.
+  @@end
+*/
+
+begin
+end.

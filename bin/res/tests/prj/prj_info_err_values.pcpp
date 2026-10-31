@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  prj_info_err_values.pcpp - Projects: pcpp --project-info on a project.toml
+  with bad values
+
+  An invalid project is "project" true, "valid" false, no project fields,
+  and EVERY report TPCProject made, warnings included, in order (the editor
+  shows them all: no error budget here). Exit 0: the JSON was written
+  (fixtures\bad_values). A cli test (pcpp itself, in the suite's output
+  root); this file itself is never compiled.
+*******************************************************************************/
+
+module exe prj_info_err_values;
+
+/*
+  @@test
+    kind cli
+    args "--project-info <DIR>/fixtures/bad_values"
+    exitcode 0
+    expect
+    | {"format":1,"project":true,"valid":false,"root":"<DIR>/fixtures/bad_values","reports":[{"severity":"warning","code":"PJ0004","message":"The project file '<DIR>/fixtures/bad_values/project.toml' has an unknown key 'extra' (ignored)","file":"","line":0,"column":0},{"severity":"warning","code":"PJ0004","message":"The project file '<DIR>/fixtures/bad_values/project.toml' has an unknown key 'project.ouput' (ignored)","file":"","line":0,"column":0},{"severity":"error","code":"PJ0011","message":"The project file '<DIR>/fixtures/bad_values/project.toml' is format 2; this compiler reads formats 1 to 1","file":"","line":0,"column":0},{"severity":"error","code":"PJ0005","message":"The project name 'module' is not valid: it is a reserved word","file":"","line":0,"column":0},{"severity":"error","code":"PJ0006","message":"The project type 'app' is not valid: use exe, dll or lib","file":"","line":0,"column":0},{"severity":"error","code":"PJ0007","message":"The main module '../prj_bad_values.pcpp' is not valid: it must not leave the project folder (..)","file":"","line":0,"column":0},{"severity":"error","code":"PJ0009","message":"The output folder 'assets/out' is not valid: it must not be inside the project's assets folder","file":"","line":0,"column":0},{"severity":"error","code":"PJ0010","message":"The pack password holds a character that is not printable ASCII (at position 2)","file":"","line":0,"column":0}]}
+  @@end
+*/
+
+begin
+end.
