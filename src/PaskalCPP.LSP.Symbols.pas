@@ -163,6 +163,20 @@ begin
         Break;
       end;
   end
+  else if (ANode is TPCMember) and (TPCMember(ANode).ResolvedKind = rkModule) then
+  begin
+    // A dotted unit (BNF.md sec 1, ref\semantics.md): SEM bound the whole
+    // chain A.B as the unit and never walked its parts (the head TPCName is
+    // rkNone by design), so every part of it is this one use, as every part
+    // of an import's name is the import. Its children are only that chain:
+    // nothing below is walked
+    if TPCLspSymbols.DoHolds(ANode.Range, FLine, FColumn) and DoInFile(ANode.Range) then
+    begin
+      FFound.Node := ANode;
+      FFound.PartIndex := -1;
+    end;
+    Exit;
+  end
   else if ANode is TPCMember then
   begin
     LMember := TPCMember(ANode);
@@ -480,6 +494,8 @@ begin
   end
   else if AUse.Node is TPCMember then
   begin
+    // A dotted unit's member (rkModule) holds its TPCImport: normalized to
+    // the module below
     if TPCMember(AUse.Node).ResolvedKind <> rkOpaque then
       Result := TPCMember(AUse.Node).ResolvedDecl;
   end

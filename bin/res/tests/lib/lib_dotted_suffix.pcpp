@@ -1,0 +1,44 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lib_dotted_suffix.pcpp - Build kind: a program that links a static lib whose
+  dotted name ends in a library file's suffix
+
+  @linklibrary "lib_dotted_suffix.Lib" is a library NAME: its last part looks
+  like a .lib suffix, but the linker finds the library by the whole name
+  (lib_dotted_suffix.Lib.lib on Windows, liblib_dotted_suffix.Lib.a on
+  Linux), so it is no file named by mistake (CMP0010 judges by the files).
+*******************************************************************************/
+
+module exe lib_dotted_suffix;
+
+/*
+  @@test
+    kind run
+    deps lib_dotted_suffix.Lib
+    expect
+    | lib_dotted_suffix_add(2, 3) = 5
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addlibrarypath "$P:output/lib";
+@linklibrary "lib_dotted_suffix.Lib";
+
+routine clink lib_dotted_suffix_add(AA: int32; AB: int32): int32; external;
+
+begin
+  println("lib_dotted_suffix_add(2, 3) = {}", lib_dotted_suffix_add(2, 3));
+end.

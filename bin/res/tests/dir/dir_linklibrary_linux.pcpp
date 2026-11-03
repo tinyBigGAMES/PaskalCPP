@@ -17,11 +17,13 @@
 
   @linklibrary "<name>"; links a library by its NAME (m, user32), as the
   system linker finds it; it is never a path (BNF.md sec 2). A path
-  separator, a drive colon or a library file's suffix (.a .lib .so .dll) is
-  an error. @linklibrary may be given more than once, the same name twice is
-  harmless, and an imported unit's @linklibrary adds to the one build. On
-  Windows this program links winmm (a system library zig does not link by
-  default: without it timeGetTime fails to link) twice and calls it. Its unit
+  separator or a drive colon is an error (PR0055); a library file named
+  instead (winmm.lib, found as a file in a library path) is CMP0010, judged by
+  the files, so a dotted name (Game.Lib) is a name like any other.
+  @linklibrary may be given more than once, the same name twice is harmless,
+  and an imported unit's @linklibrary adds to the one build. On Windows this
+  program links winmm (a system library zig does not link by default:
+  without it timeGetTime fails to link) twice and calls it. Its unit
   fixtures\dir_linklibrary_unit names the dep dir_linklibrary_lib with its own
   @linklibrary and @addlibrarypath; the program calls it through the unit.
   Linux has no system library to show here (glibc's m, dl, pthread, rt and

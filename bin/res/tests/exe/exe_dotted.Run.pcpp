@@ -1,0 +1,48 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  exe_dotted.Run.pcpp - Build kind: an exe with a dotted name
+
+  The test file's own stem is dotted (its id is exe.exe_dotted.Run): the
+  whole name is the exe's, exe_dotted.Run.exe on Windows, exe_dotted.Run on
+  Linux, which the program finds beside itself.
+*******************************************************************************/
+
+module exe exe_dotted.Run;
+
+/*
+  @@test
+    kind run
+    expect
+    | exe_dotted.Run runs
+    | exe_dotted.Run in output/bin: yes
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+import SysUtils;
+
+begin
+  println("exe_dotted.Run runs");
+@ifdef TARGET_X86_64_LINUX_GNU
+  if FileExists("$P:exe_dotted.Run") then
+@else
+  if FileExists("$P:exe_dotted.Run.exe") then
+@endif
+    println("exe_dotted.Run in output/bin: yes");
+  else
+    println("exe_dotted.Run in output/bin: no");
+  end;
+end.

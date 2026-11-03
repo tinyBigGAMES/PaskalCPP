@@ -1,0 +1,37 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lib_dotted_suffix.Lib.pcpp - Build kind: a static lib whose dotted name ends
+  in a library file's suffix (dep)
+
+  The whole dotted name is the library's, its last part Lib included:
+  lib_dotted_suffix.Lib.lib on Windows, liblib_dotted_suffix.Lib.a on Linux.
+  lib_dotted_suffix links it by that name.
+*******************************************************************************/
+
+module lib lib_dotted_suffix.Lib;
+
+/*
+  @@test
+    kind dep
+  @@end
+*/
+
+exported routine clink lib_dotted_suffix_add(AA: int32; AB: int32): int32;
+begin
+  return AA + AB;
+end;
+
+end.

@@ -1,0 +1,51 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dll_dotted_suffix.pcpp - Build kind: an exe that links a dll whose dotted
+  name ends in a library file's suffix
+
+  external "dll_dotted_suffix.Dll" is a library NAME: its last part looks like
+  a .dll file, but the linker finds the library by the whole name (the import
+  library dll_dotted_suffix.Dll.lib on Windows, libdll_dotted_suffix.Dll.so on
+  Linux), so it is no file named by mistake (CMP0010 judges by the files).
+  Two [Heap] lines: the program's and the debug dll's own.
+*******************************************************************************/
+
+module exe dll_dotted_suffix;
+
+/*
+  @@test
+    kind run
+    deps dll_dotted_suffix.Dll
+    expect
+    | twice 42
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@ifdef TARGET_X86_64_LINUX_GNU
+@addlibrarypath "$P:output/bin";
+@copydll "$P:output/bin/libdll_dotted_suffix.Dll.so";
+@else
+@addlibrarypath "$P:output/lib";
+@copydll "$P:output/bin/dll_dotted_suffix.Dll.dll";
+@endif
+
+routine clink dll_dotted_suffix_twice(AN: int32): int32; external "dll_dotted_suffix.Dll";
+
+begin
+  println("twice {}", dll_dotted_suffix_twice(21));
+end.

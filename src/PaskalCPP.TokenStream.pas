@@ -146,6 +146,13 @@ type
     // Whole-stream access (copies only)
     function Count(): Integer;
     function TokenAt(const AIndex: Integer): TPCToken;
+    // A dotted name read positionally (BNF.md sec 1 module name): the index
+    // of the last identifier of `identifier { . identifier }` starting at
+    // AIndex; -1 when the token at AIndex is not an identifier. A '.' not
+    // followed by an identifier is not part of the name
+    function DottedNameEnd(const AIndex: Integer): Integer;
+    // The name's text from AFirst to ALast (DottedNameEnd), parts joined by '.'
+    function DottedNameText(const AFirst: Integer; const ALast: Integer): string;
     function SourceBytes(): TBytes;
     function SourceFilename(): string;
     function SourceText(): TPCSourceText;
@@ -434,6 +441,34 @@ begin
   end;
 
   Result := FTokens[AIndex];
+end;
+
+function TPCTokenStream.DottedNameEnd(const AIndex: Integer): Integer;
+var
+  LLast: Integer;
+begin
+  if TokenAt(AIndex).Kind <> tkIdentifier then
+    Exit(-1);
+  LLast := AIndex;
+  // Each further part is a '.' then an identifier; TokenAt past the end is
+  // tkEOF, so the walk stops there
+  while (TokenAt(LLast + 1).Kind = tkDot) and (TokenAt(LLast + 2).Kind = tkIdentifier) do
+    LLast := LLast + 2;
+  Result := LLast;
+end;
+
+function TPCTokenStream.DottedNameText(const AFirst: Integer; const ALast: Integer): string;
+var
+  LIndex: Integer;
+begin
+  // The parts stand at AFirst, AFirst + 2, ... ALast (a '.' between each)
+  Result := TokenAt(AFirst).Spelling;
+  LIndex := AFirst + 2;
+  while LIndex <= ALast do
+  begin
+    Result := Result + '.' + TokenAt(LIndex).Spelling;
+    LIndex := LIndex + 2;
+  end;
 end;
 
 function TPCTokenStream.SourceBytes(): TBytes;

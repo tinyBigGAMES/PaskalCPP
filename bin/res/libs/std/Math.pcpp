@@ -22,7 +22,7 @@
   so equal steps sound like equal steps; PerceivedLevel turns a volume back
   into its level. Beside them: the constants (Pi, DegToRad / RadToDeg, the
   Epsilons, NaN), the everyday functions under Delphi's names (Sin, Cos,
-  Sqrt, Abs, and Round / Trunc / Floor / Ceil to int64), Clamp and Wrap,
+  Sqrt, Power, Abs, and Round / Trunc / Floor / Ceil to int64), Clamp and Wrap,
   SameSign and SameValue, Lerp, AngleDifference, SmoothMove, the Easing
   curves (Ease, EaseBetween) and Random, a seeded
   generator whose numbers are the same on every target. And the 2D geometry
@@ -397,6 +397,29 @@ end;
 exported routine Sqrt(const AValue: float32): float32;
 begin
   return std::sqrt(AValue);
+end;
+
+/// ABase raised to the power AExponent (Delphi's Math.Power): any real
+/// exponent, so roots and fractional steps too.
+/// @param ABase the base
+/// @param AExponent the exponent
+/// @returns ABase to the AExponent; 1 for any base when AExponent is 0; NaN
+/// for a negative base with a fractional exponent
+/// @example `LRatio := Power(2.0, LSemitones / 12.0); // a note's pitch ratio`
+/// @since 0.4
+exported routine Power(const ABase: float64; const AExponent: float64): float64;
+begin
+  return std::pow(ABase, AExponent);
+end;
+
+/// Power for float32 values, computed in float32.
+/// @param ABase the base
+/// @param AExponent the exponent
+/// @returns ABase to the AExponent
+/// @since 0.4
+exported routine Power(const ABase: float32; const AExponent: float32): float32;
+begin
+  return std::pow(ABase, AExponent);
 end;
 
 /// The absolute value: AValue without its sign.

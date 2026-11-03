@@ -165,7 +165,7 @@ const
   { PC_ERR_PAR_054 }
   PC_ERR_PAR_054 = 'PR0054';   // char literal clang rejects (empty, too large, bad escape)
   { PC_ERR_PAR_055 }
-  PC_ERR_PAR_055 = 'PR0055';   // @linklibrary / external "..." names a file, not a library
+  PC_ERR_PAR_055 = 'PR0055';   // @linklibrary / external "..." is no library name's shape (a path, a blank); a library FILE is CMP0010
   { PC_ERR_PAR_056 }
   PC_ERR_PAR_056 = 'PR0056';   // a folder given to AddModulePath cannot be resolved
   { PC_ERR_PAR_057 }
@@ -367,6 +367,9 @@ type
       out ATarget: TPCEmitTarget): Boolean; static;
 
     // Header and prologue
+    function DoParseModuleName(const AWhat: string; out AName: string;
+      out ARange: TSourceRange): Boolean;
+    procedure DoEndFailedName(const AMark: TPCSkipMark);
     procedure DoReadHeaderQuiet();
     procedure DoParseHeader();
     procedure DoParsePrologue();
@@ -400,7 +403,7 @@ type
 
     // Imports
     procedure DoParseImportClause();
-    procedure DoParseImport(const ANameToken: TPCToken);
+    procedure DoParseImport(const AUnitName: string; const ANameRange: TSourceRange);
     function DoFindUnitFile(const AUnitName: string; out ASearched: string): string;
     function DoInChain(const AFile: string): Boolean;
     function DoCycleText(const AUnitName: string): string;
@@ -1517,16 +1520,18 @@ end;
 class function TPCParser.DoFileStem(const APath: string): string;
 var
   LStart: Integer;
-  LDot: Integer;
+  LSuffix: string;
 begin
-  // The file name without its extension, cut as text (no RTL call that raises)
+  // The file name without its .pcpp suffix, cut as text (no RTL call that
+  // raises). Only the known suffix is cut, never at a dot: a module name may
+  // be dotted (BNF.md sec 1), so 'A.B.C' given without .pcpp keeps all of it
   LStart := APath.LastIndexOf('/');
   if APath.LastIndexOf('\') > LStart then
     LStart := APath.LastIndexOf('\');
   Result := APath.Substring(LStart + 1);
-  LDot := Result.LastIndexOf('.');
-  if LDot > 0 then
-    Result := Result.Substring(0, LDot);
+  LSuffix := '.' + PC_SRC_EXT;
+  if (Result.Length > LSuffix.Length) and Result.EndsWith(LSuffix, True) then
+    Result := Result.Substring(0, Result.Length - LSuffix.Length);
 end;
 
 class function TPCParser.DoFileDir(const APath: string): string;
@@ -1595,34 +1600,87 @@ begin
   Result := AToken.Spelling = PC_PAR_CPP_SOURCE;
 end;
 
+function TPCParser.DoParseModuleName(const AWhat: string; out AName: string;
+  out ARange: TSourceRange): Boolean;
+var
+  LPart: TPCToken;
+begin
+  // module name = identifier { "." identifier } (BNF.md sec 1), in the header
+  // and the import clause. A '.' must be followed by a part: a missing one is
+  // the expect's report and the name is not taken
+  AName := '';
+  ARange := DoStartRange();
+  LPart := DoCurrent();
+  if not DoExpect(tkIdentifier, AWhat) then
+    Exit(False);
+  AName := LPart.Spelling;
+  while DoMatch(tkDot) do
+  begin
+    LPart := DoCurrent();
+    if not DoExpect(tkIdentifier, RSParWhatNamePart) then
+      Exit(False);
+    AName := AName + '.' + LPart.Spelling;
+  end;
+  // One part: the range is that token's own (DoStartRange / DoFinishRange)
+  DoFinishRange(ARange);
+  Result := True;
+end;
+
+procedure TPCParser.DoEndFailedName(const AMark: TPCSkipMark);
+begin
+  // A header or import name DoParseModuleName refused (reported there):
+  // ';' right here ends the clause, any other rest is an error node. AMark is
+  // taken BEFORE the name, so the parts a dotted name consumed ahead of its
+  // failing part ('mod_dotted .') join that node, never dropped without one
+  // (PLAN-RECOVERY target 1). A name that fails at its first token consumed
+  // nothing: the mark is where the rest starts and ';' leaves no node
+  // (DoAddSkipped: nil), exactly as for an undotted name
+  if DoCheck(tkSemicolon) then
+  begin
+    DoAddSkipped(FModule.Decls, AMark);
+    DoAdvance();
+    Exit;
+  end;
+  DoSkipFrame();
+  DoAddSkipped(FModule.Decls, AMark);
+end;
+
 procedure TPCParser.DoReadHeaderQuiet();
 var
   LKind: TPCModuleKind;
+  LNameEnd: Integer;
 begin
-  // module <kind> <ident> ; read positionally with no report (D1), like the
+  // module <kind> <name> ; read positionally with no report (D1), like the
   // filter's header read; anything else leaves a nameless module of the
-  // assumed kind
+  // assumed kind. The name may be dotted (BNF.md sec 1)
   FKindAssumed := True;
   FModule.ModuleKind := DoAssumedKind();
-  if (FCursor.TokenAt(0).Kind <> tkKwModule) or (FCursor.TokenAt(2).Kind <> tkIdentifier) or
-    (FCursor.TokenAt(3).Kind <> tkSemicolon) then
+  if FCursor.TokenAt(0).Kind <> tkKwModule then
+    Exit;
+  LNameEnd := FCursor.DottedNameEnd(2);
+  if (LNameEnd < 0) or (FCursor.TokenAt(LNameEnd + 1).Kind <> tkSemicolon) then
     Exit;
   if not DoKindOf(FCursor.TokenAt(1).Kind, LKind) then
     Exit;
 
   FKindAssumed := False;
   FModule.ModuleKind := LKind;
-  FModule.ModuleName := FCursor.TokenAt(2).Spelling;
+  FModule.ModuleName := FCursor.DottedNameText(2, LNameEnd);
+  // From the first part's start to the last part's end
   FModule.NameRange := FCursor.TokenAt(2).Range;
+  FModule.NameRange.EndLine := FCursor.TokenAt(LNameEnd).Range.EndLine;
+  FModule.NameRange.EndColumn := FCursor.TokenAt(LNameEnd).Range.EndColumn;
+  FModule.NameRange.EndByteOffset := FCursor.TokenAt(LNameEnd).Range.EndByteOffset;
   // The module's range ends at the header's ';'
-  FLastToken := FCursor.TokenAt(3);
+  FLastToken := FCursor.TokenAt(LNameEnd + 1);
   FHasLast := True;
 end;
 
 procedure TPCParser.DoParseHeader();
 var
   LKindToken: TPCToken;
-  LNameToken: TPCToken;
+  LName: string;
+  LNameRange: TSourceRange;
   LStem: string;
   LKind: TPCModuleKind;
   LMark: TPCSkipMark;
@@ -1659,25 +1717,20 @@ begin
     (FModule.ModuleKind = mkUnit) then
     DoError(LKindToken, PC_ERR_PAR_004, RSParUnitMain, []);
 
-  LNameToken := DoCurrent();
-  if not DoExpect(tkIdentifier, RSParWhatModuleName) then
+  LMark := DoMarkSkip();
+  if not DoParseModuleName(RSParWhatModuleName, LName, LNameRange) then
   begin
-    // ';' right here ends the header; any other rest is an error node
-    if not DoMatch(tkSemicolon) then
-    begin
-      LMark := DoMarkSkip();
-      DoSkipFrame();
-      DoAddSkipped(FModule.Decls, LMark);
-    end;
+    DoEndFailedName(LMark);
     Exit;
   end;
 
-  // Module name = file name without .pcpp, exact case (BNF.md sec 1)
-  FModule.ModuleName := LNameToken.Spelling;
-  FModule.NameRange := LNameToken.Range;
+  // Module name = file name without .pcpp, exact case, the whole dotted
+  // name (BNF.md sec 1)
+  FModule.ModuleName := LName;
+  FModule.NameRange := LNameRange;
   LStem := DoFileStem(FModule.SourceFile);
   if FModule.ModuleName <> LStem then
-    DoError(LNameToken, PC_ERR_PAR_003, RSParNameMismatch, [FModule.ModuleName, LStem]);
+    DoErrorAt(LNameRange, PC_ERR_PAR_003, RSParNameMismatch, [FModule.ModuleName, LStem]);
 
   // The header is complete: a missing ';' is inserted, nothing skipped (r4)
   DoExpectTerminator(fcModule);
@@ -1893,7 +1946,8 @@ begin
 
   // A bad value still builds the argument, HasValue False and ResolvedText ''
   // ('' with HasValue is a real empty text, F-A2-1). A library name is never
-  // resolved (BNF.md sec 2): a file there is PR0055, the argument kept
+  // resolved (BNF.md sec 2): a path there is PR0055 (a library file is the
+  // Compiler's CMP0010, read from the files), the argument kept
   LHasValue := DoDecodeCString(LToken, not ARow.IsFilterChecked, LValue);
   if LHasValue then
   begin
@@ -1965,7 +2019,9 @@ procedure TPCParser.DoCheckLibName(const AToken: TPCToken; const AValue: string;
   const AWhere: string);
 begin
   // One rule for @linklibrary and an external clause's "..." library: a NAME
-  // the system linker finds, never a file (BNF.md sec 2, sem\decls.md Q25a)
+  // the system linker finds, never a file (BNF.md sec 2, sem\decls.md Q25a).
+  // Here its shape only; a value that names a library file is judged by the
+  // files themselves (TPCCompiler.DoCheckLibraryFiles, CMP0010)
   if not TPCLibraryName.IsName(AValue) then
     DoError(AToken, PC_ERR_PAR_055, RSParLibName, [AValue, AWhere]);
 end;
@@ -2154,38 +2210,33 @@ end;
 
 procedure TPCParser.DoParseImportClause();
 var
-  LNameToken: TPCToken;
+  LUnitName: string;
+  LNameRange: TSourceRange;
   LMark: TPCSkipMark;
 begin
-  // import <ident> { , <ident> } ;  right after the prologue (BNF.md sec 1)
+  // import <name> { , <name> } ;  right after the prologue; a name may be
+  // dotted (BNF.md sec 1)
   if not DoMatch(tkKwImport) then
     Exit;
   repeat
     if DoStopped() then
       Exit;
-    LNameToken := DoCurrent();
-    if not DoExpect(tkIdentifier, RSParWhatUnitName) then
+    LMark := DoMarkSkip();
+    if not DoParseModuleName(RSParWhatUnitName, LUnitName, LNameRange) then
     begin
-      // The names before it are imported (DoParseImport ran for each); ';'
-      // right here ends the clause, any other rest is an error node
-      if not DoMatch(tkSemicolon) then
-      begin
-        LMark := DoMarkSkip();
-        DoSkipFrame();
-        DoAddSkipped(FModule.Decls, LMark);
-      end;
+      // The names before it are imported (DoParseImport ran for each)
+      DoEndFailedName(LMark);
       Exit;
     end;
-    DoParseImport(LNameToken);
+    DoParseImport(LUnitName, LNameRange);
   until not DoMatch(tkComma);
 
   // Complete: a missing ';' is inserted, nothing skipped (r4)
   DoExpectTerminator(fcModule);
 end;
 
-procedure TPCParser.DoParseImport(const ANameToken: TPCToken);
+procedure TPCParser.DoParseImport(const AUnitName: string; const ANameRange: TSourceRange);
 var
-  LUnitName: string;
   LFile: string;
   LSearched: string;
   LExisting: TPCImport;
@@ -2193,17 +2244,17 @@ var
   LTarget: TPCTargetTriple;
   LError: TPCErrorStmt;
 begin
-  LUnitName := ANameToken.Spelling;
+  // AUnitName is the whole (maybe dotted) name, ANameRange all of its parts
   for LExisting in FModule.Imports do
   begin
-    if LExisting.ModuleName = LUnitName then
+    if LExisting.ModuleName = AUnitName then
     begin
       // Not a second import of the unit (a name resolves to one): the
       // repeated name is an error node in Decls, as every prologue drop
       // (PLAN-RECOVERY A7)
-      DoError(ANameToken, PC_ERR_PAR_014, RSParDuplicateImport, [LUnitName]);
+      DoErrorAt(ANameRange, PC_ERR_PAR_014, RSParDuplicateImport, [AUnitName]);
       LError := FAst.NewNode<TPCErrorStmt>();
-      LError.Range := ANameToken.Range;
+      LError.Range := ANameRange;
       FModule.Decls.Add(LError);
       Exit;
     end;
@@ -2211,21 +2262,21 @@ begin
 
   // The import states what was written; ImportedModule stays nil on an error
   LImport := FAst.NewNode<TPCImport>();
-  LImport.ModuleName := LUnitName;
-  LImport.Range := ANameToken.Range;
+  LImport.ModuleName := AUnitName;
+  LImport.Range := ANameRange;
   FModule.Imports.Add(LImport);
 
-  LFile := DoFindUnitFile(LUnitName, LSearched);
+  LFile := DoFindUnitFile(AUnitName, LSearched);
   if LFile = '' then
   begin
-    DoError(ANameToken, PC_ERR_PAR_012, RSParUnitNotFound, [LUnitName, LSearched]);
+    DoErrorAt(ANameRange, PC_ERR_PAR_012, RSParUnitNotFound, [AUnitName, LSearched]);
     Exit;
   end;
 
   // Identity is the resolved file, never the declared name (parser-core.md)
   if DoInChain(LFile) then
   begin
-    DoError(ANameToken, PC_ERR_PAR_011, RSParImportCycle, [DoCycleText(LUnitName)]);
+    DoErrorAt(ANameRange, PC_ERR_PAR_011, RSParImportCycle, [DoCycleText(AUnitName)]);
     Exit;
   end;
 
@@ -2242,8 +2293,8 @@ begin
   end;
 
   if LImport.ImportedModule.ModuleKind <> mkUnit then
-    DoError(ANameToken, PC_ERR_PAR_013, RSParImportKind,
-      [LUnitName, PC_PAR_KIND_NAMES[LImport.ImportedModule.ModuleKind]]);
+    DoErrorAt(ANameRange, PC_ERR_PAR_013, RSParImportKind,
+      [AUnitName, PC_PAR_KIND_NAMES[LImport.ImportedModule.ModuleKind]]);
 end;
 
 function TPCParser.DoFindUnitFile(const AUnitName: string; out ASearched: string): string;

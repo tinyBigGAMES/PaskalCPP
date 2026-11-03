@@ -478,6 +478,8 @@ resourcestring
   RSParWhatModuleName = 'a module name';
   { RSParWhatUnitName }
   RSParWhatUnitName = 'a unit name';
+  { RSParWhatNamePart }
+  RSParWhatNamePart = 'the next part of the dotted name';
   { RSParNeedKind }
   RSParNeedKind = 'expected a module kind (exe, dll, lib, unit), found ''%s''';
   { RSParNameMismatch }
@@ -1482,6 +1484,8 @@ resourcestring
   RSCmpInternalError = 'internal error: %s';
   { RSCmpLibraryUnreadable }
   RSCmpLibraryUnreadable = 'cannot read the library %s for the built-in data keys it holds: %s';
+  { RSCmpLibraryFile }
+  RSCmpLibraryFile = '''%s'' is not a library name but the library file %s: name the library as the linker finds it (m, user32), never its file';
   { RSCmpExeIconFailed }
   RSCmpExeIconFailed = 'cannot build the icon %s into the program: %s';
   { RSIcoWicFailed }

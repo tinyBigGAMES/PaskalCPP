@@ -1,0 +1,71 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_dotted_shadow.pcpp - Module: a name spelled like a dotted unit's first part
+
+  In code A.B is the unit A.B only when no local or module-level name is
+  spelled like its first part A (BNF.md sec 1). Here a module-level
+  variable, a parameter and a local are each named mod_dotted, a record with
+  a field Lib, so mod_dotted.Lib reads that field, never the imported unit
+  mod_dotted.Lib. The unit is still reached by its bare export.
+*******************************************************************************/
+
+module exe mod_dotted_shadow;
+
+/*
+  @@test
+    kind run
+    expect
+    | 2. module var mod_dotted.Lib = 7
+    | 2. parameter mod_dotted.Lib = 9
+    | 2. local mod_dotted.Lib = 5
+    | 2. Twice(4) = 8
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_dotted.Lib;
+
+type
+  TShadow = record
+    Lib: int32;
+  end;
+
+var
+  mod_dotted: TShadow;
+  GParam: TShadow;
+
+routine ReadParam(const mod_dotted: TShadow): int32;
+begin
+  return mod_dotted.Lib;
+end;
+
+routine ReadLocal(): int32;
+var
+  mod_dotted: TShadow;
+begin
+  mod_dotted.Lib := 5;
+  return mod_dotted.Lib;
+end;
+
+begin
+  mod_dotted.Lib := 7;
+  println("2. module var mod_dotted.Lib = {}", mod_dotted.Lib);
+  GParam.Lib := 9;
+  println("2. parameter mod_dotted.Lib = {}", ReadParam(GParam));
+  println("2. local mod_dotted.Lib = {}", ReadLocal());
+  println("2. Twice(4) = {}", Twice(4));
+end.

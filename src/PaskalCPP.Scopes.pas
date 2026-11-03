@@ -1300,13 +1300,15 @@ begin
 end;
 
 class function TPCScopes.HeadImport(const ABase: TPCExpr): TPCImport;
+var
+  LDecl: TPCNode;
 begin
-  // Was Semantics DoResolveMember (1)'s test: only a plain name is a module
-  // head (a member never names a module)
+  // Was Semantics DoResolveMember (1)'s test: a plain name (an undotted unit)
+  // or a member SEM bound to a dotted unit (BNF.md sec 1) is a module head
   Result := nil;
-  if (ABase is TPCName) and (TPCName(ABase).ResolvedKind = rkModule) and
-     (TPCName(ABase).ResolvedDecl is TPCImport) then
-    Result := TPCImport(TPCName(ABase).ResolvedDecl);
+  LDecl := TPCMember.ModuleBase(ABase);
+  if LDecl is TPCImport then
+    Result := TPCImport(LDecl);
 end;
 
 class function TPCScopes.HeadTypeDecl(const ABase: TPCExpr): TPCTypeDecl;

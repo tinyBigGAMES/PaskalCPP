@@ -1,0 +1,67 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_dotted_prefix.pcpp - Module: qualified names of dotted units
+
+  In code A.B.C.X is read as Delphi reads it (BNF.md sec 1): the LONGEST
+  dotted prefix that names a unit of the import clause is the unit, the rest
+  its member. mod_dotted.Lib is a prefix of mod_dotted.Lib.Core and both are
+  imported, so mod_dotted.Lib.Twice is Lib's routine and
+  mod_dotted.Lib.Core.CoreSum is Core's (not a member Core of Lib). Every
+  kind of export is reached qualified: routine, type, choices value, const,
+  var (read and written); a bare name still reaches its unit.
+*******************************************************************************/
+
+module exe mod_dotted_prefix;
+
+/*
+  @@test
+    kind run
+    expect
+    | 1. mod_dotted.Lib.Core initialize
+    | 2. mod_dotted.Lib.Twice(21) = 42
+    | 2. Twice(5) = 10
+    | 2. mod_dotted.Lib.Core.CoreSum(GPoint) = 30
+    | 2. GCoreCalls = 1, KCoreScale = 3
+    | 2. GCoreCalls written = 10
+    | 2. GColor is Green
+    | 3. mod_dotted.Lib.Core finalize
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_dotted.Lib, mod_dotted.Lib.Core;
+
+var
+  GPoint: mod_dotted.Lib.Core.TCorePoint;
+  GColor: mod_dotted.Lib.Core.TCoreColor = mod_dotted.Lib.Core.TCoreColor.Green;
+  GSum: int32;
+
+begin
+  println("2. mod_dotted.Lib.Twice(21) = {}", mod_dotted.Lib.Twice(21));
+  println("2. Twice(5) = {}", Twice(5));
+  GPoint.X := 2;
+  GPoint.Y := 3;
+  GSum := mod_dotted.Lib.Core.CoreSum(GPoint);
+  println("2. mod_dotted.Lib.Core.CoreSum(GPoint) = {}", GSum);
+  println("2. GCoreCalls = {}, KCoreScale = {}", mod_dotted.Lib.Core.GCoreCalls,
+    mod_dotted.Lib.Core.KCoreScale);
+  mod_dotted.Lib.Core.GCoreCalls := 10;
+  println("2. GCoreCalls written = {}", mod_dotted.Lib.Core.GCoreCalls);
+  if GColor = mod_dotted.Lib.Core.TCoreColor.Green then
+    println("2. GColor is Green");
+  end;
+end.

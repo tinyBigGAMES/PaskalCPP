@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dll_dotted.Core.pcpp - Build kind: a PaskalCPP dll with a dotted name (dep)
+
+  The whole dotted name is the library's: dll_dotted.Core.dll (import library
+  dll_dotted.Core.lib) on Windows, libdll_dotted.Core.so on Linux. dll_dotted
+  links it by that name.
+*******************************************************************************/
+
+module dll dll_dotted.Core;
+
+/*
+  @@test
+    kind dep
+  @@end
+*/
+
+exported routine clink dll_dotted_twice(AN: int32): int32;
+begin
+  return AN * 2;
+end;
+
+end.

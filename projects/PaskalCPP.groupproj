@@ -10,7 +10,7 @@
             <Dependencies/>
         </Projects>
         <Projects Include="pcpp\pcpp.dproj">
-            <Dependencies>testbed\testbed.dproj</Dependencies>
+            <Dependencies>testbed\testbed.dproj;pcppdev\pcppdev.dproj</Dependencies>
         </Projects>
     </ItemGroup>
     <ProjectExtensions>
@@ -38,13 +38,13 @@
     <Target Name="pcppdev:Make">
         <MSBuild Projects="pcppdev\pcppdev.dproj" Targets="Make"/>
     </Target>
-    <Target Name="pcpp" DependsOnTargets="testbed">
+    <Target Name="pcpp" DependsOnTargets="testbed;pcppdev">
         <MSBuild Projects="pcpp\pcpp.dproj"/>
     </Target>
-    <Target Name="pcpp:Clean" DependsOnTargets="testbed:Clean">
+    <Target Name="pcpp:Clean" DependsOnTargets="testbed:Clean;pcppdev:Clean">
         <MSBuild Projects="pcpp\pcpp.dproj" Targets="Clean"/>
     </Target>
-    <Target Name="pcpp:Make" DependsOnTargets="testbed:Make">
+    <Target Name="pcpp:Make" DependsOnTargets="testbed:Make;pcppdev:Make">
         <MSBuild Projects="pcpp\pcpp.dproj" Targets="Make"/>
     </Target>
     <Target Name="Build">

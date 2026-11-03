@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_dotted_err_own.pcpp - Module: a dotted unit naming itself before '.'
+
+  Break step of mod_dotted_prefix: fixtures\mod_dotted.Lib.Own.pcpp writes
+  mod_dotted.Lib.Own.KOwn inside itself (its marker); a qualifier names an
+  imported unit, never the module, dotted or not (mod_import_err_own_module).
+*******************************************************************************/
+
+module exe mod_dotted_err_own;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_dotted.Lib.Own;
+
+begin
+  println("{}", OwnValue());
+end.

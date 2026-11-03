@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_dotted_err_duplicate.pcpp - Module: one dotted unit named twice
+
+  Break step of mod_dotted: the first mod_dotted.Lib is found by its whole
+  name (mod_dotted.Lib.pcpp) and parsed clean (no PR0012, no PR0003); the
+  second is the same whole name, reported at its first part (PR0014).
+*******************************************************************************/
+
+module exe mod_dotted_err_duplicate;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_dotted.Lib, mod_dotted.Lib; // ERROR PR0014@24
+
+begin
+end.

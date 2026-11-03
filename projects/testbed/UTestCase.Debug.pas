@@ -74,6 +74,7 @@ type
     procedure DoTestImageSpelling(const ACell: TPCTestCell);
     procedure DoTestReplSourceBreakpoints(const ACell: TPCTestCell);
     procedure DoTestReplSession(const ACell: TPCTestCell);
+    procedure DoTestReplDotted(const ACell: TPCTestCell);
     procedure DoTestReplHeaderBreakpoint(const ACell: TPCTestCell);
     procedure DoTestReplEndOfInput(const ACell: TPCTestCell);
     procedure DoTestReplEntryHold(const ACell: TPCTestCell);
@@ -677,6 +678,7 @@ begin
   RegisterTest('image_spelling', DoTestImageSpelling);
   RegisterTest('repl_source_bps', DoTestReplSourceBreakpoints);
   RegisterTest('repl_session', DoTestReplSession);
+  RegisterTest('repl_dotted', DoTestReplDotted);
   RegisterTest('repl_header_bp', DoTestReplHeaderBreakpoint);
   RegisterTest('repl_eof', DoTestReplEndOfInput);
   RegisterTest('repl_entry_hold', DoTestReplEntryHold);
@@ -2458,6 +2460,80 @@ begin
       'repl_session: the program''s output, then its exit');
     Check(LOut.Contains(RSDbgReplNotRunning), 'repl_session: a command with no program says so');
     Check(LOut.Contains(Format(RSDbgReplUnknown, ['xyz'])), 'repl_session: an unknown command');
+  finally
+    LCompiler.Free();
+  end;
+end;
+
+procedure TPCDebugTests.DoTestReplDotted(const ACell: TPCTestCell);
+var
+  LExe: string;
+  LReason: string;
+  LCompiler: TPCCompiler;
+  LErrors: TErrors;
+  LRuntime: TPCDebugRuntime;
+  LModules: TArray<TPCModule>;
+  LUnit: string;
+  LOut: string;
+  LExit: Cardinal;
+  LOk: Boolean;
+  LCall: Integer;
+  LNext: Integer;
+  LSet: Integer;
+  LRet: Integer;
+begin
+  // A dotted unit under the debugger (dbg_dotted imports dbg_dotted.Core):
+  // its module keeps the whole dotted name, its @breakpoint stops in its
+  // routine, the routine's param and local and the unit's own global read
+  // with PaskalCPP names (pcpp_md_ namespace found through DoNamespaceName),
+  // n steps, bt names the unit's file, and b <file>:<line> takes the
+  // dotted file name whole
+  LCompiler := DoBuildProgram('dotted', LExe, LReason);
+  try
+    Check(LExe <> '', 'repl_dotted: dbg_dotted builds (' + LReason + ')');
+    if LExe = '' then
+      Exit;
+    LUnit := TPath.Combine(TPath.GetDirectoryName(DoFixturePath('dotted')), 'dbg_dotted.Core.pcpp');
+    LCall := DoMarkerLine('dotted', 'M_D_CALL');
+    LNext := DoMarkerLineIn(LUnit, 'M_D_NEXT');
+    LSet := DoMarkerLineIn(LUnit, 'M_D_SET');
+    LRet := DoMarkerLineIn(LUnit, 'M_D_RETURN');
+
+    LErrors := TErrors.Create();
+    LRuntime := DoNewRuntime(LErrors, LCompiler, LExe);
+    try
+      LModules := LRuntime.ProgramModules();
+      Check((Length(LModules) = 2) and (LModules[1].ModuleName = 'dbg_dotted.Core') and
+        TUtils.SamePath(LModules[1].SourceFile, LUnit),
+        'repl_dotted: the import is the dotted unit, its whole name kept (%d)', [Length(LModules)]);
+    finally
+      LRuntime.Free();
+      LErrors.Free();
+    end;
+
+    LOk := DoReplRun(LCompiler, LExe, ['p AV', 'p GCount', 'n', 'p LNext', 'bt',
+      Format('b dbg_dotted.Core.pcpp:%d', [LRet]), 'c', 'p GCount', 'c', 'q'], 'repl_dotted', LOut, LExit);
+    Check(LOk, 'repl_dotted: the program starts');
+    Check(LOut.Contains(Format(RSDbgReplSourceBreakpoints, [1])),
+      'repl_dotted: the dotted unit''s @breakpoint is one');
+    Check(LOut.Contains(Format(RSDbgReplStopped, [RSDbgReplReasonBreakpoint, 'Bump', 'dbg_dotted.Core.pcpp',
+      LNext])), 'repl_dotted: the unit''s @breakpoint stops in Bump, on the next line with code');
+    Check(LOut.Contains(Format(RSDbgReplEval, ['AV', '4'])), 'repl_dotted: p of the routine''s param');
+    Check(LOut.Contains(Format(RSDbgReplEval, ['GCount', '0'])),
+      'repl_dotted: p of the dotted unit''s own global, before the set');
+    Check(LOut.Contains(Format(RSDbgReplStopped, [RSDbgReplReasonStep, 'Bump', 'dbg_dotted.Core.pcpp', LSet])),
+      'repl_dotted: n steps to the next line in the unit');
+    Check(LOut.Contains(Format(RSDbgReplEval, ['LNext', '4'])), 'repl_dotted: p of the routine''s local');
+    Check(LOut.Contains(Format(RSDbgReplFrame, ['>', 0, 'Bump', 'dbg_dotted.Core.pcpp', LSet])) and
+      LOut.Contains(Format(RSDbgReplFrame, [' ', 1, 'dbg_dotted', 'dbg_dotted.pcpp', LCall])),
+      'repl_dotted: bt names the dotted unit''s file, then the caller''s');
+    Check(LOut.Contains(Format(RSDbgReplBpSet, [2, 'dbg_dotted.Core.pcpp', LRet])),
+      'repl_dotted: b takes the dotted file name whole');
+    Check(LOut.Contains(Format(RSDbgReplStopped, [RSDbgReplReasonBreakpoint, 'Bump', 'dbg_dotted.Core.pcpp',
+      LRet])), 'repl_dotted: c stops at the new breakpoint in the unit');
+    Check(LOut.Contains(Format(RSDbgReplEval, ['GCount', '4'])), 'repl_dotted: the unit''s global after the set');
+    Check(LOut.Contains('total 4') and LOut.Contains(Format(RSDbgReplExited, [0])),
+      'repl_dotted: the program''s output, then its exit');
   finally
     LCompiler.Free();
   end;

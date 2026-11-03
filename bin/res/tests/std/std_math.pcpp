@@ -170,6 +170,7 @@ module exe std_math;
     | obb true false true false true false
     | sin cos 1.000000 -1.000000 0.500000 0.500000 0.500000
     | sqrt abs 3.000000 0.500000 2.500000 1.500000 7 3 true
+    | power 1024.000000 1.414214 0.500000 1.000000 true
     | round 2 4 -2 -3 3 0
     | trunc floor ceil -2 -3 -2 2 2 3 2
     | trunc lowest -9223372036854775808
@@ -615,6 +616,11 @@ begin
   LFloat := Sqrt(-1.0);
   println("sqrt abs {:.6f} {:.6f} {:.6f} {:.6f} {} {} {}", Sqrt(9.0), Sqrt(LQuarter32), Abs(-2.5),
     Abs(-LWrap32 + 1.0f), Abs(-7), Abs(LMinus3), LFloat <> LFloat);
+  // Power (float64 and float32): a whole exponent, a root, any base to 0 is
+  // 1, a negative base with a fractional exponent is NaN
+  LFloat := Power(-8.0, 0.5);
+  println("power {:.6f} {:.6f} {:.6f} {:.6f} {}", Power(2.0, 10.0), Power(2.0, 0.5), Power(LQuarter32, 0.5f),
+    Power(-8.0, 0.0), LFloat <> LFloat);
   // Round: halfway goes to the even neighbour, as Delphi's
   println("round {} {} {} {} {} {}", Round(2.5), Round(3.5), Round(-2.5), Round(-2.6), Round(2.6),
     Round(LQuarter32));

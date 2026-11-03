@@ -1024,6 +1024,16 @@ type
     procedure DoResolveName(const AName: TPCName);
     procedure DoResolveNamedType(const AType: TPCNamedType);
     procedure DoResolveQualifiedType(const AType: TPCNamedType);
+    procedure DoQualifiedTypeMember(const AType: TPCNamedType; const AImport: TPCImport;
+      const AUnitText: string; const AMemberName: string);
+    function DoResolveDottedType(const AType: TPCNamedType): Boolean;
+    // Dotted unit names in code (BNF.md sec 1): a local or module-level name
+    // spelled like the first part wins; else the dot chain that spells an
+    // import's whole dotted name is that unit (outer chains are tried
+    // first, so the LONGEST such prefix wins); else the undotted order
+    function DoHeadIsOwn(const AHeadText: string): Boolean;
+    function DoDottedImport(const AText: string): TPCImport;
+    function DoBindDottedUnit(const AMember: TPCMember): Boolean;
     procedure DoResolveMember(const AMember: TPCMember);
     procedure DoSpecial(const ASpecial: TPCSpecial; const AIsMemberBase: Boolean);
     procedure DoCallMirror(const ACall: TPCCall);
@@ -5681,6 +5691,7 @@ var
   LPromoted: Boolean;
   LEmbedType: TPCTypeExpr;
   LEmbedText: string;
+  LHead: TPCName;
 begin
   // A member of a value (D-A1c-1): a record / object / overlay field or
   // method through '.', the same through '->' on a typed pointer; a member of
@@ -5710,6 +5721,16 @@ begin
     not TPCName(LBase).HasLeadingScope and (TPCName(LBase).Parts.Count = 1) and
     (TPCName(LBase).Parts[0] <> nil) and (FModule <> nil) and
     (TPCName(LBase).Parts[0].PartText = FModule.ModuleName) and (AMember.Access = maDot) then
+  begin
+    DoError(LBase, PC_ERR_SEM_007, RSSemCoreOwnModule, [FModule.ModuleName, AMember.Member.PartText]);
+    DoPoison(AMember);
+    Exit;
+  end;
+  // The same for a dotted module's own name (`A.B.K` inside A.B): the chain
+  // spells it and its first part was no PaskalCPP name (left C/C++'s)
+  if (LBase is TPCMember) and (FModule <> nil) and (AMember.Access = maDot) and
+    (TPCMember.DottedText(LBase, LHead) = FModule.ModuleName) and (LHead <> nil) and
+    (LHead.ResolvedKind = rkOpaque) then
   begin
     DoError(LBase, PC_ERR_SEM_007, RSSemCoreOwnModule, [FModule.ModuleName, AMember.Member.PartText]);
     DoPoison(AMember);
@@ -10689,7 +10710,8 @@ procedure TPCSemantics.DoCheckUse(const ADirective: TPCDirective;
   const AVerInfo: TPCVerInfoState);
 begin
   // The eight @vi* named one by one (never an enum range); the paths are
-  // checked for existence (Q28); @linklibrary's whole rule is PR0055
+  // checked for existence (Q28); @linklibrary's rule is PR0055 (its shape)
+  // and CMP0010 (a library file, the Compiler's)
   if ADirective.DirectiveKind in [bdVIMajor, bdVIMinor, bdVIPatch, bdVIProductName,
     bdVIDescription, bdVIFileName, bdVICompanyName, bdVICopyright] then
     DoCheckVersionInfo(ADirective, AVerInfo)
@@ -12335,6 +12357,10 @@ begin
     else if AExpr is TPCVerbatimExpr then
       // Verbatim C++ is never looked into: opaque tier
       AExpr.ResolvedType := FAst.OpaqueType()
+    else if (AExpr is TPCMember) and DoBindDottedUnit(TPCMember(AExpr)) then
+      // A.B spelling a dotted unit: the member holds the unit, as a name
+      // holds an undotted one; its parts are the unit's name, never walked
+      DoTypeLeaf(AExpr, TPCMember(AExpr).ResolvedDecl, TPCMember(AExpr).ResolvedKind)
     else if AExpr is TPCMember then
     begin
       // parent.<member> is the one form of parent (a member qualifier): its
@@ -12738,11 +12764,13 @@ procedure TPCSemantics.DoResolveQualifiedType(const AType: TPCNamedType);
 var
   LHead: string;
   LFound: TList<TPCNode>;
-  LModule: TPCModule;
 begin
-  // Module.Type: modules do not nest and there are no nested types (T3)
+  // Module.Type: modules do not nest and there are no nested types (T3);
+  // three parts or more are a dotted unit's type (A.B.T) or SM0008
   if Length(AType.Parts) >= 3 then
   begin
+    if DoResolveDottedType(AType) then
+      Exit;
     DoError(AType, PC_ERR_SEM_008, RSSemCoreQualifiedParts, []);
     Exit;
   end;
@@ -12755,14 +12783,27 @@ begin
       DoError(AType, PC_ERR_SEM_007, RSSemCoreNotModule, [LHead]);
       Exit;
     end;
-    LModule := TPCImport(LFound[0]).ImportedModule;
-    if LModule = nil then
-      Exit;
-    LFound.Clear();
-    if not DoModuleMember(LModule, AType.Parts[1], LFound) then
-      DoError(AType, PC_ERR_SEM_005, RSSemCoreModuleNoName, [LHead, AType.Parts[1]])
+    DoQualifiedTypeMember(AType, TPCImport(LFound[0]), LHead, AType.Parts[1]);
+  finally
+    LFound.Free();
+  end;
+end;
+
+procedure TPCSemantics.DoQualifiedTypeMember(const AType: TPCNamedType; const AImport: TPCImport;
+  const AUnitText: string; const AMemberName: string);
+var
+  LFound: TList<TPCNode>;
+begin
+  // The type AMemberName of the unit AImport (spelled AUnitText in the
+  // source): undotted Module.Type and dotted A.B.Type alike
+  if AImport.ImportedModule = nil then
+    Exit;
+  LFound := TList<TPCNode>.Create();
+  try
+    if not DoModuleMember(AImport.ImportedModule, AMemberName, LFound) then
+      DoError(AType, PC_ERR_SEM_005, RSSemCoreModuleNoName, [AUnitText, AMemberName])
     else if LFound.Count = 0 then
-      DoError(AType, PC_ERR_SEM_006, RSSemCoreNotExported, [AType.Parts[1], LHead])
+      DoError(AType, PC_ERR_SEM_006, RSSemCoreNotExported, [AMemberName, AUnitText])
     else if (LFound.Count = 1) and (LFound[0] is TPCTypeDecl) then
     begin
       AType.ResolvedKind := rkType;
@@ -12773,6 +12814,108 @@ begin
   finally
     LFound.Free();
   end;
+end;
+
+function TPCSemantics.DoResolveDottedType(const AType: TPCNamedType): Boolean;
+var
+  LCount: Integer;
+  LIndex: Integer;
+  LText: string;
+  LImport: TPCImport;
+begin
+  // A.B.T, the type T of the dotted unit A.B: the LONGEST prefix of the parts
+  // that is an import's whole name is the unit, and exactly one part must
+  // remain (no nested types, T3: SM0008). False = the first part is a local
+  // or module-level name, or no prefix names a unit (SM0008 as before)
+  Result := False;
+  if DoHeadIsOwn(AType.Parts[0]) then
+    Exit;
+  for LCount := Length(AType.Parts) - 1 downto 2 do
+  begin
+    LText := AType.Parts[0];
+    for LIndex := 1 to LCount - 1 do
+      LText := LText + '.' + AType.Parts[LIndex];
+    LImport := DoDottedImport(LText);
+    if LImport = nil then
+      Continue;
+    Result := True;
+    if Length(AType.Parts) - LCount > 1 then
+      DoError(AType, PC_ERR_SEM_008, RSSemCoreQualifiedParts, [])
+    else
+      DoQualifiedTypeMember(AType, LImport, LText, AType.Parts[LCount]);
+    Exit;
+  end;
+end;
+
+function TPCSemantics.DoHeadIsOwn(const AHeadText: string): Boolean;
+var
+  LFound: TList<TPCNode>;
+  LNode: TPCNode;
+begin
+  // A dotted chain's first part spelled like a local or module-level name (a
+  // parameter, a declaration of any frame on the chain, one declared later,
+  // the item being declared) is that name, before every unit. An undotted
+  // import of that name is no such name: it is a unit, the shorter prefix
+  if (DoOwnValue(AHeadText) <> nil) or (DoOwnItem(AHeadText) <> nil) or
+    (DoUsedLater(AHeadText) <> nil) then
+    Exit(True);
+  Result := False;
+  LFound := TList<TPCNode>.Create();
+  try
+    DoLookup(AHeadText, LFound);
+    for LNode in LFound do
+    begin
+      if not (LNode is TPCImport) then
+        Exit(True);
+    end;
+  finally
+    LFound.Free();
+  end;
+end;
+
+function TPCSemantics.DoDottedImport(const AText: string): TPCImport;
+var
+  LFound: TList<TPCNode>;
+  LNode: TPCNode;
+begin
+  // The import whose whole dotted name is AText (TPCScopes.Collect matches
+  // an import by its full ModuleName); nil = no unit of the clause is so named
+  Result := nil;
+  LFound := TList<TPCNode>.Create();
+  try
+    DoLookup(AText, LFound);
+    for LNode in LFound do
+    begin
+      if LNode is TPCImport then
+        Exit(TPCImport(LNode));
+    end;
+  finally
+    LFound.Free();
+  end;
+end;
+
+function TPCSemantics.DoBindDottedUnit(const AMember: TPCMember): Boolean;
+var
+  LHead: TPCName;
+  LText: string;
+  LImport: TPCImport;
+begin
+  // AMember's whole dot chain spells an import (A.B for unit A.B) and its
+  // first part is no local or module-level name: the member is that unit,
+  // rkModule with the TPCImport, as a TPCName holds an undotted one. The
+  // import test goes first (most chains name no unit: the cheaper miss)
+  Result := False;
+  LText := TPCMember.DottedText(AMember, LHead);
+  if (LText = '') or (LHead = nil) then
+    Exit;
+  LImport := DoDottedImport(LText);
+  if LImport = nil then
+    Exit;
+  if DoHeadIsOwn(LHead.Parts[0].PartText) then
+    Exit;
+  AMember.ResolvedDecl := LImport;
+  AMember.ResolvedKind := DoResolvedKindOf(LImport);
+  Result := True;
 end;
 
 procedure TPCSemantics.DoResolveMember(const AMember: TPCMember);
@@ -13005,6 +13148,7 @@ procedure TPCSemantics.DoCalleeDecls(const ACallee: TPCExpr; const AFound: TList
 var
   LMember: TPCMember;
   LBase: TPCExpr;
+  LImport: TPCImport;
   LRecord: TPCTypeExpr;
 begin
   // R-RANK 1, the one lookup of what a routine name may be (a call's
@@ -13024,10 +13168,10 @@ begin
   begin
     LMember := TPCMember(ACallee);
     LBase := LMember.Base;
-    if (LBase is TPCName) and (TPCName(LBase).ResolvedKind = rkModule) and
-      (TPCName(LBase).ResolvedDecl is TPCImport) and
-      (TPCImport(TPCName(LBase).ResolvedDecl).ImportedModule <> nil) then
-      DoModuleMember(TPCImport(TPCName(LBase).ResolvedDecl).ImportedModule, LMember.Member.PartText, AFound)
+    // A unit head, undotted or dotted (TPCScopes.HeadImport, the one rule)
+    LImport := TPCScopes.HeadImport(LBase);
+    if (LImport <> nil) and (LImport.ImportedModule <> nil) then
+      DoModuleMember(LImport.ImportedModule, LMember.Member.PartText, AFound)
     else
     begin
       LRecord := nil;
@@ -14380,6 +14524,14 @@ begin
     begin
       if DoIsPoisoned(ACall.Args[LIndex]) then
         Continue;
+      // A unit (undotted name or dotted member, TPCMember.ModuleBase) is no
+      // value here either: SM0269, never left to clang or the emitter
+      if TPCMember.ModuleBase(ACall.Args[LIndex]) <> nil then
+      begin
+        DoError(ACall.Args[LIndex], PC_ERR_SEM_269, RSSemTypeModuleNotValue, [ACall.Args[LIndex].ExprText()]);
+        DoPoison(ACall.Args[LIndex]);
+        Continue;
+      end;
       // The same decision as UnprintableArgText (the Compiler's report for a
       // C++ routine's argument): PrintFormOfArg, one RS string per form
       LForm := TPCTypeExpr.PrintFormOfArg(ACall.Args[LIndex]);

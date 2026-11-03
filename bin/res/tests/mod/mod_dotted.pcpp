@@ -1,0 +1,63 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_dotted.pcpp - Module: dotted unit names
+
+  A module name may be dotted (BNF.md sec 1): module name = identifier,
+  { "." identifier }. A unit is named in its file as its whole dotted name
+  (fixtures\mod_dotted.Lib.pcpp, mod_dotted.Lib.Core.pcpp) and imported by
+  it. Here the exports are reached bare. Each dotted unit has one flat C++
+  namespace, pcpp_md_ + each part as <length><part>, so a
+  unit whose name is another's prefix never clashes with it, and mixed C++
+  names a dotted unit's export by that spelling. mod_dotted.Lib.Core
+  imports mod_dotted.Lib and has initialize / finalize sections.
+*******************************************************************************/
+
+module exe mod_dotted;
+
+/*
+  @@test
+    kind run
+    expect
+    | 1. mod_dotted.Lib.Core initialize
+    | 2. Twice(21) = 42
+    | 2. CoreSum(GPoint) = 30
+    | 2. GCoreCalls = 1, KCoreScale = 3
+    | 2. GColor is Green
+    | 2. from C++: 8 and 3
+    | 3. mod_dotted.Lib.Core finalize
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_dotted.Lib, mod_dotted.Lib.Core;
+
+var
+  GPoint: TCorePoint;
+  GColor: TCoreColor = TCoreColor.Green;
+
+begin
+  println("2. Twice(21) = {}", Twice(21));
+  GPoint.X := 2;
+  GPoint.Y := 3;
+  println("2. CoreSum(GPoint) = {}", CoreSum(GPoint));
+  println("2. GCoreCalls = {}, KCoreScale = {}", GCoreCalls, KCoreScale);
+  if GColor = TCoreColor.Green then
+    println("2. GColor is Green");
+  end;
+  println("2. from C++: {} and {}", cpp("::pcpp_md_10mod_dotted3Lib::Twice(4)"),
+    cpp("::pcpp_md_10mod_dotted3Lib4Core::KCoreScale"));
+end.

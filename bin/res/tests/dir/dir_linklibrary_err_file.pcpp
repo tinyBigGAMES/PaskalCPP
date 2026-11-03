@@ -15,7 +15,10 @@
 -------------------------------------------------------------------------------
   dir_linklibrary_err_file.pcpp - Directive: a library file's name where its name belongs
 
-  Break step of dir_linklibrary: winmm.lib, not winmm.
+  Break step of dir_linklibrary: winmm.lib, not winmm. Judged by the files,
+  never by the text's last dot: the library path holds the file winmm.lib
+  (fixtures), and the linker finds no library of that whole name, so the
+  file was named (CMP0010, the same on both targets).
 *******************************************************************************/
 
 module exe dir_linklibrary_err_file;
@@ -26,7 +29,8 @@ module exe dir_linklibrary_err_file;
   @@end
 */
 
-@linklibrary "winmm.lib"; // ERROR PR0055@14
+@addlibrarypath "$P:res/tests/dir/fixtures";
+@linklibrary "winmm.lib"; // ERROR CMP0010@14
 
 begin
 end.

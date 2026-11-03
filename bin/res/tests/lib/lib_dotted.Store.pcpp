@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lib_dotted.Store.pcpp - Build kind: a static lib with a dotted name (dep)
+
+  The whole dotted name is the library's: lib_dotted.Store.lib on Windows,
+  liblib_dotted.Store.a on Linux. lib_dotted links it by that name.
+*******************************************************************************/
+
+module lib lib_dotted.Store;
+
+/*
+  @@test
+    kind dep
+  @@end
+*/
+
+exported routine clink lib_dotted_add(AA: int32; AB: int32): int32;
+begin
+  return AA + AB;
+end;
+
+end.

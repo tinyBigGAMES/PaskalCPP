@@ -70,6 +70,7 @@ type
     procedure DoTestRecoveryAnswers(const ACell: TPCTestCell);
     procedure DoTestCompletion(const ACell: TPCTestCell);
     procedure DoTestCompletionImports(const ACell: TPCTestCell);
+    procedure DoTestDotted(const ACell: TPCTestCell);
     procedure DoTestFormattingCore(const ACell: TPCTestCell);
     procedure DoTestFormatting(const ACell: TPCTestCell);
     procedure DoTestFormattingServer(const ACell: TPCTestCell);
@@ -1321,7 +1322,8 @@ end;
 // PLAN-RECOVERY A11 T1(b), frame form: every token inside AOwner's range
 // lies inside one of its children's ranges, or is one of AWords (the
 // construct's own grammar words, the BNF production cited by the caller),
-// or starts one of AExtra (a name token the owner holds as a range). With
+// or lies inside one of AExtra (a name the owner holds as a range: one token,
+// or every part and '.' of a dotted module name, BNF.md sec 1). With
 // AModule (the owner is the module) also a cpp placement (BNF.md :210 /
 // :802, no node). Any other token was dropped without a node. Covers the
 // span before the first and after the last element, which the
@@ -1392,7 +1394,8 @@ begin
       for LExtra in AExtra do
       begin
         if (not LExtra.IsEmpty()) and
-          (LExtra.StartByteOffset = ATokens[LToken].Range.StartByteOffset) then
+          (LExtra.StartByteOffset <= ATokens[LToken].Range.StartByteOffset) and
+          (ATokens[LToken].Range.StartByteOffset < LExtra.EndByteOffset) then
           LAllowed := True;
       end;
       if not LAllowed then
@@ -1822,6 +1825,7 @@ begin
   RegisterTest('recovery_answers', DoTestRecoveryAnswers);
   RegisterTest('completion', DoTestCompletion);
   RegisterTest('completion_imports', DoTestCompletionImports);
+  RegisterTest('dotted', DoTestDotted);
   RegisterTest('formatting_core', DoTestFormattingCore);
   RegisterTest('formatting', DoTestFormatting);
   RegisterTest('formatting_server', DoTestFormattingServer);
@@ -4288,6 +4292,98 @@ begin
     LHover := HoverValue(LSession, 15);
     Check(LHover.Contains('IaVar') and LHover.Contains('int32'),
       'imports: hover on a bare IaVar (got ' + LHover + ')');
+  finally
+    FreeSession(LSession);
+  end;
+end;
+
+procedure TPCLspTests.DoTestDotted(const ACell: TPCTestCell);
+const
+  // 0-based line of the main buffer's call (UTF-16 characters, all ASCII):
+  // '  GV := lspt_dt.Core.Twice(lspt_dt.Half(8));'
+  //   lspt_dt 8-14, Core 16-19, Twice 21-25, lspt_dt 27-33, Half 35-38
+  CLineCall = 5;
+var
+  LSession: TLspSession;
+  LMain: string;
+  LUnit: string;
+  LCore: string;
+  LCoreHeader: string;
+  LLabels: string;
+  LHover: string;
+  LOutline: string;
+begin
+  // PLAN-DOTTED-MODULES atom 9: a dotted unit (lspt_dt.Core) beside an
+  // undotted unit spelled as its first part (lspt_dt), both imported. Every
+  // part of the dotted unit's spelling is one use of it (the head lspt_dt
+  // too: SEM bound the whole chain, the longest imported prefix), the member
+  // after it is its routine, the undotted lspt_dt. stays that unit; hover
+  // names the dotted module, completion after it lists its exports, the
+  // import clause's dotted name goes to the unit, and the outline lists the
+  // import under its whole name. Every location by hand from the buffers
+  LMain := TestFile('lspt_dmain.pcpp');
+  LUnit := TestFile('lspt_dt.pcpp');
+  LCore := TestFile('lspt_dt.Core.pcpp');
+  LSession := NewSession();
+  try
+    RunSession([PC_LSPT_INITIALIZE, PC_LSPT_INITIALIZED,
+      OpenMessage(LUnit,
+        'module unit lspt_dt;'#10 +                                   // 0
+        'exported routine Half(const AX: int32): int32;'#10 +         // 1
+        'begin'#10 +                                                  // 2
+        '  return AX div 2;'#10 +                                     // 3
+        'end;'#10 +                                                   // 4
+        'end.'#10),                                                   // 5
+      OpenMessage(LCore,
+        'module unit lspt_dt.Core;'#10 +                              // 0
+        'exported routine Twice(const AX: int32): int32;'#10 +        // 1
+        'begin'#10 +                                                  // 2
+        '  return AX * 2;'#10 +                                       // 3
+        'end;'#10 +                                                   // 4
+        'exported const'#10 +                                         // 5
+        '  KCore: int32 = 7;'#10 +                                    // 6
+        'end.'#10),                                                   // 7
+      OpenMessage(LMain,
+        'module exe lspt_dmain;'#10 +                                 // 0
+        'import lspt_dt, lspt_dt.Core;'#10 +                          // 1
+        'var'#10 +                                                    // 2
+        '  GV: int32;'#10 +                                           // 3
+        'begin'#10 +                                                  // 4
+        '  GV := lspt_dt.Core.Twice(lspt_dt.Half(8));'#10 +           // 5
+        'end.'#10),                                                   // 6
+      DefinitionMessage(20, LMain, CLineCall, 10),     // the head lspt_dt of the dotted unit
+      DefinitionMessage(21, LMain, CLineCall, 17),     // Core: the dotted unit's last part
+      DefinitionMessage(22, LMain, CLineCall, 22),     // Twice: the dotted unit's routine
+      DefinitionMessage(23, LMain, CLineCall, 29),     // lspt_dt: the undotted unit
+      DefinitionMessage(24, LMain, CLineCall, 36),     // Half: the undotted unit's routine
+      DefinitionMessage(25, LMain, 1, 20),             // lspt_dt.Core in the import clause
+      HoverMessage(26, LMain, CLineCall, 17),          // on Core
+      CompletionMessage(27, LMain, CLineCall, 21, ''), // after 'lspt_dt.Core.'
+      SymbolsMessage(28, LMain),
+      PC_LSPT_SHUTDOWN, PC_LSPT_EXIT], LSession);
+
+    LCoreHeader := 'lspt_dt.Core.pcpp:0:12-0:24';
+    Check(DefinitionText(LSession, 20) = LCoreHeader,
+      'dotted: the head part is the dotted unit (got ' + DefinitionText(LSession, 20) + ')');
+    Check(DefinitionText(LSession, 21) = LCoreHeader,
+      'dotted: the last part is the dotted unit (got ' + DefinitionText(LSession, 21) + ')');
+    Check(DefinitionText(LSession, 22) = 'lspt_dt.Core.pcpp:1:17-1:22',
+      'dotted: the member is the dotted unit''s routine (got ' + DefinitionText(LSession, 22) + ')');
+    Check(DefinitionText(LSession, 23) = 'lspt_dt.pcpp:0:12-0:19',
+      'dotted: the undotted lspt_dt stays its own unit (got ' + DefinitionText(LSession, 23) + ')');
+    Check(DefinitionText(LSession, 24) = 'lspt_dt.pcpp:1:17-1:21',
+      'dotted: the undotted unit''s routine (got ' + DefinitionText(LSession, 24) + ')');
+    Check(DefinitionText(LSession, 25) = LCoreHeader,
+      'dotted: the import clause''s dotted name is the unit (got ' + DefinitionText(LSession, 25) + ')');
+    LHover := HoverValue(LSession, 26);
+    Check(LHover.Contains('module lspt_dt.Core'),
+      'dotted: hover names the dotted module whole (got ' + LHover + ')');
+    LLabels := ',' + CompletionLabels(LSession, 27) + ',';
+    Check(LLabels.Contains(',Twice,') and LLabels.Contains(',KCore,') and (not LLabels.Contains(',Half,')),
+      'dotted: completion after the dotted unit lists its exports only (got ' + LLabels + ')');
+    LOutline := SymbolsText(LSession, 28);
+    Check(LOutline.Contains('lspt_dt.Core/2/') and LOutline.Contains('lspt_dt/2/'),
+      'dotted: the outline lists both imports by their whole names (got ' + LOutline + ')');
   finally
     FreeSession(LSession);
   end;

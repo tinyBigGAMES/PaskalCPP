@@ -555,8 +555,12 @@ const
   // + the TPCChoicesType's Range.StartByteOffset (unique in the module)
   PC_EMT_LOCAL_CHOICES_PREFIX = 'pcpp_choices_';
   { PC_EMT_MODULE_NS_PREFIX }
-  // A module's C++ namespace is pcpp_m_<ModuleName> (DoNamespaceName)
+  // An undotted module's C++ namespace is pcpp_m_<ModuleName> (DoNamespaceName)
   PC_EMT_MODULE_NS_PREFIX = 'pcpp_m_';
+  { PC_EMT_DOTTED_NS_PREFIX }
+  // A dotted module's C++ namespace is pcpp_md_ + each part as <length><part>
+  // (DoNamespaceName)
+  PC_EMT_DOTTED_NS_PREFIX = 'pcpp_md_';
   { PC_EMT_VARARGS_NAME }
   // A variadic routine's pack (cpplink, O-V1) or va_list (clink, H5)
   PC_EMT_VARARGS_NAME = 'pcpp_va';
@@ -729,12 +733,29 @@ begin
 end;
 
 class function TPCEmitter.DoNamespaceName(const AModule: TPCModule): string;
+var
+  LParts: TArray<string>;
+  LPart: string;
 begin
   // A module's C++ namespace: pcpp_m_<M>. A reserved prefix cannot collide
   // with a C/C++ global of any target (glibc declares index, time, stat ...
   // at global scope) nor hide one from the module's own code, which a
   // namespace named M would (cross-target parity, DESIGN sec 7)
-  Result := PC_EMT_MODULE_NS_PREFIX + AModule.ModuleName;
+  if not AModule.ModuleName.Contains('.') then
+    Exit(PC_EMT_MODULE_NS_PREFIX + AModule.ModuleName);
+
+  // A dotted module (A.B.C): one flat namespace, pcpp_md_ + each part as
+  // <length><part> (A.B.C -> pcpp_md_1A1B1C). Not nested per part: unit
+  // A.B exporting C beside unit A.B.C would make C a type and a namespace.
+  // pcpp_md_ never equals pcpp_m_<identifier>, and the lengths keep the
+  // parts apart (A.BC -> pcpp_md_1A2BC, AB.C -> pcpp_md_2AB1C). A part
+  // starts with a letter or '_' (an identifier), so its digits end there.
+  // ModuleName is a parsed dotted name, never a path: splitting it at
+  // every '.' is its parts
+  Result := PC_EMT_DOTTED_NS_PREFIX;
+  LParts := AModule.ModuleName.Split(['.']);
+  for LPart in LParts do
+    Result := Result + IntToStr(LPart.Length) + LPart;
 end;
 
 class function TPCEmitter.DoDeclName(const ADecl: TPCDecl): string;
@@ -2878,6 +2899,7 @@ end;
 procedure TPCEmitter.DoWriteMember(const AFile: TPCOutFile; const AMember: TPCMember);
 var
   LBase: TPCExpr;
+  LModuleDecl: TPCNode;
   LModuleName: string;
   LHop: Integer;
 begin
@@ -2901,17 +2923,20 @@ begin
     DoNoRule(AMember);
   if AMember.ResolvedKind = rkChoiceValue then
     DoWriteChoiceValue(AFile, AMember.ResolvedDecl)
-  else if (LBase is TPCName) and (TPCName(LBase).ResolvedKind = rkModule) then
+  else if TPCMember.ModuleBase(LBase) <> nil then
   begin
+    // The base is a unit: a name (undotted) or a member SEM bound to a dotted
+    // unit; either way it is never written itself
+    LModuleDecl := TPCMember.ModuleBase(LBase);
     if AMember.ResolvedDecl is TPCDecl then
       DoText(AFile, DoReadName(TPCDecl(AMember.ResolvedDecl), AMember))
     else
     begin
       // An overload set or a C++ name of the module: ::M:: + the name
-      if TPCName(LBase).ResolvedDecl is TPCImport then
-        LModuleName := DoNamespaceName(TPCImport(TPCName(LBase).ResolvedDecl).ImportedModule)
-      else if TPCName(LBase).ResolvedDecl is TPCModule then
-        LModuleName := DoNamespaceName(TPCModule(TPCName(LBase).ResolvedDecl))
+      if LModuleDecl is TPCImport then
+        LModuleName := DoNamespaceName(TPCImport(LModuleDecl).ImportedModule)
+      else if LModuleDecl is TPCModule then
+        LModuleName := DoNamespaceName(TPCModule(LModuleDecl))
       else
       begin
         DoMissing(AFile, 'module');

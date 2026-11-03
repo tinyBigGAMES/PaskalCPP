@@ -16,7 +16,9 @@
   decl_external_err_lib_file.pcpp - Decl: external, lib file
 
   Break step of decl_external: a file name as the library: external takes a
-  name such as lib_plain.
+  name such as lib_plain. Judged by the files, never by the text's last dot:
+  the library path holds the file lib_plain.lib (fixtures), and the linker
+  finds no library of that whole name, so the file was named (CMP0010).
 *******************************************************************************/
 
 module exe decl_external_err_lib_file;
@@ -27,7 +29,9 @@ module exe decl_external_err_lib_file;
   @@end
 */
 
-routine clink lib_plain_add(AA: int32; AB: int32): int32; external "lib_plain.lib"; // ERROR PR0055@68
+@addlibrarypath "$P:res/tests/decl/fixtures";
+
+routine clink lib_plain_add(AA: int32; AB: int32): int32; external "lib_plain.lib"; // ERROR CMP0010@68
 
 begin
   println("{}", lib_plain_add(2, 3));

@@ -26,7 +26,12 @@
   TryStrToInt reads decimal only: blanks around, one optional sign, digits
   to the end; anything else fails and leaves the value as it was; int32 and
   int64 take exactly their own range (both ends), nothing wraps.
-  StrToIntDef gives the number or the default. The "qualified" row calls
+  StrToIntDef gives the number or the default. TryStrToFloat reads decimal
+  only (fraction and exponent allowed, a lead digit or '.', so nan / inf /
+  hex fail), leaves the value on failure, and refuses a number past its
+  type's range (float32 and float64 each). LowerCase changes A..Z only
+  (UTF-8 bytes stay); StartsText compares a prefix case aside (an empty
+  prefix starts anything, a longer one nothing). The "qualified" row calls
   StrUtils.Trim. Each row prints "ok <case>", or "FAIL <case>" with what
   came back. Pieces print as [a|b|c].
 *******************************************************************************/
@@ -72,6 +77,28 @@ module exe std_strutils;
     | ok   def bad
     | ok   def good
     | ok   def int64
+    | ok   float
+    | ok   float minus
+    | ok   float plus
+    | ok   float blanks
+    | ok   float dot lead
+    | ok   float exponent
+    | ok   float bad tail
+    | ok   float empty
+    | ok   float nan
+    | ok   float inf
+    | ok   float hex
+    | ok   float sign only
+    | ok   float64 over
+    | ok   float32
+    | ok   float32 over
+    | ok   lower
+    | ok   lower utf8
+    | ok   starts
+    | ok   starts case
+    | ok   starts empty
+    | ok   starts longer
+    | ok   starts miss
     | ok   qualified
     | done
     | [Heap] Allocs: 0, Frees: 0, Leaked: 0
@@ -216,11 +243,84 @@ begin
   CheckDefault("def int64", StrToIntDef("-5000000000", int64(0)), -5000000000);
 end;
 
+// One float64 row: whether it read, and the value it left (every wanted
+// value is exact in binary, so = compares them)
+routine CheckFloat64(const ACase: string; const AText: string; const AWantOk: bool; const AWant: float64);
+var
+  LValue: float64;
+  LOk: bool;
+begin
+  LValue := 99.0;
+  LOk := TryStrToFloat(AText, LValue);
+  if (LOk = AWantOk) and (LValue = AWant) then
+    println("ok   {}", ACase);
+  else
+    println("FAIL {}: got {} {}, want {} {}", ACase, LOk, LValue, AWantOk, AWant);
+  end;
+end;
+
+// One float32 row: whether it read, and the value it left
+routine CheckFloat32(const ACase: string; const AText: string; const AWantOk: bool; const AWant: float32);
+var
+  LValue: float32;
+  LOk: bool;
+begin
+  LValue := 99.0;
+  LOk := TryStrToFloat(AText, LValue);
+  if (LOk = AWantOk) and (LValue = AWant) then
+    println("ok   {}", ACase);
+  else
+    println("FAIL {}: got {} {}, want {} {}", ACase, LOk, LValue, AWantOk, AWant);
+  end;
+end;
+
+routine TestFloat();
+begin
+  CheckFloat64("float", "2.5", true, 2.5);
+  CheckFloat64("float minus", "-0.5", true, -0.5);
+  CheckFloat64("float plus", "+4", true, 4.0);
+  CheckFloat64("float blanks", " \t0.25 \r\n", true, 0.25);
+  CheckFloat64("float dot lead", ".5", true, 0.5);
+  CheckFloat64("float exponent", "1e3", true, 1000.0);
+  CheckFloat64("float bad tail", "1.5x", false, 99.0);
+  CheckFloat64("float empty", "", false, 99.0);
+  CheckFloat64("float nan", "nan", false, 99.0);
+  CheckFloat64("float inf", "-inf", false, 99.0);
+  CheckFloat64("float hex", "0x1p3", false, 99.0);
+  CheckFloat64("float sign only", "+", false, 99.0);
+  CheckFloat64("float64 over", "1e400", false, 99.0);
+  CheckFloat32("float32", "0.75", true, 0.75);
+  CheckFloat32("float32 over", "1e39", false, 99.0);
+end;
+
+// One bool row: what came back against what the rule says
+routine CheckBool(const ACase: string; const AGot: bool; const AWant: bool);
+begin
+  if AGot = AWant then
+    println("ok   {}", ACase);
+  else
+    println("FAIL {}: got {}, want {}", ACase, AGot, AWant);
+  end;
+end;
+
+routine TestCase();
+begin
+  CheckText("lower", LowerCase("Give SHIPS 3"), "give ships 3");
+  CheckText("lower utf8", LowerCase("CAFÉ"), "cafÉ");
+  CheckBool("starts", StartsText("sp", "spawn"), true);
+  CheckBool("starts case", StartsText("SP", "spawn"), true);
+  CheckBool("starts empty", StartsText("", "spawn"), true);
+  CheckBool("starts longer", StartsText("spawns", "spawn"), false);
+  CheckBool("starts miss", StartsText("sw", "spawn"), false);
+end;
+
 begin
   TestTrim();
   TestSplit();
   TestInt();
   TestDefault();
+  TestFloat();
+  TestCase();
   CheckText("qualified", StrUtils.Trim(" q "), "q");
   println("done");
 end.

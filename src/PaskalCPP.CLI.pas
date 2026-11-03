@@ -35,7 +35,7 @@
   the compiler and runs it.
 
   Dependencies: StdApp.Base, StdApp.Console, StdApp.Utils, StdApp.Resources,
-    PaskalCPP.Common (PC_SRC_EXT), PaskalCPP.Project, PaskalCPP.Compiler,
+    PaskalCPP.Project, PaskalCPP.Compiler,
     PaskalCPP.ZigBuild (TPCBuildMode), PaskalCPP.Debug.Runtime, PaskalCPP.Debug.REPL,
     PaskalCPP.Debug.DAP, PaskalCPP.LSP.Transport, PaskalCPP.LSP.Server
 ===============================================================================}
@@ -191,7 +191,6 @@ uses
   System.IOUtils,
   StdApp.Console,
   StdApp.Resources,
-  PaskalCPP.Common,
   PaskalCPP.ZigBuild,
   PaskalCPP.LSP.Server,
   PaskalCPP.Debug.Runtime,
@@ -457,13 +456,14 @@ function TPCCLI.DoResolveSource(): Boolean;
 var
   LArg: string;
 begin
-  // The input is a PaskalCPP module: the extension is forced to .pcpp. The
-  // RTL refuses some spellings (illegal characters): that is a bad argument
-  // with the RTL's reason
+  // The input is a PaskalCPP module file, named by the facade's one rule
+  // (TPCCompiler.SourceFileOf: '.pcpp' appended unless it ends so; a dotted
+  // name keeps every part). The RTL refuses some spellings (illegal
+  // characters): that is a bad argument with the RTL's reason
   Result := False;
   LArg := FSourceFile;
   try
-    FSourceFile := TUtils.ResolvePath(TPath.ChangeExtension(LArg, '.' + PC_SRC_EXT));
+    FSourceFile := TUtils.ResolvePath(TPCCompiler.SourceFileOf(LArg));
     if not TFile.Exists(FSourceFile) then
     begin
       DoArgError(RSPcCliSourceNotFound, [COLOR_YELLOW + FSourceFile], False);

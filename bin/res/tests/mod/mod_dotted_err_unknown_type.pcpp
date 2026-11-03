@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_dotted_err_unknown_type.pcpp - Module: a type a dotted unit does not declare
+
+  Break step of mod_dotted_prefix: in a type position mod_dotted.Lib.Core is
+  the unit (the longest imported prefix, though mod_dotted.Lib is imported
+  too) and it declares no TNope.
+*******************************************************************************/
+
+module exe mod_dotted_err_unknown_type;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_dotted.Lib, mod_dotted.Lib.Core;
+
+var
+  GX: mod_dotted.Lib.Core.TNope; // ERROR SM0005@7
+
+begin
+end.

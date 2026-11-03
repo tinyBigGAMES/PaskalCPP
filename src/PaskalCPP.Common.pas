@@ -50,7 +50,7 @@ const
   // them into numbers for the exe version resource
   PC_MAJOR_VERSION = '0';
   { PC_MINOR_VERSION }
-  PC_MINOR_VERSION = '3';
+  PC_MINOR_VERSION = '4';
   { PC_PATCH_VERSION }
   PC_PATCH_VERSION = '0';
   { PC_VERSION_STR }
@@ -706,12 +706,16 @@ type
   { TPCLibraryName }
   // A link library as `@linklibrary` and an `external` clause name it (BNF.md
   // sec 2, user 2026-10-06): a NAME the system linker finds (m, user32), never
-  // a file. The one check of that rule (research\cppmix\sem\decls.md Q25a).
-  // Pure: no RTL call that can raise
+  // a file. The one check of the name's SHAPE (research\cppmix\sem\decls.md
+  // Q25a). Dots are ordinary name characters (Game.Lib, Net.dll, a dotted
+  // module's library): whether a value names a library FILE is decided by the
+  // files themselves, where the library paths are known (TPCCompiler
+  // DoCheckLibraryFiles), never by the text's last dot. Pure: no RTL call
+  // that can raise
   TPCLibraryName = record
   public
     // False for '', a blank or control character, a path separator or drive
-    // colon, or a library file's suffix (.a .lib .so .dll, any case)
+    // colon
     class function IsName(const AText: string): Boolean; static;
   end;
 
@@ -3628,13 +3632,8 @@ end;
 { TPCLibraryName }
 
 class function TPCLibraryName.IsName(const AText: string): Boolean;
-const
-  { PC_LIB_FILE_SUFFIXES }
-  PC_LIB_FILE_SUFFIXES: array[0..3] of string = ('.a', '.lib', '.so', '.dll');
 var
   LChar: Char;
-  LLower: string;
-  LSuffix: string;
 begin
   if AText = '' then
     Exit(False);
@@ -3643,14 +3642,6 @@ begin
   for LChar in AText do
   begin
     if (LChar <= ' ') or (LChar = '/') or (LChar = '\') or (LChar = ':') then
-      Exit(False);
-  end;
-
-  // A library FILE's suffix means the user named a file, not a library
-  LLower := AText.ToLower();
-  for LSuffix in PC_LIB_FILE_SUFFIXES do
-  begin
-    if LLower.EndsWith(LSuffix) then
       Exit(False);
   end;
 

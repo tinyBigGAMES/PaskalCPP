@@ -1,0 +1,39 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  dll_dotted_suffix.Dll.pcpp - Build kind: a PaskalCPP dll whose dotted name
+  ends in a library file's suffix (dep)
+
+  The whole dotted name is the library's, its last part Dll included (a part
+  spelled dll is the module-kind keyword, never a name part):
+  dll_dotted_suffix.Dll.dll (import library dll_dotted_suffix.Dll.lib) on
+  Windows, libdll_dotted_suffix.Dll.so on Linux. dll_dotted_suffix links it
+  by that name.
+*******************************************************************************/
+
+module dll dll_dotted_suffix.Dll;
+
+/*
+  @@test
+    kind dep
+  @@end
+*/
+
+exported routine clink dll_dotted_suffix_twice(AN: int32): int32;
+begin
+  return AN * 2;
+end;
+
+end.

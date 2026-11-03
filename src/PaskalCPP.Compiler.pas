@@ -82,6 +82,8 @@ const
   PC_ERR_CMP_008 = 'CMP0008';   // a non-Windows exe's icon could not be decoded / written (PLAN-RESDATA A6)
   { PC_ERR_CMP_009 }
   PC_ERR_CMP_009 = 'CMP0009';   // the project's type differs from its main module's kind (PLAN-PROJECTS)
+  { PC_ERR_CMP_010 }
+  PC_ERR_CMP_010 = 'CMP0010';   // @linklibrary / external names a library FILE found in a library path, not a library
 
   { PC_CMP_OUTPUT_RECORD }
   // pcpp's own record of an output folder, written by every build (beside
@@ -278,6 +280,12 @@ type
     procedure DoApplyDirectives(const AModule: TPCModule; const AIsMain: Boolean);
     // Every `external` clause's library under ANode, handed to AAdd in walk order
     procedure DoCollectLinks(const ANode: TPCNode; const AAdd: TProc<string>);
+    // The library paths and libraries this build links, and the target's file
+    // naming, read from the AST (DoCheckLibraryFiles, DoLinkedResDataKeys)
+    function DoLinkInputs(out APaths: TArray<string>; out ALibraries: TArray<string>;
+      out AWindows: Boolean): Boolean;
+    // CMP0010: a library named by its file, judged by the files themselves
+    procedure DoCheckLibraryFiles();
     // PLAN-RESDATA A5b (1), SEM's TPCLinkedResDataKeys: the data keys of the
     // static libraries this build links, read from their symbol indexes
     function DoLinkedResDataKeys(): TArray<string>;
@@ -450,6 +458,12 @@ type
       out ALevel: TPCOptimizeLevel): Boolean; static;
     class function FindSubsystem(const AText: string;
       out ASubsystem: TPCSubsystemType): Boolean; static;
+    // The one rule of how a source argument names a module file (the CLI
+    // and Compile read it): kept when it ends '.pcpp' (any case), else
+    // '.pcpp' is appended. A module name may be dotted, so nothing cuts at
+    // a dot (Adam.Compiler.Lexer -> Adam.Compiler.Lexer.pcpp, foo.txt ->
+    // foo.txt.pcpp). Pure
+    class function SourceFileOf(const AArgument: string): string; static;
   end;
 
 implementation
@@ -1213,6 +1227,19 @@ begin
   end;
 end;
 
+class function TPCCompiler.SourceFileOf(const AArgument: string): string;
+var
+  LSuffix: string;
+begin
+  // Only the whole '.pcpp' suffix counts: a dotted module name's last part
+  // is never taken for an extension (Adam.Compiler.Lexer keeps Lexer)
+  LSuffix := '.' + PC_SRC_EXT;
+  if AArgument.EndsWith(LSuffix, True) then
+    Result := AArgument
+  else
+    Result := AArgument + LSuffix;
+end;
+
 procedure TPCCompiler.DoAddSetup(const ASetup: TPCZigSetup);
 begin
   FSetup.Add(ASetup);
@@ -1464,12 +1491,12 @@ begin
   DoFreePhases();
   DoCreatePhases();
 
-  // No extension = the PaskalCPP one; every path through TUtils.ResolvePath.
-  // A file the source provider has exists (an editor buffer not saved yet)
+  // The module file is SourceFileOf's (a dotted name keeps every part);
+  // every path through TUtils.ResolvePath. The project name cuts the last
+  // dot only, which SourceFileOf guarantees is the '.pcpp' one. A file the
+  // source provider has exists (an editor buffer not saved yet)
   try
-    LSource := ASourceFile;
-    if TPath.GetExtension(LSource) = '' then
-      LSource := LSource + '.' + PC_SRC_EXT;
+    LSource := SourceFileOf(ASourceFile);
     FSourceFile := TUtils.ResolvePath(LSource);
     FProjectName := TPath.GetFileNameWithoutExtension(FSourceFile);
     LExists := Assigned(FSourceProvider) and FSourceProvider(FSourceFile, LBytes);
@@ -1672,6 +1699,9 @@ begin
   DoApplyProjectSecret();
 
   FSemantics.Analyze(FAst);
+  // A library named by its file, read from the files (the AST's resolved
+  // directives and external clauses), in the build and the LSP alike
+  DoCheckLibraryFiles();
   Result := not FErrors.HasErrors();
 end;
 
@@ -1946,34 +1976,27 @@ begin
     end);
 end;
 
-function TPCCompiler.DoLinkedResDataKeys(): TArray<string>;
+function TPCCompiler.DoLinkInputs(out APaths: TArray<string>;
+  out ALibraries: TArray<string>; out AWindows: Boolean): Boolean;
 var
-  LPaths: TArray<string>;
-  LLibraries: TArray<string>;
   LIndex: Integer;
   LModule: TPCModule;
   LDirective: TPCDirective;
+  LPaths: TArray<string>;
+  LLibraries: TArray<string>;
   LTarget: TPCTargetTriple;
-  LLibrary: string;
-  LFile: string;
-  LFiles: TDictionary<string, Boolean>;
-  LSymbols: TArray<string>;
-  LSymbol: string;
-  LKey: string;
-  LFailure: string;
-  LNamedIn: string;
-  LNamedLine: UInt64;
-  LNamedColumn: UInt64;
 begin
   // The paths and libraries the driver will link with, in its order: the
   // program's API settings (already on the driver, DoCreatePhases), then each
-  // module's applied directives and its `external` clauses (DoConfigureBuild).
-  // Each library's file by the linker's own search (TPCZigBuild.FindLinkFile);
-  // only a static library's symbol index holds keys (a shared library's or a
-  // dll's import library's data is its own binary's), each file read once
-  Result := nil;
+  // module's applied directives and its `external` clauses (DoConfigureBuild),
+  // and whether the target names its library files the Windows way. Read
+  // from the AST, so it holds before DoConfigureBuild (SEM, the LSP's
+  // Analyze). False when there is no AST to read
+  APaths := nil;
+  ALibraries := nil;
+  AWindows := False;
   if (FAst = nil) or (FZigBuild = nil) or (FMainModule = nil) then
-    Exit;
+    Exit(False);
 
   LPaths := FZigBuild.GetLibraryPaths();
   LLibraries := FZigBuild.GetLinkLibraries();
@@ -2005,11 +2028,96 @@ begin
   if LTarget.IsEmpty() then
     LTarget := TPCTargetTriple.DefaultTriple();
 
+  APaths := LPaths;
+  ALibraries := LLibraries;
+  AWindows := LTarget.IsWindows();
+  Result := True;
+end;
+
+procedure TPCCompiler.DoCheckLibraryFiles();
+var
+  LPaths: TArray<string>;
+  LLibraries: TArray<string>;
+  LWindows: Boolean;
+  LLibrary: string;
+  LFile: string;
+  LPath: string;
+  LCandidate: string;
+  LNamedIn: string;
+  LNamedLine: UInt64;
+  LNamedColumn: UInt64;
+  LSeen: TDictionary<string, Boolean>;
+begin
+  // A library is a NAME the linker finds (BNF.md sec 2); TPCLibraryName.IsName
+  // checks only its shape, so a dotted name (Game.Lib, Net.dll) is a name like
+  // any other. Whether a value names a library FILE is read from the files:
+  // the linker's own search (TPCZigBuild.FindLinkFile) finds the library ->
+  // a name; it does not, and the value itself is a file in a library path
+  // (winmm.lib, lib_plain.lib) -> the file was named, CMP0010, where the
+  // source names it (TPCAst.LocateLibrary). Neither: zig's own missing-library
+  // report. Run in DoAnalyze, so the build and the LSP report it alike.
+  // JoinResolvedPath joins as text; FileExists reports by result, never raises
+  if not DoLinkInputs(LPaths, LLibraries, LWindows) then
+    Exit;
+
+  // A library the list names twice (a directive and an external clause) is
+  // judged, and reported, once
+  LSeen := TDictionary<string, Boolean>.Create();
+  try
+    for LLibrary in LLibraries do
+    begin
+      if LSeen.ContainsKey(LLibrary) then
+        Continue;
+      LSeen.Add(LLibrary, True);
+      if TPCZigBuild.FindLinkFile(LWindows, LPaths, LLibrary, LFile) then
+        Continue;
+      for LPath in LPaths do
+      begin
+        LCandidate := TUtils.JoinResolvedPath(LPath, LLibrary);
+        if not FileExists(LCandidate) then
+          Continue;
+        if FAst.LocateLibrary(LLibrary, LNamedIn, LNamedLine, LNamedColumn) then
+          FErrors.Add(LNamedIn, LNamedLine, LNamedColumn, esError, PC_ERR_CMP_010,
+            RSCmpLibraryFile, [LLibrary, LCandidate])
+        else
+          FErrors.Add(esError, PC_ERR_CMP_010, RSCmpLibraryFile, [LLibrary, LCandidate]);
+        Break;
+      end;
+    end;
+  finally
+    LSeen.Free();
+  end;
+end;
+
+function TPCCompiler.DoLinkedResDataKeys(): TArray<string>;
+var
+  LPaths: TArray<string>;
+  LLibraries: TArray<string>;
+  LWindows: Boolean;
+  LLibrary: string;
+  LFile: string;
+  LFiles: TDictionary<string, Boolean>;
+  LSymbols: TArray<string>;
+  LSymbol: string;
+  LKey: string;
+  LFailure: string;
+  LNamedIn: string;
+  LNamedLine: UInt64;
+  LNamedColumn: UInt64;
+begin
+  // The link inputs (DoLinkInputs), each library's file by the linker's own
+  // search (TPCZigBuild.FindLinkFile); only a static library's symbol index
+  // holds keys (a shared library's or a dll's import library's data is its
+  // own binary's), each file read once
+  Result := nil;
+  if not DoLinkInputs(LPaths, LLibraries, LWindows) then
+    Exit;
+
   LFiles := TDictionary<string, Boolean>.Create();
   try
     for LLibrary in LLibraries do
     begin
-      if not TPCZigBuild.FindLinkFile(LTarget.IsWindows(), LPaths, LLibrary, LFile) then
+      if not TPCZigBuild.FindLinkFile(LWindows, LPaths, LLibrary, LFile) then
         Continue;
       if LFiles.ContainsKey(LFile) then
         Continue;

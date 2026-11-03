@@ -1,0 +1,36 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_dotted_err_mismatch.pcpp - Module: a dotted name that is not its
+  file's
+
+  Break step of mod_dotted: the import is found by its whole dotted name
+  (mod_dotted.Lib.Wrong.pcpp), whose header names mod_dotted.Lib.Other;
+  PR0003 is reported at the unit's own header (the marker is there).
+*******************************************************************************/
+
+module exe mod_dotted_err_mismatch;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_dotted.Lib.Wrong;
+
+begin
+end.

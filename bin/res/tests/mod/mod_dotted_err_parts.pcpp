@@ -1,0 +1,38 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_dotted_err_parts.pcpp - Module: a nested type after a dotted unit
+
+  Break step of mod_dotted_prefix: mod_dotted.Lib is the unit (the longest
+  imported prefix) and two parts follow it; there are no nested types, so
+  one part must name the unit's type (as mod_qual_err_parts).
+*******************************************************************************/
+
+module exe mod_dotted_err_parts;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_dotted.Lib;
+
+var
+  GX: mod_dotted.Lib.TOuter.TInner; // ERROR SM0008@7
+
+begin
+end.

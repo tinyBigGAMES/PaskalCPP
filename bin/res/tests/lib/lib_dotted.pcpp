@@ -1,0 +1,57 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  lib_dotted.pcpp - Build kind: a program that links a static lib with a
+  dotted name
+
+  Links its dep lib_dotted.Store by its whole dotted name (@linklibrary, from
+  output\lib; on Linux DoFindLinkFile builds liblib_dotted.Store.a), calls
+  its routine, then looks from its own folder (output\bin) for the library
+  under the target's file name: no part of the name is taken for an
+  extension.
+*******************************************************************************/
+
+module exe lib_dotted;
+
+/*
+  @@test
+    kind run
+    deps lib_dotted.Store
+    expect
+    | lib_dotted_add(2, 3) = 5
+    | lib_dotted.Store in output/lib: yes
+    | [Heap] Allocs: 0, Frees: 0, Leaked: 0
+  @@end
+*/
+
+@addlibrarypath "$P:output/lib";
+@linklibrary "lib_dotted.Store";
+
+import SysUtils;
+
+routine clink lib_dotted_add(AA: int32; AB: int32): int32; external;
+
+begin
+  println("lib_dotted_add(2, 3) = {}", lib_dotted_add(2, 3));
+@ifdef TARGET_X86_64_LINUX_GNU
+  if FileExists("$P:../lib/liblib_dotted.Store.a") then
+@else
+  if FileExists("$P:../lib/lib_dotted.Store.lib") then
+@endif
+    println("lib_dotted.Store in output/lib: yes");
+  else
+    println("lib_dotted.Store in output/lib: no");
+  end;
+end.

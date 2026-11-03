@@ -1,0 +1,35 @@
+/*******************************************************************************
+  PaskalCPP™ Programming Language
+
+  Copyright © 2026-present tinyBigGAMES™ LLC
+  All Rights Reserved.
+
+  https://paskalcpp.org
+
+  SPDX-License-Identifier: MPL-2.0
+
+  This Source Code Form is subject to the terms of the
+  Mozilla Public License, v. 2.0. If a copy of the MPL
+  was not distributed with this file, You can obtain one
+  at https://mozilla.org/MPL/2.0/.
+-------------------------------------------------------------------------------
+  mod_dotted_err_part.pcpp - Module: a dotted name missing a part
+
+  Break step of mod_dotted: every '.' of a dotted module name (BNF.md
+  sec 1) is followed by an identifier; the report is at the token found
+  in its place.
+*******************************************************************************/
+
+module exe mod_dotted_err_part;
+
+/*
+  @@test
+    kind error
+  @@end
+*/
+
+@addmodulepath "$P:res/tests/mod/fixtures";
+import mod_dotted.; // ERROR PR0001@19
+
+begin
+end.

@@ -19,9 +19,11 @@
   StrUtils.pcpp - the StrUtils unit: `import StrUtils;` takes text apart
   with Delphi's names: Trim / TrimLeft / TrimRight cut the blanks at the
   ends, SplitString cuts text into pieces at any of a set of separator
-  characters (lines, words, fields), and TryStrToInt / StrToIntDef read a
-  whole number. Text is UTF-8 bytes throughout: a blank is a byte at or
-  below the space, which a UTF-8 lead or continuation byte never is, so a
+  characters (lines, words, fields), TryStrToInt / StrToIntDef read a
+  whole number, TryStrToFloat a decimal number, and LowerCase / StartsText
+  read words without their case. Text is UTF-8 bytes throughout: a blank
+  is a byte at or below the space and a case change touches only A..Z,
+  neither of which a UTF-8 lead or continuation byte ever is, so a
   character is never cut in two. A name is read bare when no other
   imported unit exports it (Trim), or qualified (StrUtils.Trim).
 ==============================================================================*/
@@ -34,6 +36,7 @@ module unit StrUtils;
 cpp source;
 
 #include <charconv>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -133,6 +136,61 @@ bool StrDoParseInt64(const std::string& AText, int64_t& AValue)
       return false;
     AValue = static_cast<int64_t>(LMagnitude);
   }
+  return true;
+}
+
+// AText with the ASCII capitals A..Z made small; every other byte stays,
+// so a UTF-8 lead or continuation byte (0x80 and up) is never touched
+std::string StrDoLower(const std::string& AText)
+{
+  std::string LText = AText;
+  for (char& LByte : LText)
+  {
+    if ((LByte >= 'A') && (LByte <= 'Z'))
+      LByte = static_cast<char>(LByte - 'A' + 'a');
+  }
+  return LText;
+}
+
+// True when AText begins with APrefix, the ASCII letters compared without
+// their case (StrDoLower's rule: bytes 0x80 and up compare as they are)
+bool StrDoStartsText(const std::string& APrefix, const std::string& AText)
+{
+  if (APrefix.size() > AText.size())
+    return false;
+  return StrDoLower(APrefix) == StrDoLower(AText.substr(0, APrefix.size()));
+}
+
+// Reads a decimal floating-point number into T (float or double): blanks
+// around it allowed, one optional sign, then digits or a '.' first (so
+// "nan", "inf" and hex never read), the whole text one number, and a
+// value outside T's range refused (from_chars reports it; the finite
+// check holds the line whatever the library does at the edge)
+template <typename T>
+bool StrDoParseFloat(const std::string& AText, T& AValue)
+{
+  const std::string LText = StrDoTrim(AText, true, true);
+  std::size_t LFirst = 0;
+  bool LNegative = false;
+  if ((!LText.empty()) && ((LText[0] == '+') || (LText[0] == '-')))
+  {
+    LNegative = (LText[0] == '-');
+    LFirst = 1;
+  }
+  if (LFirst >= LText.size())
+    return false;
+  const char LLead = LText[LFirst];
+  if (!(((LLead >= '0') && (LLead <= '9')) || (LLead == '.')))
+    return false;
+  T LValue = 0;
+  const char* LBegin = LText.data() + LFirst;
+  const char* LEnd = LText.data() + LText.size();
+  const std::from_chars_result LRead = std::from_chars(LBegin, LEnd, LValue, std::chars_format::general);
+  if ((LRead.ec != std::errc()) || (LRead.ptr != LEnd))
+    return false;
+  if (!std::isfinite(LValue))
+    return false;
+  AValue = LNegative ? -LValue : LValue;
   return true;
 }
 
@@ -305,6 +363,77 @@ begin
     return LValue;
   end;
   return ADefault;
+end;
+
+/// The text with its ASCII capitals made small, as Delphi's LowerCase:
+/// only A..Z change, every other byte stays, so UTF-8 text keeps every
+/// character whole (a letter outside ASCII keeps its case).
+/// @param AText the text
+/// @returns the text with A..Z as a..z
+/// @example `LowerCase("Give SHIPS 3")   // "give ships 3"`
+/// @since 0.4
+/// @see StartsText
+exported routine LowerCase(const AText: string): string;
+begin
+  return StrDoLower(AText);
+end;
+
+/// True when the text begins with the sub-text, the ASCII letters compared
+/// without their case, as Delphi's StartsText (LowerCase's rule: bytes
+/// outside ASCII compare as they are). An empty sub-text begins every text.
+/// @param ASubText the start to look for
+/// @param AText the text to look in
+/// @returns true when AText starts with ASubText, case aside
+/// @example `StartsText("SP", "spawn")   // true`
+/// @since 0.4
+/// @see LowerCase
+exported routine StartsText(const ASubText: string; const AText: string): bool;
+begin
+  return StrDoStartsText(ASubText, AText);
+end;
+
+/// Reads a decimal number with an optional fraction and exponent into a
+/// float64, as Delphi's TryStrToFloat with `.` as the decimal point:
+/// blanks around it are allowed, then an optional `+` or `-`, then the
+/// number (`3`, `0.5`, `.5`, `1e3`) and nothing else. "nan", "inf", hex
+/// and a number outside float64's range are refused.
+/// @param AText the text
+/// @param AValue the number (left as it was when the call fails)
+/// @returns true when the whole text is one finite number
+/// @example `if TryStrToFloat(" 2.5 ", LSpeed) then ... end;   // 2.5`
+/// @since 0.4
+/// @see TryStrToInt
+exported routine TryStrToFloat(const AText: string; var AValue: float64): bool;
+var
+  LValue: float64;
+begin
+  LValue := 0.0;
+  if not StrDoParseFloat(AText, LValue) then
+    return false;
+  end;
+  AValue := LValue;
+  return true;
+end;
+
+/// Reads a decimal number into a float32: the float64 form's rules, read
+/// straight to float32 (rounded once), and a number outside float32's
+/// range is refused, never made infinite.
+/// @param AText the text
+/// @param AValue the number (left as it was when the call fails)
+/// @returns true when the whole text is one finite number in float32's range
+/// @example `if TryStrToFloat("0.25", LScale) then ... end;`
+/// @since 0.4
+/// @see TryStrToInt
+exported routine TryStrToFloat(const AText: string; var AValue: float32): bool;
+var
+  LValue: float32;
+begin
+  LValue := 0.0;
+  if not StrDoParseFloat(AText, LValue) then
+    return false;
+  end;
+  AValue := LValue;
+  return true;
 end;
 
 end.

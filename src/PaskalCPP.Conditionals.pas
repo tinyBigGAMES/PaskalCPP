@@ -230,11 +230,17 @@ end;
 procedure TPCConditionalFilter.DoReadHeader();
 var
   LKind: TPCTokenKind;
+  LNameEnd: Integer;
 begin
   // module <kind> <name> ; read positionally; the parser reports a malformed header
   if FInput.TokenAt(0).Kind <> tkKwModule then
     Exit;
-  if FInput.TokenAt(3).Kind <> tkSemicolon then
+  // The name is dotted (BNF.md sec 1); a token that is not an identifier
+  // is read as a one-token name, as before dotted names
+  LNameEnd := FInput.DottedNameEnd(2);
+  if LNameEnd < 0 then
+    LNameEnd := 2;
+  if FInput.TokenAt(LNameEnd + 1).Kind <> tkSemicolon then
     Exit;
 
   LKind := FInput.TokenAt(1).Kind;
@@ -248,7 +254,8 @@ begin
     DoDefine('BUILD_UNIT')
   else
     Exit;
-  FPrologueStart := 4;
+  // The prologue starts right after the header's ';'
+  FPrologueStart := LNameEnd + 2;
 end;
 
 procedure TPCConditionalFilter.DoTrackPrologue(const AToken: TPCToken);

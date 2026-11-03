@@ -418,6 +418,8 @@ type
   TPCRoutineMember = class;
   { TPCCall }
   TPCCall = class;
+  { TPCName }
+  TPCName = class;
 
   { TPCNodeClass }
   TPCNodeClass = class of TPCNode;
@@ -890,7 +892,7 @@ type
     function DoDumpResolved(): string; override;
   public
     ModuleName: string;
-    NameRange: TSourceRange;        // parser: the header's name token; empty = no header (assumed kind)
+    NameRange: TSourceRange;        // parser: the header's name, every dotted part; empty = no header (assumed kind)
     EndRange: TSourceRange;         // parser: the closing 'end' keyword (BNF sec 1); empty = not consumed
     ModuleKind: TPCModuleKind;
     SourceFile: string;   // resolved absolute path
@@ -2010,6 +2012,15 @@ type
     // the member of the object it holds. The one rule of the emitter's
     // ::pcpp::deref and TPCAst.ModuleNamesRuntime
     class function ReadsOwner(const AMember: TPCMember): Boolean; static;
+    // The imported unit (TPCImport) or module (TPCModule) a member base
+    // names: a TPCName (an undotted unit) or a TPCMember (a dotted unit,
+    // BNF.md sec 1) that SEM resolved rkModule; nil otherwise. The one
+    // "is this base a unit" rule (Scopes.HeadImport, the emitter, calls)
+    class function ModuleBase(const ABase: TPCExpr): TPCNode; static;
+    // 'A.B.C' for a plain dot chain whose head is one bare name (no '::',
+    // no template arguments, no '->'), AHead that name; '' otherwise. The
+    // text SEM compares with an import's dotted ModuleName
+    class function DottedText(const AExpr: TPCExpr; out AHead: TPCName): string; static;
   end;
 
   { TPCName }
@@ -3305,7 +3316,7 @@ begin
       Exit(rvRoutine);
     end;
     // No declaration: an overload set, a module's (M.F) or a method set
-    if (TPCMember(AValue).Base is TPCName) and (TPCName(TPCMember(AValue).Base).ResolvedKind = rkModule) then
+    if TPCMember.ModuleBase(TPCMember(AValue).Base) <> nil then
       Exit(rvSet);
     Exit(rvMethod);
   end;
@@ -6216,6 +6227,45 @@ begin
     Exit;
   LCanon := AMember.Base.ResolvedType.Canon();
   Result := (LCanon is TPCOwnerType) and (TPCOwnerType(LCanon).OwnerKind <> okWeak);
+end;
+
+class function TPCMember.ModuleBase(const ABase: TPCExpr): TPCNode;
+begin
+  Result := nil;
+  if (ABase is TPCName) and (TPCName(ABase).ResolvedKind = rkModule) then
+    Result := TPCName(ABase).ResolvedDecl
+  else if (ABase is TPCMember) and (TPCMember(ABase).ResolvedKind = rkModule) then
+    Result := TPCMember(ABase).ResolvedDecl;
+end;
+
+class function TPCMember.DottedText(const AExpr: TPCExpr; out AHead: TPCName): string;
+var
+  LExpr: TPCExpr;
+  LMember: TPCMember;
+  LName: TPCName;
+begin
+  // Walk the chain from its outer member down to the head, prefixing each
+  // part; any form a unit name cannot take ends it with ''
+  Result := '';
+  AHead := nil;
+  LExpr := AExpr;
+  while LExpr is TPCMember do
+  begin
+    LMember := TPCMember(LExpr);
+    if (LMember.Access <> maDot) or (LMember.Member = nil) or LMember.Member.HasTemplateArgs or
+      (LMember.Member.PartText = '') then
+      Exit('');
+    Result := '.' + LMember.Member.PartText + Result;
+    LExpr := LMember.Base;
+  end;
+  if not (LExpr is TPCName) then
+    Exit('');
+  LName := TPCName(LExpr);
+  if LName.HasLeadingScope or (LName.Parts.Count <> 1) or (LName.Parts[0] = nil) or
+    LName.Parts[0].HasTemplateArgs or (LName.Parts[0].PartText = '') then
+    Exit('');
+  AHead := LName;
+  Result := LName.Parts[0].PartText + Result;
 end;
 
 { TPCName }
